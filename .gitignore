@@ -1,0 +1,28 @@
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+backend/.pgdata-test/
+
+# --- Node / frontend ---
+node_modules/
+.svelte-kit/
+frontend/build/
+frontend/dist/
+
+# --- Env files (examples are tracked, real ones are not) ---
+.env
+.env.*.local
+backend/.env
+frontend/.env
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
