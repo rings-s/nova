@@ -1,0 +1,29 @@
+# Keep the build context small and the image clean. Anything listed here is
+# invisible to `COPY . .` in the runtime stage.
+
+# The image builds its own environment at /opt/venv; a host venv copied in
+# would be both wrong and enormous.
+.venv
+.env
+.env.*
+!.env.example
+
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.git/
+.gitignore
+.github/
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store
+
+# Not needed to run the service. The dev target bind-mounts the real tree over
+# /app, so excluding them costs a developer nothing.
+README.md
