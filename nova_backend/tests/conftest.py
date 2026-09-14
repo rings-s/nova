@@ -49,7 +49,11 @@ from app.core.deps import get_db_session  # noqa: E402
 from app.core.security import Principal, PrincipalKind, get_principal  # noqa: E402
 from app.db.session import APP_DB_ROLE  # noqa: E402
 from app.main import create_app  # noqa: E402
-from app.modules.ai_agents.dependencies import get_agent_transaction  # noqa: E402
+from app.modules.ai_agents.dependencies import (  # noqa: E402
+    get_agent_transaction,
+    get_conversation_store,
+)
+from app.modules.ai_agents.history import InMemoryConversationStore  # noqa: E402
 from app.modules.catalog.models import (  # noqa: E402
     Business,
     Location,

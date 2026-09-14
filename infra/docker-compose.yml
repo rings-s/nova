@@ -1,14 +1,46 @@
 name: nova
 
-# The backend, the worker and the one-shot migration job are the same image
-# with different commands. Defined once here so the build arguments and the
-# datastore URLs cannot drift apart between them.
+# What the API and the worker connect with, and nothing more. A service's own
+# `environment` replaces a merged mapping wholesale rather than extending it, so
+# the containers that also need the schema owner extend this anchor
+# (`x-owner-environment`) instead of keeping a copy that could drift.
+x-backend-environment: &backend-environment
+  # The API and the worker log in as `nova_app`, never as POSTGRES_USER. The
+  # `postgres` image makes POSTGRES_USER a superuser, and Postgres exempts a
+  # superuser from row-level security even under FORCE, so connecting as it
+  # switches every tenant policy off. infra/postgres/initdb gives `nova_app`
+  # its login (`make db-app-role` on an older volume); migration e1f2a3b4c5d6
+  # grants it the schema.
+  DATABASE_URL: postgresql+asyncpg://nova_app:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is unset, see infra/.env.example}@postgres:5432/${POSTGRES_DB:-nova}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is unset, see infra/.env.example}@redis:6379/0
+  # `env_file` hands the process every line of infra/.env, the superuser's
+  # password among them. Blanked here, so an API or worker that is compromised
+  # cannot read it out of its own environment.
+  POSTGRES_PASSWORD: ""
+
+# The schema owner, for the two containers that create tables: the one-shot
+# `migrate` job and the on-demand `tools` container. Never `backend` or
+# `worker`, the processes that serve traffic and run jobs.
+x-owner-environment: &owner-environment
+  <<: *backend-environment
+  # Migrations need the owner, since `nova_app` cannot create a table.
+  # alembic/env.py prefers this over DATABASE_URL.
+  MIGRATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset, see infra/.env.example}@postgres:5432/${POSTGRES_DB:-nova}
+  # `make test` runs pytest in `tools`, where conftest.py's localhost default
+  # would resolve to the container itself. The owner, because conftest.py
+  # migrates the test database and then runs every test as `nova_app` through
+  # `SET ROLE`.
+  TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset, see infra/.env.example}@postgres:5432/${POSTGRES_TEST_DB:-nova_test}
+
+# The backend, the worker and the one-shot containers are the same image with
+# different commands. Defined once here so the build arguments cannot drift
+# apart between them.
 x-backend: &backend
   build:
     context: ../nova_backend
     dockerfile: Dockerfile
     # The dev target: bind-mounted source, reload on save, test and lint
-    # tooling present so `make test` and `make migrate` work through `exec`.
+    # tooling present so `make test` and `make migrate` work in `tools`.
     # `docker build nova_backend` with no target builds the production image.
     target: dev
     args:
@@ -19,25 +51,7 @@ x-backend: &backend
       GID: ${GID:-1000}
   image: nova-backend:dev
   env_file: .env
-  environment:
-    # The API and the worker log in as `nova_app`, never as POSTGRES_USER. The
-    # `postgres` image makes POSTGRES_USER a superuser, and Postgres exempts a
-    # superuser from row-level security even under FORCE, so connecting as it
-    # switches every tenant policy off. infra/postgres/initdb gives `nova_app`
-    # its login (`make db-app-role` on an older volume); migration e1f2a3b4c5d6
-    # grants it the schema.
-    DATABASE_URL: postgresql+asyncpg://nova_app:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is unset, see infra/.env.example}@postgres:5432/${POSTGRES_DB:-nova}
-    # Migrations need the owner, since `nova_app` cannot create a table.
-    # alembic/env.py prefers this over DATABASE_URL.
-    MIGRATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
-    REDIS_URL: redis://redis:6379/0
-    # `make test` runs pytest inside this container, where conftest.py's
-    # localhost default resolves to the container itself. Kept on the shared
-    # block rather than on `backend` alone: a YAML merge key replaces the whole
-    # `environment` mapping, so a per-service override would silently drop the
-    # URLs above. The owner, because conftest.py migrates the test database and
-    # then runs every test as `nova_app` through `SET ROLE`.
-    TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_TEST_DB:-nova_test}
+  environment: *backend-environment
   volumes:
     # Bind mount for reload-on-save. The image keeps its virtualenv at
     # /opt/venv precisely so this mount cannot shadow it.
@@ -57,12 +71,16 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nova}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nova}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset, see infra/.env.example}
       POSTGRES_DB: ${POSTGRES_DB:-nova}
       # Read by initdb/20-create-app-role.sh: the login for `nova_app`.
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is unset, see infra/.env.example}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only, like every port this file publishes. On 0.0.0.0 the
+      # database answered anyone who could reach this machine: the office LAN,
+      # public Wi-Fi, a tailnet. Containers reach it as `postgres` and need no
+      # published port at all.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Creates the `nova_test` database and the `nova_app` login on first
@@ -81,9 +99,21 @@ services:
     restart: unless-stopped
     # appendonly: idempotency keys and rate-limit counters are not worth a full
     # RDB snapshot, but losing every one on restart is worse than the disk cost.
-    command: ["redis-server", "--appendonly", "yes"]
+    #
+    # requirepass: ARQ keeps its job queue here, and a queued job is something
+    # the worker executes. The healthcheck's redis-cli authenticates through
+    # REDISCLI_AUTH.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - "${REDIS_PASSWORD:?REDIS_PASSWORD is unset, see infra/.env.example}"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is unset, see infra/.env.example}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # Loopback only; see `postgres`.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -103,6 +133,7 @@ services:
     <<: *backend
     # A one-shot job. `unless-stopped` would restart it forever on exit 0.
     restart: "no"
+    environment: *owner-environment
     command: ["alembic", "upgrade", "head"]
     healthcheck:
       disable: true
@@ -114,7 +145,9 @@ services:
     <<: *backend
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      # Loopback only; see `postgres`. The tunnel reaches the backend over the
+      # compose network, not through this port.
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,9 +174,27 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # No public ports are exposed on the host: the tunnel dials out to Cloudflare
+  # On demand and never started by `up`: `docker compose run --rm tools
+  # <command>`, which is what `make test`, `make migrate` and `make revision`
+  # do. It holds the schema owner's credentials, so it lives only as long as
+  # one of those commands.
+  tools:
+    <<: *backend
+    profiles: ["tools"]
+    restart: "no"
+    environment: *owner-environment
+    command: ["true"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Nothing is published beyond loopback: the tunnel dials out to Cloudflare
   # and traffic arrives over that connection (docs/01, docs/09 #15). Runs only
-  # when a token is configured, so `make dev` works offline without one.
+  # when a token is configured, so `make dev` works offline without one. The
+  # API refuses to start with AUTH_DEV_BYPASS on while the token is set, so the
+  # tunnel cannot publish an API that needs no token.
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped

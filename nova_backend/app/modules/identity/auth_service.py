@@ -5,6 +5,7 @@ The token issuer ADR-0006 listed as missing. Tokens are minted here from the
 anything a client asserted.
 """
 
+import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import DomainError
 from app.core.passwords import hash_password, needs_rehash, verify_password
+from app.core.rate_limit import LOGIN_FAILURE_POLICY, RateLimiter, RateLimitExceeded
 from app.core.security import (
     ACCESS_TOKEN_TTL_SECONDS,
     REFRESH_TOKEN_TTL_SECONDS,
@@ -28,9 +30,13 @@ from app.modules.identity.models import Membership, User
 
 logger = logging.getLogger(__name__)
 
-#: Lock an account after this many consecutive failures. Blunts credential
-#: stuffing even when an attacker rotates IPs to dodge the rate limiter.
-MAX_FAILED_LOGINS = 5
+#: Consecutive failed logins at one account, from any address, before it locks.
+#:
+#: Well above `LOGIN_FAILURE_POLICY`, the allowance for one client at one
+#: account, on purpose. A lock stops the owner too, so it is kept for guessing
+#: spread across several addresses: one address runs out of attempts long before
+#: it could lock anybody out on its own.
+MAX_FAILED_LOGINS = 20
 LOCKOUT_DURATION = timedelta(minutes=15)
 
 
@@ -38,17 +44,10 @@ class InvalidCredentialsError(AuthenticationError):
     code = "invalid_credentials"
 
     def __init__(self) -> None:
-        # Deliberately identical whether the email is unknown or the password
-        # is wrong — distinguishing them turns the login form into an account
-        # enumeration oracle.
+        # Deliberately identical whether the email is unknown, the password is
+        # wrong or the account is locked. Distinguishing them turns the login
+        # form into an account enumeration oracle.
         super().__init__("Email or password is incorrect.")
-
-
-class AccountLockedError(AuthenticationError):
-    code = "account_locked"
-
-    def __init__(self, until: datetime) -> None:
-        super().__init__(f"Account is locked until {until.isoformat()}.")
 
 
 class EmailAlreadyRegisteredError(DomainError):
@@ -69,10 +68,16 @@ class TokenPair:
         self.token_type = "bearer"
 
 
+def _email_digest(email: str) -> str:
+    """Keys a limit to an account without writing the address into Redis."""
+    return hashlib.sha256(email.encode()).hexdigest()[:32]
+
+
 class AuthService:
-    def __init__(self, session: AsyncSession, *, secret_key: str) -> None:
+    def __init__(self, session: AsyncSession, *, secret_key: str, limiter: RateLimiter) -> None:
         self.session = session
         self.secret_key = secret_key
+        self.limiter = limiter
 
     # --- registration ------------------------------------------------------
 
@@ -96,28 +101,44 @@ class AuthService:
 
     # --- login -------------------------------------------------------------
 
-    async def login(self, *, email: str, password: str) -> TokenPair:
-        user = await self._find_by_email(email.strip().lower())
+    async def login(self, *, email: str, password: str, client_key: str) -> TokenPair:
+        """Signs a user in, or refuses with one answer for every kind of failure.
 
-        if user is None:
-            # Still hash, so a missing account does not answer measurably
-            # faster than a wrong password.
-            hash_password(password)
-            raise InvalidCredentialsError()
+        Three limits apply, each against a different attacker:
 
-        if user.locked_until is not None and user.locked_until > datetime.now(UTC):
-            raise AccountLockedError(user.locked_until)
+          - `login_rate_limit` caps how fast one client address tries anything
+            (the router applies it);
+          - `LOGIN_FAILURE_POLICY` stops one client address guessing at one
+            account, without touching the owner signing in from anywhere else;
+          - `MAX_FAILED_LOGINS` locks the account against guessing spread over
+            many addresses.
 
-        if not user.is_active or not verify_password(password, user.password_hash):
-            await self._record_failed_login(user)
-            raise InvalidCredentialsError()
+        When this raises `InvalidCredentialsError` the caller must still commit.
+        The failure count is the point of a failed attempt, and it used to roll
+        back with the error, so no account ever locked.
+        """
+        email = email.strip().lower()
+        failures = f"login-failures:{_email_digest(email)}:{client_key}"
 
-        # Successful login clears the failure counter and opportunistically
+        # Asked before the account is looked up, so an address with no account
+        # is limited exactly like one with an account.
+        allowance = await self.limiter.peek(failures, LOGIN_FAILURE_POLICY)
+        if not allowance.allowed:
+            raise RateLimitExceeded(allowance.retry_after_seconds, LOGIN_FAILURE_POLICY)
+
+        try:
+            user = await self._authenticate(email, password)
+        except InvalidCredentialsError:
+            await self.limiter.check(failures, LOGIN_FAILURE_POLICY)
+            raise
+
+        # Successful login clears the failure counts and opportunistically
         # upgrades a hash whose cost parameters are now below policy.
         user.failed_login_attempts = 0
         user.locked_until = None
         if needs_rehash(user.password_hash):
             user.password_hash = hash_password(password)
+        await self.limiter.forget(failures)
 
         await self.session.flush()
         return await self._issue_pair(user)
@@ -149,6 +170,29 @@ class AuthService:
 
     # --- internals ---------------------------------------------------------
 
+    async def _authenticate(self, email: str, password: str) -> User:
+        """The account these credentials open, or `InvalidCredentialsError`.
+
+        Every refusal costs one password hash, so none answers measurably faster
+        than another.
+        """
+        user = await self._find_by_email(email)
+        if user is None:
+            hash_password(password)
+            raise InvalidCredentialsError()
+
+        if user.locked_until is not None and user.locked_until > datetime.now(UTC):
+            # No separate "locked" answer. It told anyone which addresses have an
+            # account, and a correct password must not reveal that either.
+            hash_password(password)
+            raise InvalidCredentialsError()
+
+        if not user.is_active or not verify_password(password, user.password_hash):
+            await self._record_failed_login(user)
+            raise InvalidCredentialsError()
+
+        return user
+
     async def _find_by_email(self, email: str) -> User | None:
         stmt = select(User).where(func.lower(User.email) == email)
         result = await self.session.execute(stmt)
@@ -158,6 +202,10 @@ class AuthService:
         user.failed_login_attempts += 1
         if user.failed_login_attempts >= MAX_FAILED_LOGINS:
             user.locked_until = datetime.now(UTC) + LOCKOUT_DURATION
+            # Starts the count again, so the next lock needs as many fresh
+            # failures. Left at the threshold, one failure each time a lock
+            # expired would have re-locked the account indefinitely.
+            user.failed_login_attempts = 0
             logger.warning("account_locked", extra={"user_id": str(user.id)})
         await self.session.flush()
 

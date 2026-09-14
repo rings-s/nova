@@ -32,8 +32,9 @@ from app.modules.payment.dependencies import (
     get_payment_gateway,
     get_payment_service,
     get_webhook_processor,
+    refuse_customer_amount,
 )
-from app.modules.payment.domain import Payment, WebhookSignatureError
+from app.modules.payment.domain import Payment, PaymentAmountMismatchError, WebhookSignatureError
 from app.modules.payment.exceptions import UnknownWebhookPaymentError
 from app.modules.payment.schemas import (
     CreatePaymentIntentRequest,
@@ -87,12 +88,15 @@ async def create_payment_intent(
     check any authenticated caller could open a real gateway payment against a
     stranger's appointment and read its price back in the response.
     """
+    # Every check before the replay, so a stored response reaches only a caller
+    # who could make this request now.
+    refuse_customer_amount(amount=payload.amount, currency=payload.currency, principal=principal)
+    await service.bookings.assert_visible_to(payload.booking_id, principal)
+
     body = payload.model_dump(mode="json")
     replay = await guard.begin(body)
     if replay is not None:
         return replay
-
-    await service.bookings.assert_visible_to(payload.booking_id, principal)
 
     intent = await service.create_intent(**payload.model_dump())
     out = PaymentIntentOut(payment=_payment_out(intent.payment), redirect_url=intent.redirect_url)
@@ -147,7 +151,8 @@ async def refund_payment(
 ) -> object:
     """Refunds a captured payment. Owners and managers only (`refund_payments`),
     and idempotency-keyed — a double-submitted refund is real money leaving
-    twice."""
+    twice. The permission is a route dependency, so it is checked before any
+    replay."""
     body = payload.model_dump(mode="json")
     replay = await guard.begin({**body, "payment_id": str(payment_id)})
     if replay is not None:
@@ -181,15 +186,18 @@ async def moyasar_webhook(
          the signature would never match.
       2. Verify the signature. Nothing before this point is trusted, and an
          unverified payload never reaches a service.
-      3. Record the raw event, and stop if it is a duplicate — Moyasar retries,
-         and applying a capture twice double-confirms a booking.
+      3. Record the event, less its shared secret, and stop if it is a
+         duplicate — Moyasar retries, and applying a capture twice
+         double-confirms a booking.
       4. Resolve the tenant from the payment (the one cross-tenant read in the
          application), then re-scope the connection for RLS.
-      5. Apply the status change.
+      5. Apply the status change that Moyasar's own record of the payment
+         confirms, which a forged webhook cannot supply.
 
-    Always answers 200 once the signature verifies, including for events we do
-    not act on: a non-2xx makes the gateway retry an event that will never
-    succeed.
+    Answers 200 once the signature verifies, including for events we do not act
+    on: a non-2xx makes the gateway retry an event that will never succeed. The
+    exception is a claim Moyasar's record does not confirm, answered 503 so the
+    gateway retries it, with nothing recorded.
     """
     raw_body = await request.body()
     try:
@@ -242,11 +250,24 @@ async def moyasar_webhook(
     # identical to the request path's.
     payment_service = build_payment_service(session, tenant_id, gateway=gateway)
 
-    await payment_service.apply_gateway_status(
-        gateway_payment_id=gateway_payment_id,
-        gateway_status=gateway_status,
-        webhook_verified=True,
-    )
+    try:
+        await payment_service.apply_gateway_status(
+            gateway_payment_id=gateway_payment_id,
+            gateway_status=gateway_status,
+            webhook_verified=True,
+        )
+    except PaymentAmountMismatchError as exc:
+        # Recorded, acknowledged and left uncaptured for a person to look at. A
+        # non-2xx would make the gateway retry a payment that will never match.
+        await processor.events.mark_processed(
+            event, now=datetime.now(UTC), tenant_id=tenant_id, error=exc.message
+        )
+        await session.commit()
+        logger.error(
+            "webhook_amount_mismatch",
+            extra={"gateway_payment_id": gateway_payment_id, "tenant_id": str(tenant_id)},
+        )
+        return WebhookAckOut(status="amount_mismatch")
     await processor.events.mark_processed(event, now=datetime.now(UTC), tenant_id=tenant_id)
     await session.commit()
     return WebhookAckOut(status="processed")

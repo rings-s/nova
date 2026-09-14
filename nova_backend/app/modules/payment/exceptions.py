@@ -5,7 +5,7 @@ guard (`InvalidPaymentTransition`, `PaymentNotCapturedError`,
 `RefundExceedsCaptureError`, `WebhookSignatureError`); this file holds the rest.
 """
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import DomainError, NotFoundError
 
 
 class PaymentNotFoundError(NotFoundError):
@@ -26,3 +26,21 @@ class UnknownWebhookPaymentError(NotFoundError):
 
     def __init__(self, gateway_payment_id: str) -> None:
         super().__init__(f"No local payment matches gateway id '{gateway_payment_id}'.")
+
+
+class PaymentNotConfirmedError(DomainError):
+    """A webhook claims a payment changed, and Moyasar's own record disagrees.
+
+    Answered 503 so the gateway retries, since its API may briefly trail its own
+    notification. A webhook forged with a leaked secret is never confirmed however
+    often it is sent, so nothing it claims is recorded or applied.
+    """
+
+    status_code = 503
+    code = "payment_not_confirmed"
+
+    def __init__(self, gateway_payment_id: str, *, claimed: str, actual: str) -> None:
+        super().__init__(
+            f"The webhook reports payment '{gateway_payment_id}' as '{claimed}', "
+            f"but the gateway reports '{actual or 'no status'}'."
+        )

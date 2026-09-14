@@ -13,9 +13,15 @@ Contract:
     silently serving the first response would hide it.
   - Keys expire after 24 hours.
 
-Concurrency: uniqueness on (key, endpoint) means two simultaneous requests
-race to INSERT and exactly one wins. The loser waits for the winner's result
-rather than executing.
+Scope: a key belongs to its endpoint and to the tenant and principal that sent
+it. Looked up by key and endpoint alone, the same key and body from anyone else,
+at any tenant, was served the first caller's stored response: their booking, or
+their payment intent and its checkout link. Routes also authorize before they
+call `begin`, so a replay reaches only a caller who could make the request.
+
+Concurrency: uniqueness on (key, endpoint, tenant, principal) means two
+simultaneous requests race to INSERT and exactly one wins. The loser waits for
+the winner's result rather than executing.
 """
 
 import hashlib
@@ -24,7 +30,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, select
+from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,11 +62,21 @@ class IdempotentRequestInFlight(ConflictError):
 class IdempotencyKey(Base, UUIDPKMixin):
     __tablename__ = "idempotency_keys"
     __table_args__ = (
-        UniqueConstraint("idempotency_key", "endpoint", name="uq_idempotency_keys_key_endpoint"),
+        UniqueConstraint(
+            "idempotency_key",
+            "endpoint",
+            "tenant_id",
+            "principal_id",
+            name="uq_idempotency_keys_scope",
+        ),
         Index("ix_idempotency_keys_expires", "expires_at"),
     )
 
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    #: Who sent the key. With `tenant_id`, what keeps one caller's stored
+    #: response from reaching another. Null only on rows from before keys were
+    #: scoped (migration `f2b3c4d5e6a7`), which no lookup matches.
+    principal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -84,13 +100,24 @@ def fingerprint_request(body: Any) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _in_scope(*, key: str, endpoint: str, tenant_id: uuid.UUID, principal_id: uuid.UUID) -> list:
+    """The one key a request may see: its own, at its own tenant and endpoint."""
+    return [
+        IdempotencyKey.idempotency_key == key,
+        IdempotencyKey.endpoint == endpoint,
+        IdempotencyKey.tenant_id == tenant_id,
+        IdempotencyKey.principal_id == principal_id,
+    ]
+
+
 async def begin_idempotent(
     session: AsyncSession,
     *,
     key: str,
     endpoint: str,
     body: Any,
-    tenant_id: uuid.UUID | None = None,
+    tenant_id: uuid.UUID,
+    principal_id: uuid.UUID,
 ) -> tuple[bool, dict[str, Any] | None, int | None]:
     """Claims the key.
 
@@ -100,13 +127,20 @@ async def begin_idempotent(
     """
     now = datetime.now(UTC)
     fingerprint = fingerprint_request(body)
+    scope = _in_scope(key=key, endpoint=endpoint, tenant_id=tenant_id, principal_id=principal_id)
 
-    existing = await _find(session, key=key, endpoint=endpoint, now=now)
+    existing = await _find(session, scope, now=now)
     if existing is not None:
         return _replay(existing, fingerprint)
 
+    # An expired row is invisible to `_find` but still holds the unique slot, so
+    # a key reused after it expired failed on the constraint until the nightly
+    # purge ran. It is spent; clear it.
+    await session.execute(delete(IdempotencyKey).where(*scope, IdempotencyKey.expires_at <= now))
+
     record = IdempotencyKey(
         tenant_id=tenant_id,
+        principal_id=principal_id,
         idempotency_key=key,
         endpoint=endpoint,
         request_fingerprint=fingerprint,
@@ -119,7 +153,7 @@ async def begin_idempotent(
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        existing = await _find(session, key=key, endpoint=endpoint, now=now)
+        existing = await _find(session, scope, now=now)
         if existing is None:
             raise
         return _replay(existing, fingerprint)
@@ -137,14 +171,8 @@ def _replay(
     return False, existing.response_body, existing.response_status
 
 
-async def _find(
-    session: AsyncSession, *, key: str, endpoint: str, now: datetime
-) -> IdempotencyKey | None:
-    stmt = select(IdempotencyKey).where(
-        IdempotencyKey.idempotency_key == key,
-        IdempotencyKey.endpoint == endpoint,
-        IdempotencyKey.expires_at > now,
-    )
+async def _find(session: AsyncSession, scope: list, *, now: datetime) -> IdempotencyKey | None:
+    stmt = select(IdempotencyKey).where(*scope, IdempotencyKey.expires_at > now)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -154,11 +182,14 @@ async def complete_idempotent(
     *,
     key: str,
     endpoint: str,
+    tenant_id: uuid.UUID,
+    principal_id: uuid.UUID,
     status_code: int,
     body: Any,
 ) -> None:
     """Stores the response so a retry can replay it."""
-    record = await _find(session, key=key, endpoint=endpoint, now=datetime.now(UTC))
+    scope = _in_scope(key=key, endpoint=endpoint, tenant_id=tenant_id, principal_id=principal_id)
+    record = await _find(session, scope, now=datetime.now(UTC))
     if record is None:
         return
     record.state = "completed"
@@ -175,6 +206,7 @@ class IdempotencyGuard:
     and hiding a replay would make an endpoint that silently does nothing very
     hard to debug. The route reads:
 
+        <authorize the request>
         replay = await guard.begin(payload)
         if replay is not None:
             return replay
@@ -191,12 +223,14 @@ class IdempotencyGuard:
         *,
         key: str | None,
         endpoint: str,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
+        principal_id: uuid.UUID,
     ) -> None:
         self.session = session
         self.key = key
         self.endpoint = endpoint
         self.tenant_id = tenant_id
+        self.principal_id = principal_id
 
     @property
     def active(self) -> bool:
@@ -213,6 +247,7 @@ class IdempotencyGuard:
             endpoint=self.endpoint,
             body=body,
             tenant_id=self.tenant_id,
+            principal_id=self.principal_id,
         )
         if should_execute:
             return None
@@ -234,6 +269,8 @@ class IdempotencyGuard:
             self.session,
             key=self.key,
             endpoint=self.endpoint,
+            tenant_id=self.tenant_id,
+            principal_id=self.principal_id,
             status_code=status_code,
             body=body,
         )
@@ -243,16 +280,26 @@ def idempotency_guard(endpoint: str):
     """Builds a FastAPI dependency producing a guard for one endpoint.
 
     Scoped per endpoint so the same key reused against a *different* operation
-    is a separate record rather than replaying an unrelated response.
+    is a separate record rather than replaying an unrelated response, and per
+    tenant and principal so it is never another caller's.
     """
     from fastapi import Depends, Header
 
-    from app.core.deps import get_db_session
+    from app.core.deps import get_db_session, get_tenant_context
+    from app.core.security import Principal, get_principal
 
     async def _dependency(
         session: AsyncSession = Depends(get_db_session),
+        tenant_id: uuid.UUID = Depends(get_tenant_context),
+        principal: Principal = Depends(get_principal),
         idempotency_key: str | None = Header(default=None, alias=IDEMPOTENCY_HEADER),
     ) -> IdempotencyGuard:
-        return IdempotencyGuard(session, key=idempotency_key, endpoint=endpoint)
+        return IdempotencyGuard(
+            session,
+            key=idempotency_key,
+            endpoint=endpoint,
+            tenant_id=tenant_id,
+            principal_id=principal.subject_id,
+        )
 
     return _dependency

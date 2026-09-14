@@ -17,12 +17,17 @@ Redis is the backend so the limit is shared across API processes. When Redis
 is unavailable the limiter falls back to a per-process in-memory window: less
 accurate under horizontal scaling, but it fails *closed* on the limit rather
 than disabling protection entirely.
+
+No FastAPI import here, so an application service can apply a limit as well as
+a route can. The route dependencies live in `core/throttling.py`.
 """
 
 import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
+
+from app.core.exceptions import DomainError
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +42,25 @@ class RateLimitPolicy:
         return f"{self.limit} requests per {self.window_seconds}s"
 
 
+class RateLimitExceeded(DomainError):
+    status_code = 429
+    code = "rate_limit_exceeded"
+
+    def __init__(self, retry_after_seconds: int, policy: RateLimitPolicy) -> None:
+        super().__init__(
+            f"Rate limit exceeded ({policy.description}). Retry in {retry_after_seconds} seconds."
+        )
+        self.retry_after_seconds = retry_after_seconds
+
+
 #: Tight: an attacker guessing passwords should get very few attempts, and a
 #: legitimate user never needs more.
 LOGIN_POLICY = RateLimitPolicy(limit=5, window_seconds=60)
+#: Failed logins at one account from one client address. Counted by the auth
+#: service rather than a route, because only it knows that an attempt failed and
+#: which account it named. A client that reaches this has locked only itself out
+#: of that account: the owner, signing in from anywhere else, is unaffected.
+LOGIN_FAILURE_POLICY = RateLimitPolicy(limit=5, window_seconds=15 * 60)
 #: Refresh is automated, so it is called more often than login but still rarely.
 REFRESH_POLICY = RateLimitPolicy(limit=20, window_seconds=60)
 #: General API traffic.
@@ -84,6 +105,7 @@ class RateLimiter:
         self._memory: dict[str, deque[float]] = defaultdict(deque)
 
     async def check(self, key: str, policy: RateLimitPolicy) -> RateLimitResult:
+        """Records an attempt, and says whether it was within the limit."""
         now = time.time()
         if self._redis is not None:
             try:
@@ -93,6 +115,29 @@ class RateLimiter:
                 # local window and say so once per occurrence.
                 logger.warning("rate_limit_redis_unavailable", exc_info=True)
         return self._check_memory(key, policy, now)
+
+    async def peek(self, key: str, policy: RateLimitPolicy) -> RateLimitResult:
+        """Whether another attempt would be within the limit, without recording one.
+
+        For a limit that counts only some attempts, such as failed logins: the
+        caller peeks before acting, and calls `check` only for what counts.
+        """
+        now = time.time()
+        if self._redis is not None:
+            try:
+                return await self._peek_redis(key, policy, now)
+            except Exception:
+                logger.warning("rate_limit_redis_unavailable", exc_info=True)
+        return self._peek_memory(key, policy, now)
+
+    async def forget(self, key: str) -> None:
+        """Clears a key's window, as a successful login clears its failures."""
+        self._memory.pop(key, None)
+        if self._redis is not None:
+            try:
+                await self._redis.delete(f"ratelimit:{key}")
+            except Exception:
+                logger.warning("rate_limit_redis_unavailable", exc_info=True)
 
     async def _check_redis(self, key: str, policy: RateLimitPolicy, now: float) -> RateLimitResult:
         window_start = now - policy.window_seconds
@@ -115,6 +160,15 @@ class RateLimiter:
 
         return RateLimitResult(True, max(0, policy.limit - count), 0)
 
+    async def _peek_redis(self, key: str, policy: RateLimitPolicy, now: float) -> RateLimitResult:
+        redis_key = f"ratelimit:{key}"
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(redis_key, 0, now - policy.window_seconds)
+        pipe.zcard(redis_key)
+        pipe.zrange(redis_key, 0, 0, withscores=True)
+        _, count, oldest = await pipe.execute()
+        return _peeked(count, oldest[0][1] if oldest else None, policy, now)
+
     def _check_memory(self, key: str, policy: RateLimitPolicy, now: float) -> RateLimitResult:
         window_start = now - policy.window_seconds
         bucket = self._memory[key]
@@ -129,12 +183,31 @@ class RateLimiter:
         bucket.append(now)
         return RateLimitResult(True, policy.limit - len(bucket), 0)
 
+    def _peek_memory(self, key: str, policy: RateLimitPolicy, now: float) -> RateLimitResult:
+        bucket = self._memory.get(key)
+        if not bucket:
+            return RateLimitResult(True, policy.limit, 0)
+        while bucket and bucket[0] < now - policy.window_seconds:
+            bucket.popleft()
+        return _peeked(len(bucket), bucket[0] if bucket else None, policy, now)
+
     def reset(self, key: str | None = None) -> None:
         """Test helper: clears the in-memory window."""
         if key is None:
             self._memory.clear()
         else:
             self._memory.pop(key, None)
+
+
+def _peeked(
+    count: int, oldest: float | None, policy: RateLimitPolicy, now: float
+) -> RateLimitResult:
+    """The answer `check` would give next, for a window already holding `count`."""
+    if count < policy.limit:
+        return RateLimitResult(True, policy.limit - count, 0)
+    if oldest is None:
+        return RateLimitResult(False, 0, 1)
+    return RateLimitResult(False, 0, max(1, int(oldest + policy.window_seconds - now) + 1))
 
 
 _limiter: RateLimiter | None = None

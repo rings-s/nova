@@ -54,7 +54,7 @@ from app.modules.ai_agents.guardrails import (
 )
 from app.modules.ai_agents.history import ConversationKey, ConversationStore
 from app.modules.ai_agents.runtime import InferenceEngine, InferenceResult, fallback_result
-from app.modules.ai_agents.tools import AgentToolkit, HeldSlot, QueuePlace
+from app.modules.ai_agents.tools import AgentToolkit, HeldSlot, PendingCancellation, QueuePlace
 from app.modules.analytics.service import AnalyticsService, ChartReport
 from app.modules.billing.service import BillingService
 from app.modules.booking.service import BookingService

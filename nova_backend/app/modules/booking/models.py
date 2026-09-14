@@ -169,6 +169,7 @@ class SlotHoldRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
         UniqueConstraint("hold_token", name="uq_slot_holds_token"),
         Index("ix_slot_holds_tenant_provider_window", "tenant_id", "provider_id", "starts_at"),
         Index("ix_slot_holds_expiry", "expires_at"),
+        Index("ix_slot_holds_tenant_held_by", "tenant_id", "held_by", "expires_at"),
         CheckConstraint("ends_at > starts_at", name="end_after_start"),
     )
 
@@ -177,6 +178,11 @@ class SlotHoldRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     #: Null for an anonymous PWA checkout that has not identified itself yet.
     customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    #: Who took the hold: the principal's subject id. A customer may hold only a
+    #: few slots at a business at once (`BookingService.hold_slot`), so one
+    #: account cannot keep a salon's calendar blocked. Null only on holds taken
+    #: before holders were recorded (migration `f1a2b3c4d5e6`).
+    held_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -49,8 +49,10 @@ class AgentUnavailableError(GuardrailError):
         )
 
 
-#: Tools that change something. Only customer-facing agents hold any.
-WRITE_TOOLS: frozenset[str] = frozenset({"hold_slot", "join_queue", "cancel_booking"})
+#: Tools that change something. Only customer-facing agents hold any. None
+#: cancels: `request_cancellation` asks the customer to confirm in the app,
+#: because a cancellation is not undone and can cost the customer a deposit.
+WRITE_TOOLS: frozenset[str] = frozenset({"hold_slot", "join_queue"})
 
 INSIGHTS_FEATURE = "ai_insights_agent"
 

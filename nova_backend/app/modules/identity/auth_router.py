@@ -4,13 +4,18 @@ Unauthenticated by design (that is the point of logging in), so these carry the
 tightest rate limits in the system.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db_session
 from app.core.security import Principal, get_principal
-from app.core.throttling import login_rate_limit, refresh_rate_limit, write_rate_limit
-from app.modules.identity.auth_service import AuthService
+from app.core.throttling import (
+    client_ip_key,
+    login_rate_limit,
+    refresh_rate_limit,
+    write_rate_limit,
+)
+from app.modules.identity.auth_service import AuthService, InvalidCredentialsError
 from app.modules.identity.dependencies import get_auth_service
 from app.modules.identity.schemas import (
     LoginRequest,
@@ -47,11 +52,20 @@ async def register(
 @router.post("/login", response_model=TokenOut, dependencies=[Depends(login_rate_limit)])
 async def login(
     payload: LoginRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     service: AuthService = Depends(get_auth_service),
 ) -> TokenOut:
-    tokens = await service.login(email=payload.email, password=payload.password)
-    # Commits the failed-attempt counter / lockout state as well as success.
+    try:
+        tokens = await service.login(
+            email=payload.email, password=payload.password, client_key=client_ip_key(request)
+        )
+    except InvalidCredentialsError:
+        # A failed attempt's count, and any lock it triggers, must outlive the
+        # error. Without this commit they rolled back with it, and no account
+        # ever locked however many passwords were tried.
+        await session.commit()
+        raise
     await session.commit()
     return TokenOut(
         access_token=tokens.access_token,

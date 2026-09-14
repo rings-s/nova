@@ -82,6 +82,19 @@ class QueuePlace:
     estimated_wait_minutes: int | None
 
 
+@dataclass(frozen=True)
+class PendingCancellation:
+    """A booking the customer asked to cancel, waiting for them to confirm it.
+
+    The agent never cancels. The client shows this and, if the customer agrees,
+    calls `POST /tenants/{tenant_id}/bookings/{booking_id}/cancel` itself.
+    """
+
+    booking_id: UUID
+    starts_at: datetime
+    reason: str | None
+
+
 def _iso(value: date | datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 

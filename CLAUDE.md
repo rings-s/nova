@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 NOVA is a multi-tenant booking and customer-operations platform for GCC beauty/wellness businesses: salons and spas, with walk-in queues, WhatsApp messaging and deposits. The tree currently holds only the backend.
 
 - **`nova_backend/`**: FastAPI on Python 3.13, SQLAlchemy 2 async + asyncpg, Alembic, and an ARQ worker on Redis. Managed with `uv`.
-- **`infra/`**: a docker compose stack that reads `infra/.env`. Services: postgres 16, redis, a one-shot `migrate`, `backend`, `worker`, and an optional `cloudflared` profile.
+- **`infra/`**: a docker compose stack that reads `infra/.env`. Services: postgres 16, redis, a one-shot `migrate`, `backend`, `worker`, an on-demand `tools` container, and an optional `cloudflared` profile.
 - **`docs/`**: numbered design docs (Obsidian-style `[[links]]`) and ADRs in `docs/decisions/`. Code comments cite them as `docs/10 section 12` or `ADR-0010`.
   - `docs/12-Backend-Code-Walkthrough.md` is the onboarding guide.
   - `nova_backend/README.md` is the maintained code map.
@@ -22,18 +22,18 @@ The Makefile is at the repo root.
 
 | Command | What it does |
 | --- | --- |
-| `make dev` | Starts the full stack via compose. Migrations run first in the `migrate` container. API docs at http://localhost:8000/docs. Creates `infra/.env` from the example if it is missing. |
-| `make test` | Runs `pytest` inside the running `backend` container, against the `nova_test` database. |
+| `make dev` | Starts the full stack via compose. Migrations run first in the `migrate` container. API docs at http://localhost:8000/docs. Creates `infra/.env` from the example if it is missing, generating every blank secret. |
+| `make test` | Runs `pytest` in a one-off `tools` container, against the `nova_test` database. |
 | `make check` | ruff, mypy, and a `create_app()` assembly smoke check. No database needed. |
 | `make lint` / `make fmt` / `make typecheck` | `ruff check` / `ruff format` / `mypy app`, on the host via `uv run`. |
-| `make revision m="add_x"` | `alembic revision --autogenerate` inside the container. |
-| `make migrate` | `alembic upgrade head` inside the container. |
+| `make revision m="add_x"` | `alembic revision --autogenerate` in a one-off `tools` container. |
+| `make migrate` | `alembic upgrade head` in a one-off `tools` container. |
 
 To run a single test:
 
 ```bash
-# DB-backed tests: inside the stack
-docker compose -f infra/docker-compose.yml --env-file infra/.env exec backend \
+# DB-backed tests: in the stack's tools container, the one that holds TEST_DATABASE_URL
+docker compose -f infra/docker-compose.yml --env-file infra/.env run --rm tools \
   uv run pytest tests/modules/booking/test_availability.py::test_name -q
 
 # Pure tests (tests/test_architecture.py, every test_domain.py) need no DB: run on the host
@@ -94,7 +94,7 @@ There are two sanctioned exceptions:
 - **`set_discovery_scope`**: for the public marketplace (`discovery`, ADR-0010). It is SELECT-only and sees only published listings, through catalog's `PublicCatalogService`.
 
 **Never connect the app as a role RLS exempts.** Postgres skips every policy for a superuser or a `BYPASSRLS` role, `FORCE` or not.
-- The API and worker connect as `nova_app` (NOSUPERUSER NOBYPASSRLS, created and granted DML by migration `e1f2a3b4c5d6`). Only migrations use the schema owner, through `MIGRATION_DATABASE_URL`.
+- The API and worker connect as `nova_app` (NOSUPERUSER NOBYPASSRLS, created and granted DML by migration `e1f2a3b4c5d6`). Only migrations and the test suite use the schema owner, through `MIGRATION_DATABASE_URL` and `TEST_DATABASE_URL`, and compose gives those to the `migrate` and `tools` containers alone.
 - `enforce_rls_role` (`app/db/session.py`) refuses to start a staging or production process that is connected as an exempt role.
 - `set_tenant_scope` also switches off any earlier `bypass_tenant_scope` in the same transaction.
 - Tests run as `nova_app` too. Fixtures seed rows as the owner through `as_owner`. Repository isolation tests read as the owner, so that only the repository's own filter can pass them.
@@ -106,8 +106,19 @@ Caller identity is never read from the request. `customer_id` is derived from th
 
 - **Tokens.** `app/core/security.py` verifies HS256 bearer JWTs (stdlib only) into a `Principal` of kind STAFF, CUSTOMER or SERVICE.
   - A customer may reach any tenant, because it is a marketplace. So operational routes need `Depends(require_staff)`, and customer reads need per-row ownership checks (see `BookingService.get_for_principal`).
-  - With `AUTH_DEV_BYPASS=true`, a request without an `Authorization` header becomes a SERVICE principal. Setting the flag raises an error unless `ENV` is `local` or `test`.
+  - Routes that move money or read what a business earns need a role permission instead: `Depends(RequirePermission(StaffPermission.X))` from `identity/dependencies.py`. The role is read from this tenant's `memberships` row, never from `Principal.roles`, which is flattened across tenants. The policy is one table in `identity/domain.py`. `tests/test_route_guards.py` lists which routes need which permission.
+  - With `AUTH_DEV_BYPASS=true`, a request without an `Authorization` header becomes a SERVICE principal. `Settings` refuses to load with the flag set unless `ENV` is `local` or `test`, and whenever `CLOUDFLARE_TUNNEL_TOKEN` is set (`config.py::dev_bypass_refusal`).
 - **Rate limits.** Write endpoints declare `dependencies=[Depends(write_rate_limit)]` from `core/throttling.py`.
+  - IP buckets come from `client_ip_key`. That is the TCP peer, or the header `Settings.trusted_client_ip_header` names: `CLIENT_IP_HEADER`, else `CF-Connecting-IP` while a tunnel token is set. Never `X-Forwarded-For`, whose first entry the client writes.
+  - **Login** (`auth_service.py`):
+    - It allows 5 failures per account per client address in 15 minutes.
+    - It locks an account after 20 consecutive failures from anywhere; each lock restarts the count.
+    - Every refusal, a locked account included, answers `invalid_credentials`.
+    - The router commits on `InvalidCredentialsError`, or the count rolls back with the error.
+- **Payments.**
+  - Only staff may set a payment intent's `amount` or `currency` (`payment/dependencies.py::refuse_customer_amount`).
+  - `return_url` must be on `PUBLIC_APP_URL`'s origin.
+  - The webhook captures only when the reported amount and currency match the payment row. Otherwise it records the event, answers `amount_mismatch`, and leaves the payment uncaptured.
 - **Idempotency.** Retryable create-style POSTs take `idempotency_guard("<op>")` from `core/idempotency.py` (see `queue/router.py::join_queue`):
   1. Call `guard.begin(...)`. If it returns a replay, return that.
   2. Call `guard.complete(...)` before committing.
@@ -132,12 +143,14 @@ Caller identity is never read from the request. `customer_id` is derived from th
   - `SoftDeleteMixin` is **not** auto-filtered.
 - **Bilingual text** is stored as `name_en`/`name_ar` column pairs, both required (`core/validators.py::require_bilingual_text`, ADR-0004).
 - **Money** uses `core/values.Money`. The defaults are SAR and Asia/Riyadh.
-- **Migrations.** `alembic/env.py` takes the database URL from `Settings.database_url`, not `alembic.ini`. Always read an autogenerated migration before keeping it.
-- **Settings** (`app/core/config.py`, `lru_cache`d) requires `DATABASE_URL`, `REDIS_URL` and `SECRET_KEY`. Integration credentials (Moyasar, Nextcloud, WhatsApp) are optional: without them the adapters raise `IntegrationNotConfiguredError`, and the app still boots.
+- **Migrations.** `alembic/env.py` takes the database URL from `Settings.migration_database_url`, falling back to `Settings.database_url`, never from `alembic.ini`. Always read an autogenerated migration before keeping it.
+- **Settings** (`app/core/config.py`, `lru_cache`d) requires `DATABASE_URL`, `REDIS_URL` and `SECRET_KEY`. `ENV` defaults to `production`. An empty `SECRET_KEY` is refused everywhere, and outside `local`/`test` so is one under 32 characters or starting with "change". Integration credentials (Moyasar, Nextcloud, WhatsApp) are optional: without them the adapters raise `IntegrationNotConfiguredError`, and the app still boots.
 - **AI is optional.**
   - PydanticAI and Ollama are reached only through `ai_agents/runtime.py`, via a guarded import (`uv sync --extra ai`; `make image EXTRAS=ai` for the production image). Without them, agents degrade to a human handoff.
-  - The roster is data in `ai_agents/agents.py` (docs/13, ADR-0011). Owner agents (accountant, analyst, business manager) are staff-only, bound to one business, and may state only numbers a tool returned. The business manager proposes actions and never applies them.
-  - `tests/modules/ai_agents/` asserts that every other flow works offline. `test_turns.py` runs whole turns against PydanticAI's `FunctionModel`.
+  - The roster is data in `ai_agents/agents.py` (docs/13, ADR-0011). Owner agents (accountant, analyst, business manager) are staff-only, need a role permission (`required_permission`), are bound to one business, and may state only numbers a tool returned. The business manager proposes actions and never applies them.
+  - A turn holds no transaction (see "Services `flush()`" above). What a write tool produced for the client comes back in `AiChatResponse.held_slots` and `queue_places`, even with a handoff. The model never sees a hold token.
+  - **Conversation memory** is in Redis (`ai_agents/history.py`). Recent turns are keyed by tenant, principal, business and a hash of `session_id`, with a TTL and a turn cap. An unreachable Redis gives a fresh turn, never a failed one. Tool results from earlier turns still count as grounded.
+  - `tests/modules/ai_agents/` asserts that every other flow works offline. `test_turns.py` runs whole turns against PydanticAI's `FunctionModel`, and conftest gives each test app an in-memory conversation store.
   - Agents call services, never repositories.
 
 ### Tests
@@ -154,6 +167,12 @@ Caller identity is never read from the request. `customer_id` is derived from th
 
 - **ADRs can be stale.** Their "Consequences" sections describe the code at the time the ADR was written. ADR-0006, for example, lists RLS, the outbox, rate limiting and idempotency as missing, and all of them exist now. Trust the code.
 - **SELinux.** Any bind mount added to `infra/docker-compose.yml` needs the `:z` label, like the existing ones.
+- **Compose hardening, keep all of it.**
+  - Published ports bind to `127.0.0.1`.
+  - Redis requires `REDIS_PASSWORD`.
+  - `backend` and `worker` get no schema-owner credentials: compose blanks `POSTGRES_PASSWORD` in them.
+  - ARQ jobs are JSON, not pickle (`WorkerSettings.job_serializer`). With pickle, anyone who can write to Redis runs code in the worker.
+  - `infra/.env.example` holds no secret values, and `make infra/.env` generates them. The repository is public.
 - **Dev image.**
   - The venv lives at `/opt/venv` so the `/app` bind mount cannot shadow it.
   - The container UID must match the host's (`UID`/`GID` in `infra/.env`), because `alembic revision` writes into the mount.

@@ -243,7 +243,8 @@ curl -X POST http://localhost:8000/api/v1/tenants \
 > Every route now needs `-H "Authorization: Bearer <access token>"`, where the token comes from
 > `POST /api/v1/auth/login` (ADR-0006). `POST /tenants` makes the caller the tenant's owner
 > (ADR-0007). Locally, `AUTH_DEV_BYPASS=true` treats a request with no header as a service
-> principal.
+> principal. It is off in `infra/.env.example`, and the app refuses to start with it outside
+> `ENV=local`/`test` or while `CLOUDFLARE_TUNNEL_TOKEN` is set.
 
 ### Step 1 — `schemas.py` defines the shape
 

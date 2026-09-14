@@ -82,10 +82,10 @@ Full domain, schema, and persistence specifications live in `docs/`.
 ## Running it
 
 ```bash
-cp infra/.env.example infra/.env     # review SECRET_KEY before deploying
-make dev                              # postgres, redis, backend, worker
+make dev                              # creates infra/.env with random secrets, then
+                                      # starts postgres, redis, backend, worker
 make migrate                          # apply migrations
-make test                             # run the suite in the container
+make test                             # run the suite in a one-off tools container
 ```
 
 Then open **http://localhost:8000/docs**.

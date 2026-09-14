@@ -11,6 +11,7 @@ import hmac
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -19,10 +20,15 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.outbox import OutboxEvent
 from app.db.session import set_tenant_scope
+from app.integrations.payments.moyasar import MoyasarGateway
 from app.modules.booking.models import BookingRecord
+from app.modules.payment.dependencies import get_payment_gateway
 from app.modules.payment.models import PaymentRecord, WebhookEventRecord
 
 WEBHOOK_SECRET = "test-webhook-secret"
+
+#: Moyasar's record of a paid 150.00 SAR payment. Amounts are integer halalas.
+PAID = {"status": "paid", "amount": 15000, "currency": "SAR"}
 
 
 @pytest.fixture(autouse=True)
@@ -35,8 +41,38 @@ def _configure_moyasar(monkeypatch):
     get_settings.cache_clear()
 
 
+class FakeMoyasar(MoyasarGateway):
+    """The real signature check, with Moyasar's payment API answered from a dict.
+
+    A payment it has no record of is `initiated`, as Moyasar reports one the
+    customer has not paid.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(api_key="sk_test_x", webhook_secret=WEBHOOK_SECRET)
+        self.payments: dict[str, dict[str, Any]] = {}
+
+    async def fetch_payment(self, payment_id: str) -> dict[str, Any]:
+        return self.payments.get(payment_id, {"id": payment_id, "status": "initiated"})
+
+
+@pytest.fixture
+def moyasar(app) -> FakeMoyasar:
+    gateway = FakeMoyasar()
+    app.dependency_overrides[get_payment_gateway] = lambda: gateway
+    return gateway
+
+
 def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
     return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+async def _deliver(client, payload: dict[str, Any], *, sign: bool = True):
+    body = json.dumps(payload).encode()
+    headers = {"Content-Type": "application/json"}
+    if sign:
+        headers["X-Moyasar-Signature"] = _sign(body)
+    return await client.post("/api/v1/webhooks/moyasar", content=body, headers=headers)
 
 
 async def _payment(db_session, tenant, *, gateway_id: str, booking_id=None) -> PaymentRecord:
@@ -56,6 +92,14 @@ async def _payment(db_session, tenant, *, gateway_id: str, booking_id=None) -> P
     db_session.add(payment)
     await db_session.flush()
     return payment
+
+
+async def _stored_event(db_session, external_id: str) -> WebhookEventRecord:
+    return (
+        await db_session.execute(
+            select(WebhookEventRecord).where(WebhookEventRecord.external_event_id == external_id)
+        )
+    ).scalar_one()
 
 
 class TestWebhookVerification:
@@ -109,6 +153,7 @@ class TestWebhookProcessing:
         self,
         client,
         db_session,
+        moyasar,
         tenant_factory,
         business_factory,
         location_factory,
@@ -145,15 +190,10 @@ class TestWebhookProcessing:
         await db_session.flush()
 
         payment = await _payment(db_session, tenant, gateway_id="pay_ok", booking_id=booking.id)
+        moyasar.payments["pay_ok"] = {"id": "pay_ok", **PAID}
 
-        body = json.dumps({"id": "pay_ok", "type": "payment_paid", "status": "paid"}).encode()
-        response = await client.post(
-            "/api/v1/webhooks/moyasar",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Moyasar-Signature": _sign(body),
-            },
+        response = await _deliver(
+            client, {"id": "pay_ok", "type": "payment_paid", "status": "paid"}
         )
 
         assert response.status_code == 200
@@ -166,19 +206,16 @@ class TestWebhookProcessing:
         # Payment state drives booking state — but only through the domain.
         assert booking.status == "confirmed"
 
-    async def test_a_redelivered_webhook_is_a_no_op(self, client, db_session, tenant_factory):
+    async def test_a_redelivered_webhook_is_a_no_op(
+        self, client, db_session, moyasar, tenant_factory
+    ):
         """Moyasar retries. A second capture must not be applied twice."""
         tenant = await tenant_factory()
         await _payment(db_session, tenant, gateway_id="pay_retry")
+        moyasar.payments["pay_retry"] = {"id": "pay_retry", **PAID}
 
-        body = json.dumps({"id": "pay_retry", "status": "paid"}).encode()
-        headers = {
-            "Content-Type": "application/json",
-            "X-Moyasar-Signature": _sign(body),
-        }
-
-        first = await client.post("/api/v1/webhooks/moyasar", content=body, headers=headers)
-        second = await client.post("/api/v1/webhooks/moyasar", content=body, headers=headers)
+        first = await _deliver(client, {"id": "pay_retry", "status": "paid"})
+        second = await _deliver(client, {"id": "pay_retry", "status": "paid"})
 
         assert first.json()["status"] == "processed"
         assert second.json()["status"] == "duplicate"
@@ -189,26 +226,55 @@ class TestWebhookProcessing:
         )
         assert len(list(stored.scalars().all())) == 1
 
-    async def test_the_raw_payload_is_stored_for_audit(self, client, db_session, tenant_factory):
+    async def test_the_raw_payload_is_stored_for_audit(
+        self, client, db_session, moyasar, tenant_factory
+    ):
         tenant = await tenant_factory()
         await _payment(db_session, tenant, gateway_id="pay_audit")
+        moyasar.payments["pay_audit"] = {"id": "pay_audit", **PAID}
 
-        body = json.dumps({"id": "pay_audit", "status": "paid", "extra": "kept"}).encode()
-        await client.post(
-            "/api/v1/webhooks/moyasar",
-            content=body,
-            headers={"Content-Type": "application/json", "X-Moyasar-Signature": _sign(body)},
-        )
+        await _deliver(client, {"id": "pay_audit", "status": "paid", "extra": "kept"})
 
-        stored = (
-            await db_session.execute(
-                select(WebhookEventRecord).where(
-                    WebhookEventRecord.external_event_id == "pay_audit"
-                )
-            )
-        ).scalar_one()
+        stored = await _stored_event(db_session, "pay_audit")
         assert stored.payload["extra"] == "kept"
         assert stored.signature_verified is True
+
+    async def test_the_shared_secret_is_never_stored(
+        self, client, db_session, moyasar, tenant_factory
+    ):
+        """Stored, it would let anyone who can read the table sign the next webhook."""
+        tenant = await tenant_factory()
+        payment = await _payment(db_session, tenant, gateway_id="pay_token")
+        moyasar.payments["pay_token"] = {"id": "pay_token", **PAID}
+
+        # The body-token scheme: no signature header, the secret in the payload.
+        response = await _deliver(
+            client,
+            {"id": "pay_token", "status": "paid", "secret_token": WEBHOOK_SECRET},
+            sign=False,
+        )
+
+        assert response.json()["status"] == "processed"
+        stored = await _stored_event(db_session, "pay_token")
+        assert "secret_token" not in stored.payload
+        assert WEBHOOK_SECRET not in json.dumps(stored.payload)
+        await db_session.refresh(payment)
+        assert payment.status == "captured"
+
+    async def test_a_forged_capture_is_not_applied(
+        self, client, db_session, moyasar, tenant_factory
+    ):
+        """Signed with a leaked secret, but Moyasar's record says nobody has paid."""
+        tenant = await tenant_factory()
+        payment = await _payment(db_session, tenant, gateway_id="pay_not_paid")
+
+        response = await _deliver(client, {"id": "pay_not_paid", "status": "paid"})
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "payment_not_confirmed"
+        await db_session.refresh(payment)
+        assert payment.status == "pending"
+        assert payment.webhook_verified is False
 
     async def test_a_webhook_for_an_unknown_payment_is_acknowledged_not_retried(self, client):
         # A 5xx would make the gateway retry forever for a payment that will
@@ -223,20 +289,44 @@ class TestWebhookProcessing:
         assert response.json()["status"] == "unknown_payment"
 
     async def test_a_failed_payment_does_not_confirm_anything(
-        self, client, db_session, tenant_factory
+        self, client, db_session, moyasar, tenant_factory
     ):
         tenant = await tenant_factory()
         payment = await _payment(db_session, tenant, gateway_id="pay_failed")
+        moyasar.payments["pay_failed"] = {"id": "pay_failed", "status": "failed"}
 
-        body = json.dumps({"id": "pay_failed", "status": "failed"}).encode()
-        await client.post(
-            "/api/v1/webhooks/moyasar",
-            content=body,
-            headers={"Content-Type": "application/json", "X-Moyasar-Signature": _sign(body)},
-        )
+        await _deliver(client, {"id": "pay_failed", "status": "failed"})
 
         await db_session.refresh(payment)
         assert payment.status == "failed"
+
+    @pytest.mark.parametrize(
+        ("recorded", "why"),
+        [
+            ({"amount": 100, "currency": "SAR"}, "1.00 against 150.00"),
+            ({"amount": 15000, "currency": "USD"}, "another currency"),
+            ({}, "no amount at all"),
+        ],
+    )
+    async def test_a_capture_that_does_not_match_the_payment_is_not_applied(
+        self, client, db_session, moyasar, tenant_factory, recorded, why
+    ):
+        """Paying less than the booking required must not capture it, or confirm anything."""
+        tenant = await tenant_factory()
+        gateway_id = f"pay_mismatch_{uuid4().hex[:8]}"
+        payment = await _payment(db_session, tenant, gateway_id=gateway_id)
+        moyasar.payments[gateway_id] = {"id": gateway_id, "status": "paid", **recorded}
+
+        response = await _deliver(client, {"id": gateway_id, "status": "paid"})
+
+        assert response.status_code == 200, why
+        assert response.json()["status"] == "amount_mismatch", why
+        await db_session.refresh(payment)
+        assert payment.status == "pending", why
+
+        stored = await _stored_event(db_session, gateway_id)
+        assert stored.processed_at is not None
+        assert "not captured" in (stored.error or "")
 
 
 class TestOutboxDelivery:

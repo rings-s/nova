@@ -12,6 +12,7 @@ Business rules live in `domain.py`; this file only sequences them.
 
 import secrets
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -48,6 +49,7 @@ from app.modules.booking.events import (
 from app.modules.booking.exceptions import (
     BookingNotFoundError,
     HoldExpiredError,
+    HoldLimitReachedError,
     HoldNotFoundError,
     HorizonTooLargeError,
     ProviderLocationMismatchError,

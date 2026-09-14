@@ -56,6 +56,7 @@ def build_booking_service(
         slot_granularity_minutes=settings.availability_slot_granularity_minutes,
         max_horizon_days=settings.availability_max_horizon_days,
         hold_ttl_seconds=settings.slot_hold_ttl_seconds,
+        max_active_holds_per_customer=settings.slot_hold_max_active_per_customer,
     )
 
 
