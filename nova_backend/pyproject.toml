@@ -1,0 +1,85 @@
+[project]
+name = "nova-backend"
+version = "0.1.0"
+description = "NOVA backend — FastAPI vertical-slice API"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "arq>=0.26",
+    # Declared explicitly even though `arq` pulls it in: `app/core/rate_limit.py`
+    # imports it directly, and its import failure is caught and logged, so a
+    # transitive-only dependency would degrade rate limiting to per-process
+    # in-memory buckets silently instead of failing the build.
+    "redis>=5.0",
+    # Outbound HTTP for the Moyasar / Nextcloud / WhatsApp adapters.
+    "httpx>=0.28",
+    "numpy>=2.5",
+    "pandas>=3.0",
+    "plotly>=7.0",
+]
+
+# PydanticAI (docs/04) is deliberately NOT a hard dependency. `ai_agents` imports
+# it lazily and degrades to `requires_human_handoff=True` when it or Ollama is
+# absent — the fallback docs/10 section 12 requires anyway. Install with:
+#     uv sync --extra ai
+[project.optional-dependencies]
+# 2.31 is the floor: runtime.py uses OpenAIChatModel, OllamaProvider and output validators.
+ai = ["pydantic-ai-slim[openai]>=2.31"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    # The `backend-typecheck` CI job runs this; it was never declared.
+    "mypy>=1.13",
+    "pydantic-ai-slim[openai]>=2.31",
+]
+
+[tool.uv]
+package = false
+
+[tool.mypy]
+python_version = "3.13"
+# Not strict mode: this codebase leans on SQLAlchemy's declarative attributes
+# and FastAPI's DI, neither of which a strict configuration reads well. What is
+# enabled catches the mistakes that actually happen here.
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+# PydanticAI is an optional runtime extra (`uv sync --extra ai`), absent from the
+# production image; the dev group installs it so tests run the real library.
+# `ai_agents/runtime.py` guards every import of it at runtime.
+module = ["pydantic_ai.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pandas and plotly ship no type information. Both are confined to
+# `analytics/metrics.py` and `analytics/charts.py` (ADR-0011).
+module = ["pandas.*", "plotly.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "B008",   # Depends()/Path() in argument defaults is the standard FastAPI DI pattern
+    "UP046",  # Generic[T] base class kept for clarity/compatibility over PEP 695 syntax
+    "RUF012", # ARQ's WorkerSettings requires plain mutable class attributes
+]

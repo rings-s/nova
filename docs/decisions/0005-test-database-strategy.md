@@ -8,7 +8,7 @@ fast and isolated, but also representative of the real database.
 ## Decision
 
 Real Postgres, not SQLite — a second logical database (`nova_test`) alongside the main one.
-`backend/tests/conftest.py`:
+`nova_backend/tests/conftest.py`:
 
 - Migrations applied once per test session (`alembic upgrade head` against
   `TEST_DATABASE_URL`), so tests exercise the same migrations that run in production.

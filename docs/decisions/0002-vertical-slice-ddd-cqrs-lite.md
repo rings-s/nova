@@ -1,5 +1,22 @@
 # 0002 — Vertical Slice Architecture + Pragmatic DDD + CQRS-lite
 
+> [!warning] Partially superseded — 2026-08-15
+> Two parts of this ADR no longer describe the code:
+>
+> 1. **CQRS-lite is out.** Modules use `service.py`, not `commands.py`/`queries.py`, to match
+>    docs 02/06/07 and the README. The handler-pair style was implemented in the old `tenants`
+>    module and collapsed into `TenantService` when that module became `identity`.
+> 2. **Rich domain entities are in, selectively.** This ADR rejected domain entities distinct
+>    from ORM models outright. That still holds for `identity`, `catalog`, `media`, and
+>    `notification` — but `booking`, `queue`, and `payment` own real state machines and define
+>    their own entities in `domain.py`, with the repository mapping to the ORM row. See
+>    `nova_backend/README.md`, "Two styles of domain.py", for the test used to decide.
+>
+> **Still in force:** the vertical-slice layout itself, one directory per bounded context, and
+> the rule that `domain.py` has no FastAPI or SQLAlchemy imports.
+>
+> Paths below say `backend/app/...`; the tree is now `nova_backend/app/...`.
+
 ## Context
 
 NOVA will grow many business modules (tenants, booking, queue, payments, WhatsApp, AI

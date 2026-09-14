@@ -1,20 +1,77 @@
 name: nova
 
+# The backend, the worker and the one-shot migration job are the same image
+# with different commands. Defined once here so the build arguments and the
+# datastore URLs cannot drift apart between them.
+x-backend: &backend
+  build:
+    context: ../nova_backend
+    dockerfile: Dockerfile
+    # The dev target: bind-mounted source, reload on save, test and lint
+    # tooling present so `make test` and `make migrate` work through `exec`.
+    # `docker build nova_backend` with no target builds the production image.
+    target: dev
+    args:
+      # The container writes into the bind mount — `alembic revision
+      # --autogenerate` produces a file there — so its uid has to match the
+      # host's. Set UID/GID in infra/.env if yours is not 1000.
+      UID: ${UID:-1000}
+      GID: ${GID:-1000}
+  image: nova-backend:dev
+  env_file: .env
+  environment:
+    # The API and the worker log in as `nova_app`, never as POSTGRES_USER. The
+    # `postgres` image makes POSTGRES_USER a superuser, and Postgres exempts a
+    # superuser from row-level security even under FORCE, so connecting as it
+    # switches every tenant policy off. infra/postgres/initdb gives `nova_app`
+    # its login (`make db-app-role` on an older volume); migration e1f2a3b4c5d6
+    # grants it the schema.
+    DATABASE_URL: postgresql+asyncpg://nova_app:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is unset, see infra/.env.example}@postgres:5432/${POSTGRES_DB:-nova}
+    # Migrations need the owner, since `nova_app` cannot create a table.
+    # alembic/env.py prefers this over DATABASE_URL.
+    MIGRATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
+    REDIS_URL: redis://redis:6379/0
+    # `make test` runs pytest inside this container, where conftest.py's
+    # localhost default resolves to the container itself. Kept on the shared
+    # block rather than on `backend` alone: a YAML merge key replaces the whole
+    # `environment` mapping, so a per-service override would silently drop the
+    # URLs above. The owner, because conftest.py migrates the test database and
+    # then runs every test as `nova_app` through `SET ROLE`.
+    TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_TEST_DB:-nova_test}
+  volumes:
+    # Bind mount for reload-on-save. The image keeps its virtualenv at
+    # /opt/venv precisely so this mount cannot shadow it.
+    #
+    # `:z` relabels the tree for SELinux. On an enforcing host (Fedora, RHEL,
+    # openSUSE 16) source under a home directory is `user_home_t`, which a
+    # container may not read: without it every service sharing this mount
+    # dies at start with "Permission denied" on /app. Lowercase `z` is the
+    # shared label — `Z` would make it private to one container, and migrate,
+    # backend and worker all mount it. A no-op where SELinux is off. Undo
+    # with `restorecon -R nova_backend`.
+    - ../nova_backend:/app:z
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16
     restart: unless-stopped
-    mem_limit: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nova}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nova}
       POSTGRES_DB: ${POSTGRES_DB:-nova}
+      # Read by initdb/20-create-app-role.sh: the login for `nova_app`.
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is unset, see infra/.env.example}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Creates the `nova_test` database and the `nova_app` login on first
+      # initialisation. Each file says what to do about an existing volume.
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro,z
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nova}"]
+      # The backend waits on this rather than sleeping — a race here shows up as
+      # a confusing "connection refused" on the first request instead.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nova} -d ${POSTGRES_DB:-nova}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,7 +79,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    mem_limit: 256m
+    # appendonly: idempotency keys and rate-limit counters are not worth a full
+    # RDB snapshot, but losing every one on restart is worse than the disk cost.
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -33,75 +92,69 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
-    build:
-      context: ../backend
-    restart: unless-stopped
-    mem_limit: 1g
+  # Runs once per `up`, before anything can serve a request. Without it the
+  # first request after a fresh clone hits an empty database and 500s, and the
+  # fix ("now run make migrate") is knowledge you have to already have.
+  #
+  # A separate service rather than an entrypoint step in the backend, because
+  # backend and worker both start at once and two concurrent `alembic upgrade
+  # head` runs race each other. This one finishes before either begins.
+  migrate:
+    <<: *backend
+    # A one-shot job. `unless-stopped` would restart it forever on exit 0.
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      ENV: local
-      DEBUG: "true"
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
-      REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-random-value}
-      CORS_ORIGINS: '["http://localhost:5173"]'
-      DEFAULT_LOCALE: en
-      SUPPORTED_LOCALES: '["en","ar"]'
-      DEFAULT_TIMEZONE: Asia/Riyadh
-      DEFAULT_CURRENCY: SAR
-      ALLOWED_PHONE_COUNTRY_CODES: '["966","971","973","974","965","968"]'
-      # --- reserved for future integration adapters, unset until implemented ---
-      WHATSAPP_BSP_API_KEY: ${WHATSAPP_BSP_API_KEY:-}
-      MOYASAR_API_KEY: ${MOYASAR_API_KEY:-}
-      NEXTCLOUD_URL: ${NEXTCLOUD_URL:-}
-      NEXTCLOUD_USERNAME: ${NEXTCLOUD_USERNAME:-}
-      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD:-}
-      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
-    volumes:
-      - ../backend:/app
+
+  backend:
+    <<: *backend
+    restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-8000}:8000"
-
-  worker:
-    build:
-      context: ../backend
-    restart: unless-stopped
-    mem_limit: 512m
-    command: ["uv", "run", "arq", "app.worker.arq_worker.WorkerSettings"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      ENV: local
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
-      REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-random-value}
-    volumes:
-      - ../backend:/app
+      migrate:
+        condition: service_completed_successfully
 
-  frontend:
-    build:
-      context: ../frontend
+  worker:
+    # Same image, different entrypoint: the ARQ worker drains the transactional
+    # outbox and runs scheduled jobs. Without it, domain events are written and
+    # never delivered, and notifications are composed and never sent.
+    <<: *backend
     restart: unless-stopped
-    mem_limit: 1g
+    command: ["arq", "app.worker.arq_worker.WorkerSettings"]
+    # The image's healthcheck probes an HTTP port this process does not open.
+    healthcheck:
+      disable: true
     depends_on:
-      - backend
-    environment:
-      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-    volumes:
-      - ../frontend:/app
-      - frontend_node_modules:/app/node_modules
-    ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # No public ports are exposed on the host: the tunnel dials out to Cloudflare
+  # and traffic arrives over that connection (docs/01, docs/09 #15). Runs only
+  # when a token is configured, so `make dev` works offline without one.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    depends_on:
+      # Waits for the backend to actually answer, not merely to have started —
+      # otherwise the tunnel comes up first and the public URL 502s.
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
   redis_data:
-  frontend_node_modules:
