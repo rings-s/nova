@@ -12,12 +12,14 @@ Everything is scheduled by cron rather than triggered, so a job that fails
 simply runs again next tick.
 """
 
+import json
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from arq import cron
@@ -438,6 +440,22 @@ async def advance_dunning(ctx: dict) -> int:
     return chased
 
 
+def encode_job(data: dict[str, Any]) -> bytes:
+    """A job, or its result, as JSON rather than ARQ's default pickle.
+
+    ARQ unpickles whatever it reads from its Redis queue, so anyone able to
+    write there could run code in this process. Every job here is a cron job
+    with no arguments and a plain result, so JSON loses nothing. `default=str`
+    turns what it cannot encode, such as a failed job's exception, into text,
+    rather than letting ARQ drop the result.
+    """
+    return json.dumps(data, default=str).encode()
+
+
+def decode_job(raw: bytes) -> dict[str, Any]:
+    return json.loads(raw)
+
+
 async def startup(ctx: dict) -> None:
     configure_logging()
     await enforce_rls_role(get_engine(), env=_settings.env)
@@ -494,3 +512,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(str(_settings.redis_url))
+    # JSON, never ARQ's default pickle: see `encode_job`. The worker is the only
+    # process that enqueues, so both ends of the queue change together.
+    job_serializer = encode_job
+    job_deserializer = decode_job
