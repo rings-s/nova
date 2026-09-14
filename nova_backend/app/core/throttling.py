@@ -1,8 +1,10 @@
 """FastAPI dependencies that apply rate-limit policies to endpoints."""
 
+import ipaddress
+
 from fastapi import Depends, Request
 
-from app.core.exceptions import DomainError
+from app.core.config import get_settings
 from app.core.rate_limit import (
     DEFAULT_POLICY,
     DISCOVERY_AVAILABILITY_POLICY,
@@ -11,38 +13,45 @@ from app.core.rate_limit import (
     LOGIN_POLICY,
     REFRESH_POLICY,
     WRITE_POLICY,
+    RateLimitExceeded,
     RateLimitPolicy,
     get_rate_limiter,
 )
 from app.core.security import Principal, get_principal
 
 
-class RateLimitExceeded(DomainError):
-    status_code = 429
-    code = "rate_limit_exceeded"
+def client_ip_key(request: Request) -> str:
+    """The caller's address, as the bucket an IP rate limit charges.
 
-    def __init__(self, retry_after_seconds: int, policy: RateLimitPolicy) -> None:
-        super().__init__(
-            f"Rate limit exceeded ({policy.description}). Retry in {retry_after_seconds} seconds."
-        )
-        self.retry_after_seconds = retry_after_seconds
+    `X-Forwarded-For` is never read. Cloudflare appends to a header the client
+    already sent, so its first entry is whatever the client wrote, and trusting
+    it gave every request a fresh bucket. The one header trusted is the one
+    `Settings.trusted_client_ip_header` names, which the proxy in front of the
+    API writes itself. Without one, the TCP peer is the caller.
 
-
-def _client_key(request: Request) -> str:
-    """Identifies the caller for limiting purposes.
-
-    Prefers the real client IP from `X-Forwarded-For`, which is what Cloudflare
-    Tunnel sets — without it every request appears to come from the tunnel and
-    the whole platform shares one bucket.
-
-    Trusting that header is only safe because nothing reaches this service
-    except through the tunnel (docs/01). If the API is ever exposed directly,
-    this becomes spoofable and must move behind a trusted-proxy check.
+    IPv6 is bucketed by /64, the block one subscriber is routinely given, so an
+    attacker cannot take a new bucket for every address inside it.
     """
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    header = get_settings().trusted_client_ip_header
+    address = _parse_ip(request.headers.get(header)) if header else None
+    if address is None:
+        address = _parse_ip(request.client.host if request.client else None)
+    if address is None:
+        return "unknown"
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.IPv6Network((address, 64), strict=False))
+    return str(address)
+
+
+def _parse_ip(value: str | None) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    if not value:
+        return None
+    try:
+        return ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
 
 
 def rate_limit(policy: RateLimitPolicy, *, scope: str):
@@ -50,7 +59,7 @@ def rate_limit(policy: RateLimitPolicy, *, scope: str):
 
     async def _dependency(request: Request) -> None:
         limiter = get_rate_limiter()
-        key = f"{scope}:{_client_key(request)}"
+        key = f"{scope}:{client_ip_key(request)}"
         result = await limiter.check(key, policy)
         if not result.allowed:
             raise RateLimitExceeded(result.retry_after_seconds, policy)

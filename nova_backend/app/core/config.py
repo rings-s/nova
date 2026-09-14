@@ -126,12 +126,28 @@ class Settings(BaseSettings):
 
     # --- Ingress ---
     #: Set when `make tunnel` publishes the stack through Cloudflare, which is
-    #: also why `dev_bypass_refusal` reads it.
+    #: also why `dev_bypass_refusal` and `trusted_client_ip_header` read it.
     cloudflare_tunnel_token: str | None = None
+    #: The header carrying the real client address, written by the one proxy in
+    #: front of the API. IP rate limits bucket by it. Unset, and with no tunnel
+    #: token, the TCP peer is the client.
+    client_ip_header: str | None = None
 
     #: Public base URL of the customer PWA. Used to build `ticket_page_url`
     #: (docs/07 section 7) — a ticket the customer cannot open is not a ticket.
     public_app_url: str = "http://localhost:5173"
+
+    @property
+    def trusted_client_ip_header(self) -> str | None:
+        """The header a rate limit may read the client address from, if any.
+
+        `CF-Connecting-IP` whenever a tunnel token is set: Cloudflare writes it
+        itself, replacing any value the client sent, and with every published
+        port on loopback the tunnel is the only way in.
+        """
+        if self.client_ip_header:
+            return self.client_ip_header
+        return "CF-Connecting-IP" if self.cloudflare_tunnel_token else None
 
     @model_validator(mode="after")
     def _refuse_unsafe_configuration(self) -> "Settings":
@@ -150,6 +166,11 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"SECRET_KEY is too weak for ENV={self.env}: use at least "
                 f"{MIN_SECRET_KEY_LENGTH} random characters (openssl rand -hex 32)."
+            )
+        if (self.client_ip_header or "").strip().lower() == "x-forwarded-for":
+            raise ValueError(
+                "CLIENT_IP_HEADER cannot be X-Forwarded-For: its first entry is whatever the "
+                "client sent. Name the header your proxy writes itself, such as CF-Connecting-IP."
             )
         refusal = dev_bypass_refusal(self)
         if refusal is not None:

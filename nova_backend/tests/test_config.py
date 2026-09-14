@@ -80,3 +80,22 @@ class TestDevBypass:
         """`make tunnel` would otherwise put an API that needs no token online."""
         with pytest.raises(ValidationError, match="CLOUDFLARE_TUNNEL_TOKEN"):
             build(env="local", auth_dev_bypass=True, cloudflare_tunnel_token="token")
+
+
+class TestClientIpHeader:
+    def test_no_header_is_trusted_by_default(self):
+        assert build(client_ip_header=None).trusted_client_ip_header is None
+
+    def test_cloudflares_header_is_trusted_behind_the_tunnel(self):
+        settings = build(client_ip_header=None, cloudflare_tunnel_token="token")
+        assert settings.trusted_client_ip_header == "CF-Connecting-IP"
+
+    def test_a_configured_header_wins(self):
+        settings = build(client_ip_header="X-Real-IP", cloudflare_tunnel_token="token")
+        assert settings.trusted_client_ip_header == "X-Real-IP"
+
+    @pytest.mark.parametrize("header", ["X-Forwarded-For", " x-forwarded-for "])
+    def test_x_forwarded_for_is_refused(self, header):
+        """Its first entry is whatever the client sent: the bypass this closes."""
+        with pytest.raises(ValidationError, match="cannot be X-Forwarded-For"):
+            build(client_ip_header=header)

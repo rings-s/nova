@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_db_session, get_tenant_context
+from app.core.rate_limit import get_rate_limiter
 from app.core.security import Principal, require_staff
 from app.modules.identity.auth_service import AuthService
 from app.modules.identity.domain import StaffPermission
@@ -127,4 +128,4 @@ def get_customer_service(
 
 def get_auth_service(session: AsyncSession = Depends(get_db_session)) -> AuthService:
     """Not tenant-scoped: signing in happens before any tenant is chosen."""
-    return AuthService(session, secret_key=get_settings().secret_key)
+    return AuthService(session, secret_key=get_settings().secret_key, limiter=get_rate_limiter())
