@@ -6,10 +6,14 @@ are applied once per session via Alembic (the same migrations that run in
 production), and each test gets an isolated outer transaction that is rolled
 back afterward, so tests never see each other's data without paying for a
 drop/recreate per test. See docs/decisions/0005-test-database-strategy.md.
+
+Every test runs as `nova_app`, the role the deployed API connects as, so
+row-level security applies exactly as it does in production. See `db_session`.
 """
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +24,7 @@ from alembic.command import upgrade
 from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 # Point Settings.database_url at the test database before anything imports
@@ -29,6 +34,10 @@ TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://nova:nova@localhost:5432/nova_test"
 )
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+# The same for migrations. Inside the compose stack MIGRATION_DATABASE_URL names
+# the development database and alembic/env.py prefers it, so left alone,
+# `_apply_migrations` would migrate `nova` instead of `nova_test`.
+os.environ["MIGRATION_DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("ENV", "test")
 # Settings requires these, and a test run should not need real ones. Defaulted
 # here rather than in CI so `pytest` works from a clean checkout with nothing
@@ -38,7 +47,9 @@ os.environ.setdefault("SECRET_KEY", "test-secret-not-used-outside-tests")
 
 from app.core.deps import get_db_session  # noqa: E402
 from app.core.security import Principal, PrincipalKind, get_principal  # noqa: E402
+from app.db.session import APP_DB_ROLE  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.modules.ai_agents.dependencies import get_agent_transaction  # noqa: E402
 from app.modules.catalog.models import (  # noqa: E402
     Business,
     Location,
@@ -75,6 +86,11 @@ async def db_session(_apply_migrations: None) -> AsyncIterator[AsyncSession]:
     # avoids "attached to a different loop" errors from a shared engine.
     engine: AsyncEngine = create_async_engine(TEST_DATABASE_URL)
     async with engine.connect() as connection, connection.begin() as outer_transaction:
+        # The whole test runs as the role the deployed app connects as, so every
+        # RLS policy applies as it does in production. The connection itself
+        # logs in as the schema owner: that is what lets `SET ROLE` go without a
+        # password, and what `as_owner` steps back out to.
+        await connection.execute(text(f"SET LOCAL ROLE {APP_DB_ROLE}"))
         session = AsyncSession(
             bind=connection,
             join_transaction_mode="create_savepoint",
@@ -84,6 +100,27 @@ async def db_session(_apply_migrations: None) -> AsyncIterator[AsyncSession]:
         await session.close()
         await outer_transaction.rollback()
     await engine.dispose()
+
+
+@asynccontextmanager
+async def _owner_role(session: AsyncSession) -> AsyncIterator[None]:
+    """Runs a block as the schema owner, which RLS does not restrict.
+
+    For building fixtures only. A test seeds several tenants at once, which no
+    request ever does, so it writes the way a seed script would. Nothing under
+    test runs inside this.
+    """
+    await session.execute(text("SET LOCAL ROLE NONE"))
+    try:
+        yield
+    finally:
+        await session.execute(text(f"SET LOCAL ROLE {APP_DB_ROLE}"))
+
+
+@pytest.fixture
+def as_owner(db_session: AsyncSession) -> Callable[[], AbstractAsyncContextManager[None]]:
+    """`async with as_owner():` seeds rows outside RLS. See `_owner_role`."""
+    return lambda: _owner_role(db_session)
 
 
 @pytest.fixture
@@ -112,10 +149,23 @@ async def app(db_session: AsyncSession, principal: Principal) -> AsyncIterator[F
     async def _override_get_principal() -> Principal:
         return principal
 
+    @asynccontextmanager
+    async def _savepoint() -> AsyncIterator[AsyncSession]:
+        async with db_session.begin_nested():
+            yield db_session
+
     application.dependency_overrides[get_db_session] = _override_get_db_session
     # Authentication itself is exercised in tests/test_security.py against the
     # real token path; API tests override it so they can focus on behaviour.
     application.dependency_overrides[get_principal] = _override_get_principal
+    # An agent's tool calls each open a transaction of their own, which on the
+    # pool would see none of this test's uncommitted rows. A savepoint keeps
+    # the same commit-or-roll-back boundary inside the test's transaction.
+    application.dependency_overrides[get_agent_transaction] = lambda: _savepoint
+    # Conversation memory in this process, one store for the test, so turns in
+    # the same test share it and no test reads another's.
+    memory = InMemoryConversationStore()
+    application.dependency_overrides[get_conversation_store] = lambda: memory
     yield application
     application.dependency_overrides.clear()
 
@@ -157,8 +207,9 @@ async def business_factory(db_session: AsyncSession):
         }
         defaults.update(overrides)
         business = Business(**defaults)
-        db_session.add(business)
-        await db_session.flush()
+        async with _owner_role(db_session):
+            db_session.add(business)
+            await db_session.flush()
         return business
 
     return _create
@@ -178,8 +229,9 @@ async def location_factory(db_session: AsyncSession):
         }
         defaults.update(overrides)
         location = Location(**defaults)
-        db_session.add(location)
-        await db_session.flush()
+        async with _owner_role(db_session):
+            db_session.add(location)
+            await db_session.flush()
         return location
 
     return _create
@@ -199,8 +251,9 @@ async def service_factory(db_session: AsyncSession):
         }
         defaults.update(overrides)
         service = Service(**defaults)
-        db_session.add(service)
-        await db_session.flush()
+        async with _owner_role(db_session):
+            db_session.add(service)
+            await db_session.flush()
         return service
 
     return _create
@@ -217,8 +270,9 @@ async def provider_factory(db_session: AsyncSession):
         }
         defaults.update(overrides)
         provider = Provider(**defaults)
-        db_session.add(provider)
-        await db_session.flush()
+        async with _owner_role(db_session):
+            db_session.add(provider)
+            await db_session.flush()
         return provider
 
     return _create
@@ -236,8 +290,9 @@ async def qualify(db_session: AsyncSession):
         assignment = ProviderService(
             tenant_id=provider.tenant_id, provider_id=provider.id, service_id=service.id
         )
-        db_session.add(assignment)
-        await db_session.flush()
+        async with _owner_role(db_session):
+            db_session.add(assignment)
+            await db_session.flush()
         return assignment
 
     return _assign
@@ -255,8 +310,9 @@ async def customer_factory(db_session: AsyncSession):
         }
         defaults.update(overrides)
         customer = Customer(**defaults)
-        db_session.add(customer)
-        await db_session.flush()
+        async with _owner_role(db_session):
+            db_session.add(customer)
+            await db_session.flush()
         return customer
 
     return _create

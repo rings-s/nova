@@ -1,0 +1,17 @@
+-- Creates the database `make test` uses.
+--
+-- tests/conftest.py points Settings at TEST_DATABASE_URL and wraps every test
+-- in a transaction it rolls back, but it will not create the database itself —
+-- and running the suite against the development database would apply the
+-- migrations to it and leave fixture rows behind.
+--
+-- Scripts in /docker-entrypoint-initdb.d run ONCE, when the data volume is
+-- first initialised. An existing stack will not pick this up; either recreate
+-- the volume (`docker compose down -v`, which discards development data) or
+-- create it by hand:
+--
+--     docker compose exec postgres createdb -U nova nova_test
+--
+-- Owned by POSTGRES_USER, because initdb scripts run as that role and the
+-- suite needs to create and drop schema objects.
+CREATE DATABASE nova_test;

@@ -73,11 +73,71 @@ def may_manage_role(
     return target in _ROLE_GRANTS[actor]
 
 
+class StaffPermission(StrEnum):
+    """What a role unlocks beyond a staff member's day-to-day work.
+
+    Ordinary operations — the calendar, the queue, check-in — stay open to every
+    member of the salon (`require_staff`). These are the actions that move
+    money, commit the business to spend, or read what it earns.
+    """
+
+    #: Subscribe, change plan, cancel: what the business pays NOVA.
+    MANAGE_SUBSCRIPTION = "manage_subscription"
+    #: Money leaving the business, back to a customer.
+    REFUND_PAYMENTS = "refund_payments"
+    #: Invoices, commission lines, payouts, the subscription's terms, the
+    #: financial summary, and the accountant agent.
+    VIEW_FINANCIALS = "view_financials"
+    #: The analytics dashboards, revenue by provider among them, and the analyst
+    #: and business manager agents.
+    VIEW_ANALYTICS = "view_analytics"
+
+
+#: Which role holds which permission, in one table so a salon's policy can be
+#: read, and changed, in one place.
+_ROLE_PERMISSIONS: dict[MembershipRole, frozenset[StaffPermission]] = {
+    MembershipRole.OWNER: frozenset(StaffPermission),
+    # Runs the salon day to day: refunds a customer and reads the numbers, but
+    # does not decide what the business pays NOVA.
+    MembershipRole.MANAGER: frozenset(
+        {
+            StaffPermission.REFUND_PAYMENTS,
+            StaffPermission.VIEW_FINANCIALS,
+            StaffPermission.VIEW_ANALYTICS,
+        }
+    ),
+    # The front desk and the chair: the calendar and the queue, and nothing that
+    # moves or reveals money. A stylist has no business reading a colleague's
+    # takings.
+    MembershipRole.RECEPTIONIST: frozenset(),
+    MembershipRole.PROVIDER: frozenset(),
+}
+
+
+def role_allows(
+    role: MembershipRole | None,
+    permission: StaffPermission,
+    *,
+    actor_is_service: bool = False,
+) -> bool:
+    """Whether a caller holding `role` in this tenant may do what `permission` names.
+
+    `role` is None for a caller with no active membership here, and None allows
+    nothing. Like `may_manage_role`, this is never decided from
+    `Principal.roles`, which is flattened across every tenant a user belongs to.
+    """
+    if actor_is_service:
+        return True
+    return role is not None and permission in _ROLE_PERMISSIONS[role]
+
+
 __all__ = [
     "MembershipRole",
+    "StaffPermission",
     "generate_slug",
     "may_manage_role",
     "require_bilingual_text",
+    "role_allows",
     "validate_gcc_phone",
     "validate_timezone",
 ]

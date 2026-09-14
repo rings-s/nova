@@ -17,8 +17,9 @@ frontend/dist/
 # --- Env files (examples are tracked, real ones are not) ---
 .env
 .env.*.local
-backend/.env
+nova_backend/.env
 frontend/.env
+infra/.env
 
 # --- OS / editor ---
 .DS_Store

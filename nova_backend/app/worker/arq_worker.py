@@ -30,6 +30,7 @@ from app.core.logging import configure_logging
 from app.core.values import Money
 from app.db.session import (
     bypass_tenant_scope,
+    enforce_rls_role,
     get_engine,
     get_session_factory,
     set_tenant_scope,
@@ -439,6 +440,7 @@ async def advance_dunning(ctx: dict) -> int:
 
 async def startup(ctx: dict) -> None:
     configure_logging()
+    await enforce_rls_role(get_engine(), env=_settings.env)
     logger.info("worker_started")
 
 

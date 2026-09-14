@@ -1,8 +1,11 @@
+import logging
 from collections.abc import AsyncGenerator
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
@@ -10,6 +13,13 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+#: The role the API and worker connect as: NOSUPERUSER and NOBYPASSRLS, so every
+#: policy applies to it. Migration `e1f2a3b4c5d6` creates it and grants it DML on
+#: the schema. The owner runs migrations and nothing else.
+APP_DB_ROLE = "nova_app"
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -65,11 +75,19 @@ async def set_tenant_scope(session: AsyncSession, tenant_id: "UUID | None") -> N
     Called by `get_tenant_context` once the tenant is authorized. Without it,
     RLS policies match nothing and queries return empty, which is the correct
     failure direction.
+
+    It also closes a bypass opened earlier in the transaction. The payment
+    webhook and the outbox dispatcher both bypass to find the tenant and then
+    scope to it; with the bypass still on, every policy would go on matching
+    every tenant and the scope would be cosmetic.
     """
     if tenant_id is None:
         return
     await session.execute(
-        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        text(
+            "SELECT set_config('app.current_tenant_id', :tenant_id, true),"
+            " set_config('app.bypass_rls', 'off', true)"
+        ),
         {"tenant_id": str(tenant_id)},
     )
 
@@ -105,3 +123,48 @@ async def set_discovery_scope(session: AsyncSession) -> None:
     leaking to the next request that borrows this pooled connection.
     """
     await session.execute(text("SELECT set_config('app.discovery_mode', 'on', true)"))
+
+
+async def role_exempt_from_rls(connection: AsyncConnection | AsyncSession) -> str | None:
+    """The connected role's name if Postgres exempts it from RLS, else None.
+
+    A superuser or a BYPASSRLS role skips every policy, `FORCE` or not. Checked
+    against `current_user`, so a `SET ROLE` counts.
+    """
+    result = await connection.execute(
+        text(
+            "SELECT rolname FROM pg_roles"
+            " WHERE rolname = current_user AND (rolsuper OR rolbypassrls)"
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def enforce_rls_role(engine: AsyncEngine, *, env: str) -> None:
+    """Refuses to start a deployed process whose role would switch RLS off.
+
+    The compose stack connected as the `postgres` image's POSTGRES_USER, a
+    superuser, until migration `e1f2a3b4c5d6` — and every policy was off with
+    nothing to say so. Local and test only warn, so an old volume still yields
+    a working stack.
+
+    An unreachable database is logged and let through: readiness reports it,
+    and failing startup over it would turn a database blip into a restart loop.
+    """
+    try:
+        async with engine.connect() as connection:
+            role = await role_exempt_from_rls(connection)
+    except (OSError, SQLAlchemyError):
+        logger.warning("rls_role_check_skipped", exc_info=True)
+        return
+
+    if role is None:
+        return
+    if env in ("local", "test"):
+        logger.warning("rls_bypassed_by_database_role", extra={"role": role})
+        return
+    raise RuntimeError(
+        f"Connected to Postgres as '{role}', which bypasses row-level security. "
+        f"Connect as '{APP_DB_ROLE}' and keep the schema owner for migrations "
+        "(MIGRATION_DATABASE_URL)."
+    )

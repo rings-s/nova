@@ -1,4 +1,5 @@
 from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainError
+from app.core.security import AuthorizationError
 
 
 class TenantNotFoundError(NotFoundError):
@@ -95,3 +96,16 @@ class LastOwnerError(ConflictError):
 
     def __init__(self) -> None:
         super().__init__("This is the only owner of the business. Appoint another owner first.")
+
+
+class InsufficientRoleError(AuthorizationError):
+    """The caller is staff, but their role in this business does not reach this.
+
+    Its own code rather than `forbidden`, so a client can say "ask an owner"
+    instead of "you are not allowed in".
+    """
+
+    code = "insufficient_role"
+
+    def __init__(self, permission: object) -> None:
+        super().__init__(f"Your role in this business does not allow '{permission}'.")

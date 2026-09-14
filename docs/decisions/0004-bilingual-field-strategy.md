@@ -9,7 +9,8 @@ modules (services, categories) will likely need the same bilingual pattern.
 
 `name_en` / `name_ar` columns directly on the entity (e.g. `Tenant.name_en`, `Tenant.name_ar`),
 not a separate translations table. Both are required at creation — enforced by
-`require_bilingual_text` in `backend/app/modules/tenants/domain.py`.
+`require_bilingual_text` in `nova_backend/app/core/validators.py` (moved there from the old
+`tenants/domain.py` once `catalog` needed the same rule — the reuse this ADR anticipated).
 
 ## Consequences
 

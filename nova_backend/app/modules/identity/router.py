@@ -23,14 +23,14 @@ from app.modules.identity.dependencies import (
 )
 from app.modules.identity.models import Customer, Membership, Tenant
 from app.modules.identity.schemas import (
-    CustomerCreate,
-    CustomerRead,
-    CustomerUpdateConsent,
-    MembershipCreate,
-    MembershipRead,
-    MembershipUpdateRole,
-    TenantCreate,
-    TenantRead,
+    CreateCustomerRequest,
+    CreateMembershipRequest,
+    CreateTenantRequest,
+    CustomerOut,
+    MembershipOut,
+    TenantOut,
+    UpdateCustomerConsentRequest,
+    UpdateMembershipRoleRequest,
 )
 from app.modules.identity.service import CustomerService, MembershipService, TenantService
 
@@ -39,12 +39,12 @@ router = APIRouter(prefix="/tenants", tags=["identity"])
 
 @router.post(
     "",
-    response_model=TenantRead,
+    response_model=TenantOut,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(write_rate_limit)],
 )
 async def create_tenant(
-    payload: TenantCreate,
+    payload: CreateTenantRequest,
     session: AsyncSession = Depends(get_db_session),
     service: TenantService = Depends(get_tenant_service),
     principal: Principal = Depends(get_principal),
@@ -64,18 +64,18 @@ async def create_tenant(
     return tenant
 
 
-@router.get("", response_model=Page[TenantRead])
+@router.get("", response_model=Page[TenantOut])
 async def list_my_tenants(
     params: PageParams = Depends(),
     service: TenantService = Depends(get_tenant_service),
     principal: Principal = Depends(get_principal),
-) -> Page[TenantRead]:
+) -> Page[TenantOut]:
     """The caller's own businesses, never the whole platform's."""
     tenants = await service.list_for_principal(principal, limit=params.limit, offset=params.offset)
-    return Page(items=[TenantRead.model_validate(t) for t in tenants])
+    return Page(items=[TenantOut.model_validate(t) for t in tenants])
 
 
-@router.get("/{tenant_id}", response_model=TenantRead)
+@router.get("/{tenant_id}", response_model=TenantOut)
 async def get_tenant(
     tenant_id: UUID = Depends(get_tenant_context),
     service: TenantService = Depends(get_tenant_service),
@@ -95,13 +95,13 @@ customers_router = APIRouter(prefix="/tenants/{tenant_id}/customers", tags=["ide
 
 @customers_router.post(
     "",
-    response_model=CustomerRead,
+    response_model=CustomerOut,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_staff), Depends(write_rate_limit)],
 )
 async def create_customer(
     tenant_id: UUID,
-    payload: CustomerCreate,
+    payload: CreateCustomerRequest,
     session: AsyncSession = Depends(get_db_session),
     service: CustomerService = Depends(get_customer_service),
 ) -> Customer:
@@ -110,23 +110,23 @@ async def create_customer(
     return customer
 
 
-@customers_router.get("", response_model=Page[CustomerRead], dependencies=[Depends(require_staff)])
+@customers_router.get("", response_model=Page[CustomerOut], dependencies=[Depends(require_staff)])
 async def list_customers(
     tenant_id: UUID,
     q: str | None = Query(default=None, description="Partial name or phone."),
     params: PageParams = Depends(),
     service: CustomerService = Depends(get_customer_service),
-) -> Page[CustomerRead]:
+) -> Page[CustomerOut]:
     rows = (
         await service.search(q, limit=params.limit, offset=params.offset)
         if q
         else await service.list(limit=params.limit, offset=params.offset)
     )
-    return Page(items=[CustomerRead.model_validate(r) for r in rows])
+    return Page(items=[CustomerOut.model_validate(r) for r in rows])
 
 
 @customers_router.get(
-    "/{customer_id}", response_model=CustomerRead, dependencies=[Depends(require_staff)]
+    "/{customer_id}", response_model=CustomerOut, dependencies=[Depends(require_staff)]
 )
 async def get_customer(
     tenant_id: UUID,
@@ -138,13 +138,13 @@ async def get_customer(
 
 @customers_router.patch(
     "/{customer_id}/consent",
-    response_model=CustomerRead,
-    dependencies=[Depends(require_staff)],
+    response_model=CustomerOut,
+    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
 )
 async def update_customer_consent(
     tenant_id: UUID,
     customer_id: UUID,
-    payload: CustomerUpdateConsent,
+    payload: UpdateCustomerConsentRequest,
     session: AsyncSession = Depends(get_db_session),
     service: CustomerService = Depends(get_customer_service),
 ) -> Customer:
@@ -170,8 +170,8 @@ async def update_customer_consent(
 memberships_router = APIRouter(prefix="/tenants/{tenant_id}/memberships", tags=["identity"])
 
 
-def _membership_read(membership: Membership) -> MembershipRead:
-    return MembershipRead(
+def _membership_out(membership: Membership) -> MembershipOut:
+    return MembershipOut(
         id=membership.id,
         tenant_id=membership.tenant_id,
         user_id=membership.user_id,
@@ -185,32 +185,32 @@ def _membership_read(membership: Membership) -> MembershipRead:
 
 
 @memberships_router.get(
-    "", response_model=Page[MembershipRead], dependencies=[Depends(require_staff)]
+    "", response_model=Page[MembershipOut], dependencies=[Depends(require_staff)]
 )
 async def list_memberships(
     tenant_id: UUID,
     params: PageParams = Depends(),
     service: MembershipService = Depends(get_membership_service),
     principal: Principal = Depends(get_principal),
-) -> Page[MembershipRead]:
+) -> Page[MembershipOut]:
     """This salon's staff, active only. Revoked memberships are history."""
     rows = await service.list(principal, limit=params.limit, offset=params.offset)
-    return Page(items=[_membership_read(r) for r in rows])
+    return Page(items=[_membership_out(r) for r in rows])
 
 
 @memberships_router.post(
     "",
-    response_model=MembershipRead,
+    response_model=MembershipOut,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_staff), Depends(write_rate_limit)],
 )
 async def grant_membership(
     tenant_id: UUID,
-    payload: MembershipCreate,
+    payload: CreateMembershipRequest,
     session: AsyncSession = Depends(get_db_session),
     service: MembershipService = Depends(get_membership_service),
     principal: Principal = Depends(get_principal),
-) -> MembershipRead:
+) -> MembershipOut:
     """Adds an existing NOVA account to this business.
 
     404 on an unknown address: there is no invite flow yet, so the person must
@@ -223,33 +223,33 @@ async def grant_membership(
     """
     membership = await service.grant(principal, email=payload.email, role=payload.role)
     await session.commit()
-    return _membership_read(membership)
+    return _membership_out(membership)
 
 
 @memberships_router.patch(
     "/{membership_id}",
-    response_model=MembershipRead,
+    response_model=MembershipOut,
     dependencies=[Depends(require_staff), Depends(write_rate_limit)],
 )
 async def change_membership_role(
     tenant_id: UUID,
     membership_id: UUID,
-    payload: MembershipUpdateRole,
+    payload: UpdateMembershipRoleRequest,
     session: AsyncSession = Depends(get_db_session),
     service: MembershipService = Depends(get_membership_service),
     principal: Principal = Depends(get_principal),
-) -> MembershipRead:
+) -> MembershipOut:
     """409 when it would leave the business with no owner."""
     membership = await service.change_role(
         principal, membership_id=membership_id, role=payload.role
     )
     await session.commit()
-    return _membership_read(membership)
+    return _membership_out(membership)
 
 
 @memberships_router.delete(
     "/{membership_id}",
-    response_model=MembershipRead,
+    response_model=MembershipOut,
     dependencies=[Depends(require_staff), Depends(write_rate_limit)],
 )
 async def revoke_membership(
@@ -258,7 +258,7 @@ async def revoke_membership(
     session: AsyncSession = Depends(get_db_session),
     service: MembershipService = Depends(get_membership_service),
     principal: Principal = Depends(get_principal),
-) -> MembershipRead:
+) -> MembershipOut:
     """Withdraws access, keeping the row.
 
     Returns the revoked membership rather than 204 so the caller can see the
@@ -267,4 +267,4 @@ async def revoke_membership(
     """
     membership = await service.revoke(principal, membership_id=membership_id)
     await session.commit()
-    return _membership_read(membership)
+    return _membership_out(membership)

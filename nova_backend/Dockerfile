@@ -75,7 +75,12 @@ COPY pyproject.toml uv.lock ./
 # No `--no-install-project`: `[tool.uv] package = false` already means the
 # project is never installed into the environment — `app` is imported from the
 # working directory instead.
-RUN uv sync --frozen --no-dev
+#
+# `--build-arg EXTRAS=ai` adds PydanticAI, so the agents (docs/13) run against
+# Ollama. Without it they answer with a human handoff, the documented fallback
+# (docs/10 section 12), and every other flow is unaffected.
+ARG EXTRAS=""
+RUN uv sync --frozen --no-dev ${EXTRAS:+--extra "$EXTRAS"}
 
 
 # --- development ----------------------------------------------------------

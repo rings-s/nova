@@ -10,9 +10,11 @@ import pytest
 from app.core.exceptions import ValidationDomainError
 from app.modules.identity.domain import (
     MembershipRole,
+    StaffPermission,
     generate_slug,
     may_manage_role,
     require_bilingual_text,
+    role_allows,
     validate_gcc_phone,
     validate_timezone,
 )
@@ -108,3 +110,31 @@ class TestMayManageRole:
         assert MembershipRole.OWNER == "owner"
         assert MembershipRole("receptionist") is MembershipRole.RECEPTIONIST
         assert may_manage_role(MembershipRole("owner"), MembershipRole("manager"))
+
+
+class TestRoleAllows:
+    """Who may move money, commit the business to spend, or read what it earns.
+
+    The policy is one table in the domain; these pin it, so changing who may
+    refund a customer is a deliberate edit in two places rather than one.
+    """
+
+    def test_an_owner_holds_every_permission(self) -> None:
+        for permission in StaffPermission:
+            assert role_allows(MembershipRole.OWNER, permission)
+
+    def test_a_manager_refunds_and_reads_the_numbers_but_does_not_decide_the_plan(self) -> None:
+        assert role_allows(MembershipRole.MANAGER, StaffPermission.REFUND_PAYMENTS)
+        assert role_allows(MembershipRole.MANAGER, StaffPermission.VIEW_FINANCIALS)
+        assert role_allows(MembershipRole.MANAGER, StaffPermission.VIEW_ANALYTICS)
+        assert not role_allows(MembershipRole.MANAGER, StaffPermission.MANAGE_SUBSCRIPTION)
+
+    def test_receptionists_and_providers_hold_none(self) -> None:
+        for role in (MembershipRole.RECEPTIONIST, MembershipRole.PROVIDER):
+            for permission in StaffPermission:
+                assert not role_allows(role, permission)
+
+    def test_a_non_member_holds_none_and_a_service_principal_holds_all(self) -> None:
+        for permission in StaffPermission:
+            assert not role_allows(None, permission)
+            assert role_allows(None, permission, actor_is_service=True)

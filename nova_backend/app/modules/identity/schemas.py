@@ -1,13 +1,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.core.schemas import ApiSchema
+from app.core.validators import validate_email
 from app.modules.identity.domain import MembershipRole
 
 
-class TenantCreate(ApiSchema):
+class CreateTenantRequest(ApiSchema):
     name_en: str = Field(min_length=1, max_length=200)
     name_ar: str = Field(min_length=1, max_length=200)
     phone: str
@@ -17,7 +18,7 @@ class TenantCreate(ApiSchema):
     # Accepting it would let a caller create a business owned by someone else.
 
 
-class TenantRead(ApiSchema):
+class TenantOut(ApiSchema):
     id: UUID
     name_en: str
     name_ar: str
@@ -28,7 +29,7 @@ class TenantRead(ApiSchema):
     updated_at: datetime
 
 
-class CustomerCreate(ApiSchema):
+class CreateCustomerRequest(ApiSchema):
     full_name: str = Field(min_length=1, max_length=255)
     phone: str = Field(max_length=32)
     email: str | None = Field(default=None, max_length=255)
@@ -38,12 +39,12 @@ class CustomerCreate(ApiSchema):
     notes: str | None = Field(default=None, max_length=2000)
 
 
-class CustomerUpdateConsent(ApiSchema):
+class UpdateCustomerConsentRequest(ApiSchema):
     marketing_consent: bool | None = None
     whatsapp_consent: bool | None = None
 
 
-class CustomerRead(ApiSchema):
+class CustomerOut(ApiSchema):
     id: UUID
     tenant_id: UUID
     full_name: str
@@ -57,7 +58,7 @@ class CustomerRead(ApiSchema):
     updated_at: datetime
 
 
-class MembershipCreate(ApiSchema):
+class CreateMembershipRequest(ApiSchema):
     """Grant by email address, to an account that already exists.
 
     No `user_id`: an owner adding a colleague knows their email, not their
@@ -68,11 +69,11 @@ class MembershipCreate(ApiSchema):
     role: MembershipRole
 
 
-class MembershipUpdateRole(ApiSchema):
+class UpdateMembershipRoleRequest(ApiSchema):
     role: MembershipRole
 
 
-class MembershipRead(ApiSchema):
+class MembershipOut(ApiSchema):
     id: UUID
     tenant_id: UUID
     user_id: UUID
@@ -84,3 +85,45 @@ class MembershipRead(ApiSchema):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+# --- Authentication -------------------------------------------------------
+
+
+class RegisterRequest(ApiSchema):
+    email: str = Field(max_length=255)
+    password: str = Field(min_length=12, max_length=200)
+    full_name: str = Field(min_length=1, max_length=200)
+    phone: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def _normalise_email(cls, value: str) -> str:
+        return validate_email(value)
+
+
+class LoginRequest(ApiSchema):
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def _normalise_email(cls, value: str) -> str:
+        return validate_email(value)
+
+
+class RefreshRequest(ApiSchema):
+    refresh_token: str
+
+
+class TokenOut(ApiSchema):
+    access_token: str
+    refresh_token: str
+    token_type: str
+    expires_in: int
+
+
+class UserOut(ApiSchema):
+    id: str
+    email: str
+    full_name: str

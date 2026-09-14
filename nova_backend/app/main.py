@@ -7,24 +7,32 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.context import CORRELATION_ID_HEADER
 from app.core.deps import get_db_session
-from app.core.error_handlers import register_exception_handlers
+from app.core.error_handlers import ERROR_RESPONSES, register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
-from app.db.session import get_engine
+from app.db.session import enforce_rls_role, get_engine
 from app.modules.registry import routers
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     configure_logging()
+    await enforce_rls_role(get_engine(), env=get_settings().env)
     yield
     await get_engine().dispose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="NOVA API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="NOVA API",
+        version="0.1.0",
+        lifespan=lifespan,
+        # docs/07 section 2: every error is `{"error": {...}}`, and /docs says so.
+        responses=ERROR_RESPONSES,
+    )
 
     # A wildcard origin with credentials enabled lets any site make
     # authenticated requests on a logged-in user's behalf. Browsers reject the
@@ -42,6 +50,11 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # A browser only lets page script read a short safelist of response
+        # headers cross-origin, and neither of these is on it. Without this the
+        # PWA cannot honour Retry-After on a 429, or quote the correlation id
+        # of a failed request, however correctly the server sends them.
+        expose_headers=["Retry-After", CORRELATION_ID_HEADER],
     )
     app.add_middleware(CorrelationIdMiddleware)
 

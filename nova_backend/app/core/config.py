@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     debug: bool = True
 
     database_url: PostgresDsn
+    #: The schema owner, for Alembic alone. The API and worker connect as
+    #: `database_url`'s role, which row-level security must apply to (see
+    #: `app.db.session.enforce_rls_role`), and that role cannot create tables.
+    #: Unset, migrations use `database_url` too.
+    migration_database_url: PostgresDsn | None = None
     redis_url: RedisDsn
     secret_key: str
 
@@ -51,6 +56,16 @@ class Settings(BaseSettings):
     #: released again (docs/04 section 2A, docs/10 section 5).
     slot_hold_ttl_seconds: int = 300
     booking_free_cancellation_hours: int = 24
+
+    # --- Public marketplace (ADR-0010) ---
+    #: How much calendar one anonymous availability request may ask for. Much
+    #: shorter than `availability_max_horizon_days`, because the public route
+    #: answers for every provider qualified for the service rather than one
+    #: named provider, so the same window costs a multiple of it.
+    discovery_max_availability_days: int = 14
+    #: Hard cap on slots in one public availability response. The window bounds
+    #: the date dimension; a salon with thirty stylists is the other one.
+    discovery_max_public_slots: int = 500
 
     # --- Queue / tickets ---
     #: Virtual tickets expire this long after issue. An indefinitely valid QR
@@ -94,6 +109,10 @@ class Settings(BaseSettings):
     ai_tool_timeout_seconds: float = 5.0
     ai_request_timeout_seconds: float = 30.0
     ai_enabled: bool = True
+    #: How long a conversation's recent turns are remembered, and how many
+    #: (`ai_agents/history.py`). Working memory for the model, not a record.
+    ai_history_ttl_seconds: int = 86_400
+    ai_history_max_turns: int = 10
 
     # --- Ingress ---
     cloudflare_tunnel_token: str | None = None

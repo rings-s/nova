@@ -17,6 +17,9 @@ discovery -> catalog).
 from app.core import idempotency as _idempotency  # noqa: F401
 from app.db import outbox as _outbox  # noqa: F401
 from app.modules.ai_agents.router import router as ai_router
+
+# analytics owns no tables, so only its router is imported (ADR-0011).
+from app.modules.analytics.router import router as analytics_router
 from app.modules.billing import models as billing_models  # noqa: F401
 from app.modules.billing.router import router as billing_router
 from app.modules.booking import models as booking_models  # noqa: F401
@@ -57,5 +60,6 @@ routers = [
     media_router,
     notification_router,
     billing_router,
+    analytics_router,
     ai_router,
 ]

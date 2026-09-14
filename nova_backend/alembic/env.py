@@ -5,11 +5,10 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
-
 # Import every module's models via the single aggregator so autogenerate sees
 # all ORM classes without per-module wiring here.
 import app.modules.registry  # noqa: F401
+from alembic import context
 from app.core.config import get_settings
 from app.db.base import Base
 
@@ -24,7 +23,12 @@ if config.config_file_name is not None:
 
 # The runtime database URL is the single source of truth (from Settings/.env),
 # not the placeholder in alembic.ini, so the two can't drift out of sync.
-config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
+# Migrations run as the schema owner when one is configured: the app's own role
+# cannot create tables, and must not be able to.
+_settings = get_settings()
+config.set_main_option(
+    "sqlalchemy.url", str(_settings.migration_database_url or _settings.database_url)
+)
 
 target_metadata = Base.metadata
 

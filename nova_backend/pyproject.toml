@@ -19,6 +19,9 @@ dependencies = [
     "redis>=5.0",
     # Outbound HTTP for the Moyasar / Nextcloud / WhatsApp adapters.
     "httpx>=0.28",
+    "numpy>=2.5",
+    "pandas>=3.0",
+    "plotly>=7.0",
 ]
 
 # PydanticAI (docs/04) is deliberately NOT a hard dependency. `ai_agents` imports
@@ -26,7 +29,8 @@ dependencies = [
 # absent — the fallback docs/10 section 12 requires anyway. Install with:
 #     uv sync --extra ai
 [project.optional-dependencies]
-ai = ["pydantic-ai-slim[openai]>=0.0.20"]
+# 2.31 is the floor: runtime.py uses OpenAIChatModel, OllamaProvider and output validators.
+ai = ["pydantic-ai-slim[openai]>=2.31"]
 
 [dependency-groups]
 dev = [
@@ -36,6 +40,7 @@ dev = [
     "ruff>=0.8",
     # The `backend-typecheck` CI job runs this; it was never declared.
     "mypy>=1.13",
+    "pydantic-ai-slim[openai]>=2.31",
 ]
 
 [tool.uv]
@@ -51,10 +56,16 @@ warn_redundant_casts = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-# PydanticAI is an optional extra (`uv sync --extra ai`), so its stubs are
-# absent in the default install and in CI. `ai_agents/runtime.py` guards every
-# import of it at runtime.
+# PydanticAI is an optional runtime extra (`uv sync --extra ai`), absent from the
+# production image; the dev group installs it so tests run the real library.
+# `ai_agents/runtime.py` guards every import of it at runtime.
 module = ["pydantic_ai.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pandas and plotly ship no type information. Both are confined to
+# `analytics/metrics.py` and `analytics/charts.py` (ADR-0011).
+module = ["pandas.*", "plotly.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

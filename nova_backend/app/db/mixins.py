@@ -11,6 +11,19 @@ class UUIDPKMixin:
 
 
 class TimestampMixin:
+    # `updated_at` is computed by the database on every UPDATE. Without
+    # `eager_defaults`, SQLAlchemy does not read that value back at flush — it
+    # *expires* the attribute instead, to be lazy-loaded on next access. Under
+    # an async session that next access is the router serialising the response
+    # after commit, outside the greenlet the load needs, and it raises
+    # MissingGreenlet: a 500 from every endpoint that changes a row and returns
+    # it (catalog listing toggle, customer consent, membership role and
+    # revocation). With it, the UPDATE carries RETURNING and the fresh value is
+    # already in memory. Set here because this mixin is where `onupdate` lives;
+    # no model declares its own `__mapper_args__`, and one that does must keep
+    # this key or reintroduce the bug.
+    __mapper_args__ = {"eager_defaults": True}
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_db_session, get_tenant_context
+from app.core.security import Principal, require_staff
+from app.modules.identity.auth_service import AuthService
+from app.modules.identity.domain import StaffPermission
 from app.modules.identity.repository import (
     CustomerRepository,
     MembershipRepository,
@@ -44,6 +47,40 @@ def get_membership_service(
     explicit `tenant_id` the service passes into every query.
     """
     return MembershipService(memberships, users=users, tenant_id=tenant_id)
+
+
+def build_membership_service(session: AsyncSession, tenant_id: UUID) -> MembershipService:
+    """Assembles the service outside the request DI graph.
+
+    An AI turn checks the caller's role inside a unit of work of its own, with
+    no request session for `get_membership_service` to hang from. The caller
+    scopes that session to the tenant first.
+    """
+    return MembershipService(
+        MembershipRepository(session), users=UserRepository(session), tenant_id=tenant_id
+    )
+
+
+class RequirePermission:
+    """A route dependency: staff whose role in this tenant carries `permission`.
+
+    Used in place of `require_staff` on the routes that move money or read what
+    a business earns, e.g. `Depends(RequirePermission(StaffPermission.
+    REFUND_PAYMENTS))`. A customer is refused before any membership is read; a
+    member is judged by their active row in `memberships` for the path's tenant,
+    never by the token's flattened `roles`.
+    """
+
+    def __init__(self, permission: StaffPermission) -> None:
+        self.permission = permission
+
+    async def __call__(
+        self,
+        principal: Principal = Depends(require_staff),
+        memberships: MembershipService = Depends(get_membership_service),
+    ) -> Principal:
+        await memberships.require_permission(principal, self.permission)
+        return principal
 
 
 def get_tenant_service(
@@ -86,3 +123,8 @@ def get_customer_service(
     already proven the caller is a member (ADR-0003, ADR-0006).
     """
     return build_customer_service(session, tenant_id)
+
+
+def get_auth_service(session: AsyncSession = Depends(get_db_session)) -> AuthService:
+    """Not tenant-scoped: signing in happens before any tenant is chosen."""
+    return AuthService(session, secret_key=get_settings().secret_key)
