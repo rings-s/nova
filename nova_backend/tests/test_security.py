@@ -13,11 +13,13 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.config import Settings
 from app.core.security import (
     AuthenticationError,
     AuthorizationError,
     Principal,
     PrincipalKind,
+    _dev_bypass_principal,
     decode_token,
     require_tenant_access,
 )
@@ -184,3 +186,36 @@ class TestBookingCustomerResolution:
         principal = Principal(subject_id=uuid4(), kind=PrincipalKind.STAFF)
         customer_id = uuid4()
         assert resolve_booking_customer(customer_id, principal) == customer_id
+
+
+class TestDevBypass:
+    """The request-time re-check, for settings built without validation.
+
+    `Settings` refuses these states at startup (tests/test_config.py), but
+    `model_construct` skips validation, which is the gap this check covers.
+    """
+
+    @staticmethod
+    def _settings(**fields: object) -> Settings:
+        values: dict[str, object] = {
+            "auth_dev_bypass": True,
+            "env": "local",
+            "cloudflare_tunnel_token": None,
+        }
+        values.update(fields)
+        return Settings.model_construct(**values)
+
+    def test_serves_a_service_principal_on_a_developer_machine(self):
+        principal = _dev_bypass_principal(self._settings())
+        assert principal is not None and principal.kind is PrincipalKind.SERVICE
+
+    def test_off_means_no_principal(self):
+        assert _dev_bypass_principal(self._settings(auth_dev_bypass=False)) is None
+
+    def test_refuses_when_deployed(self):
+        with pytest.raises(AuthenticationError):
+            _dev_bypass_principal(self._settings(env="production"))
+
+    def test_refuses_on_a_stack_a_tunnel_publishes(self):
+        with pytest.raises(AuthenticationError):
+            _dev_bypass_principal(self._settings(cloudflare_tunnel_token="token"))

@@ -82,6 +82,8 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://nova:nova@localhost:5432/nova
       REDIS_URL: redis://localhost:6379/0
       SECRET_KEY: ci-migrations-not-a-real-secret
+      # Settings defaults ENV to production, which refuses a key this short.
+      ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -138,6 +140,8 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://nova:nova@localhost:5432/nova
       REDIS_URL: redis://localhost:6379/0
       SECRET_KEY: ci-smoke-check-not-a-real-secret
+      # Settings defaults ENV to production, which refuses a placeholder key.
+      ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3

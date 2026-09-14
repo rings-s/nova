@@ -1,14 +1,24 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import PostgresDsn, RedisDsn
+from pydantic import PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: The environments where a developer convenience may relax a deployed rule.
+DEVELOPMENT_ENVS = frozenset({"local", "test"})
+
+#: The shortest SECRET_KEY a deployed environment accepts. `openssl rand -hex 32`
+#: produces 64 characters.
+MIN_SECRET_KEY_LENGTH = 32
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    env: Literal["local", "test", "staging", "production"] = "local"
+    #: Production unless told otherwise, so a deployment that forgets ENV gets
+    #: the strict rules (SECRET_KEY checked, no dev bypass, an RLS-exempt
+    #: database role refused) instead of the relaxed local ones.
+    env: Literal["local", "test", "staging", "production"] = "production"
     debug: bool = True
 
     database_url: PostgresDsn
@@ -23,9 +33,9 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
 
     # Disables bearer-token authentication and treats every caller as a trusted
-    # service principal. `app.core.security` refuses to honour this outside
-    # env=local/test, so it cannot silently disable auth in a deployed
-    # environment.
+    # service principal. Settings refuses to load with it on outside
+    # env=local/test or while a tunnel token is set (`dev_bypass_refusal`), and
+    # `app.core.security` checks the same rule again per request.
     auth_dev_bypass: bool = False
 
     # Connection pool. Sized for a single-node deployment; Postgres's own
@@ -115,11 +125,58 @@ class Settings(BaseSettings):
     ai_history_max_turns: int = 10
 
     # --- Ingress ---
+    #: Set when `make tunnel` publishes the stack through Cloudflare, which is
+    #: also why `dev_bypass_refusal` reads it.
     cloudflare_tunnel_token: str | None = None
 
     #: Public base URL of the customer PWA. Used to build `ticket_page_url`
     #: (docs/07 section 7) — a ticket the customer cannot open is not a ticket.
     public_app_url: str = "http://localhost:5173"
+
+    @model_validator(mode="after")
+    def _refuse_unsafe_configuration(self) -> "Settings":
+        """Stops a process starting on settings that switch its security off.
+
+        SECRET_KEY signs every token, slot id, QR ticket and upload
+        authorisation, so anyone who can guess it can mint a service principal
+        that reaches every tenant.
+        """
+        if not self.secret_key:
+            raise ValueError("SECRET_KEY is empty. Generate one: openssl rand -hex 32")
+        if self.env not in DEVELOPMENT_ENVS and (
+            len(self.secret_key) < MIN_SECRET_KEY_LENGTH
+            or self.secret_key.lower().startswith("change")
+        ):
+            raise ValueError(
+                f"SECRET_KEY is too weak for ENV={self.env}: use at least "
+                f"{MIN_SECRET_KEY_LENGTH} random characters (openssl rand -hex 32)."
+            )
+        refusal = dev_bypass_refusal(self)
+        if refusal is not None:
+            raise ValueError(refusal)
+        return self
+
+
+def dev_bypass_refusal(settings: Settings) -> str | None:
+    """Why AUTH_DEV_BYPASS may not be honoured with these settings, or None.
+
+    The bypass makes a request with no token a service principal, which reaches
+    every tenant. That is acceptable on a developer's own machine only: never in
+    a deployed environment, and never on a stack a Cloudflare tunnel publishes.
+    """
+    if not settings.auth_dev_bypass:
+        return None
+    if settings.env not in DEVELOPMENT_ENVS:
+        return (
+            f"AUTH_DEV_BYPASS is enabled with ENV={settings.env}; "
+            "it is honoured only in local or test."
+        )
+    if settings.cloudflare_tunnel_token:
+        return (
+            "AUTH_DEV_BYPASS is enabled while CLOUDFLARE_TUNNEL_TOKEN is set; "
+            "the tunnel would publish an API that needs no token."
+        )
+    return None
 
 
 @lru_cache

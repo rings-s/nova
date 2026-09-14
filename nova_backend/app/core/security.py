@@ -18,7 +18,7 @@ Design notes:
     classic JWT forgery ("alg: none") and is rejected explicitly.
   - It fails CLOSED. A missing or invalid token is 401 in every environment.
     The only bypass is an explicit local-development flag, and it refuses to
-    engage outside `local`/`test`.
+    engage outside `local`/`test` or on a stack a Cloudflare tunnel publishes.
 """
 
 import base64
@@ -32,7 +32,7 @@ from uuid import UUID
 
 from fastapi import Depends, Path, Request
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, dev_bypass_refusal, get_settings
 from app.core.exceptions import DomainError
 
 
@@ -190,14 +190,18 @@ def _principal_from_claims(claims: dict) -> Principal:
 
 
 def _dev_bypass_principal(settings: Settings) -> Principal | None:
-    """Local-only escape hatch, refused outside local/test."""
+    """Local-only escape hatch.
+
+    `Settings` already refuses to load in any state `dev_bypass_refusal`
+    rejects. The rule is checked again here, so settings built without
+    validation cannot reopen it.
+    """
     if not settings.auth_dev_bypass:
         return None
-    if settings.env not in ("local", "test"):
-        # Fail loudly rather than silently disabling auth in a deployed env.
-        raise AuthenticationError(
-            "auth_dev_bypass is enabled outside a local environment; refusing to serve."
-        )
+    refusal = dev_bypass_refusal(settings)
+    if refusal is not None:
+        # Fail loudly rather than silently disabling auth.
+        raise AuthenticationError(f"{refusal} Refusing to serve.")
     return Principal(
         subject_id=UUID("00000000-0000-0000-0000-000000000001"),
         kind=PrincipalKind.SERVICE,
