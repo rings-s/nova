@@ -23,6 +23,14 @@ Design notes:
   - Revocation is immediate. Each request re-reads the account's
     `token_version` and `is_active`, so logout-everywhere, a revoked membership
     or a deactivated account ends access at once, not when the token expires.
+  - A token's lifetime is bounded even if `SECRET_KEY` leaks: `exp - iat` may
+    not exceed the refresh-token TTL, so a forged token cannot claim an
+    expiry further out than the longest one this app ever mints.
+  - `kind=service` is the one claim that skips the revocation check above — it
+    names no account to re-read. The app itself never issues one over HTTP
+    (only the dev bypass builds a SERVICE principal, and only without a token
+    at all), so a bearer token naming it is refused outside local/test: see
+    docs/14 TM-03.
 """
 
 import base64
@@ -40,7 +48,7 @@ from fastapi import Depends, Path, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings, dev_bypass_refusal, get_settings
+from app.core.config import DEVELOPMENT_ENVS, Settings, dev_bypass_refusal, get_settings
 from app.core.exceptions import DomainError
 from app.db.session import get_session_factory
 
@@ -202,6 +210,20 @@ def decode_token(token: str, *, secret: str, leeway_seconds: int = 0) -> dict:
     # false with everything, so a token expiring at NaN would never expire.
     if isinstance(expiry, bool) or not isinstance(expiry, int | float) or not math.isfinite(expiry):
         raise AuthenticationError("Token expiry is invalid.")
+
+    issued_at = claims.get("iat")
+    if isinstance(issued_at, bool) or not isinstance(issued_at, int | float) or not math.isfinite(
+        issued_at
+    ):
+        raise AuthenticationError("Token has no valid issue time.")
+    # However far out `exp` claims to be, it did not get there from
+    # `issue_token`: every token this app mints has `exp - iat` equal to one of
+    # ACCESS_TOKEN_TTL_SECONDS or REFRESH_TOKEN_TTL_SECONDS. A forged token —
+    # possible only with the signing key itself (TM-03) — is bounded to the
+    # longer of the two regardless of what its forger set `exp` to.
+    if expiry - issued_at > REFRESH_TOKEN_TTL_SECONDS:
+        raise AuthenticationError("Token lifetime exceeds the maximum allowed.")
+
     if time.time() > expiry + leeway_seconds:
         raise AuthenticationError("Token has expired.")
 
@@ -281,6 +303,22 @@ def _dev_bypass_principal(settings: Settings) -> Principal | None:
     )
 
 
+def _service_kind_refusal(env: str) -> str | None:
+    """Why a bearer token naming `kind=service` may not authenticate, or None.
+
+    `_issue_pair` mints STAFF or CUSTOMER only, and the dev bypass builds its
+    SERVICE principal directly, without a token at all — so the app itself
+    never puts `kind=service` on a bearer token. One naming it anyway proves
+    nothing but possession of `SECRET_KEY`, and that principal skips
+    `_assert_token_is_current` below, since it names no account to re-check:
+    a leaked key would otherwise mint permanent, unrevocable access to every
+    tenant (docs/14 TM-03). Honoured only where the dev bypass itself is.
+    """
+    if env in DEVELOPMENT_ENVS:
+        return None
+    return "Service principals do not authenticate over a bearer token."
+
+
 async def _assert_token_is_current(
     principal: Principal, claims: dict, lookup: TokenStateLookup
 ) -> None:
@@ -327,7 +365,11 @@ async def get_principal(
         raise AuthenticationError("Refresh tokens cannot be used to call the API.")
 
     principal = _principal_from_claims(claims)
-    if principal.kind is not PrincipalKind.SERVICE:
+    if principal.kind is PrincipalKind.SERVICE:
+        refusal = _service_kind_refusal(settings.env)
+        if refusal is not None:
+            raise AuthenticationError(refusal)
+    else:
         await _assert_token_is_current(principal, claims, token_state)
     return principal
 

@@ -149,6 +149,7 @@ Established by SEC-01 to SEC-13 and retested live on the dev stack:
 - **Authentication fails closed.**
   - `alg` is pinned to HS256, and malformed headers and claims get 401, not 500 (SEC-10).
   - Every staff and customer request re-reads `token_version` and `is_active`, so logout-everywhere and membership revocation take effect immediately (SEC-11).
+  - A `kind=service` bearer token is refused outside local/test, and every token's `exp - iat` is capped at the refresh TTL — partial TM-03, 2026-09-15.
 - **Tenant isolation has three layers.** Path-only `tenant_id` with authorization, `TenantScopedRepository`, and forced RLS on 24 tables for `nova_app`.
   - The live policy map shows `tenant_isolation` on every tenant table.
   - `public_discovery` is a `SELECT` policy on five catalog tables, and only rows that are published match.
@@ -283,7 +284,7 @@ privilege escalation. Evidence is `live`, `code` or `design` (see the top of thi
 | :--- | :--- | :--- | :--- |
 | TM-01 | **High** | An unverified phone number claims another person's customer record, at every tenant | live |
 | TM-02 | **High** | The production image makes `X-Forwarded-For` the client address, so every per-IP limit can be bypassed | live (uvicorn 0.52.3) |
-| TM-03 | **High** | `SECRET_KEY` mints non-revocable, platform-wide service tokens, and the same key signs everything | code |
+| TM-03 | **High** — partially fixed 2026-09-15 | `SECRET_KEY` mints non-revocable, platform-wide service tokens, and the same key signs everything | code |
 | TM-04 | **High** | No email verification, and memberships are granted by email: a pre-registered account becomes staff | code |
 | TM-05 | **High** | The media upload authorisation cannot be enforced by Nextcloud, and one service account holds every tenant's media | code, design |
 | TM-06 | Medium | Share links never expire, survive deletion, and binaries are never purged | code |
@@ -397,6 +398,23 @@ if not isinstance(claims.get("iat"), int) or claims["exp"] - claims["iat"] > REF
 def purpose_key(secret: str, purpose: str) -> bytes:
     return hmac.new(secret.encode(), f"nova:{purpose}".encode(), sha256).digest()
 ```
+
+- **Fixed, 2026-09-15 (partial):**
+  - `get_principal` now refuses a bearer token naming `kind=service` outside local/test
+    (`_service_kind_refusal`), the same environments the dev bypass itself is honoured in. A
+    leaked key can no longer mint unrevocable, platform-wide access over HTTP in a deployed
+    environment — the app never puts that claim on a token itself, so a live request bearing one
+    proves only key possession, nothing else.
+  - `decode_token` now requires an `iat` claim and refuses `exp - iat > REFRESH_TOKEN_TTL_SECONDS`
+    (30 days), for every token — access, refresh, and any forged one. A leaked key can no longer
+    mint a token that outlives the longest one this app ever issues itself.
+  - **Still open:** one root key signs access tokens, refresh tokens, slot ids, QR tickets and
+    upload authorisations, with no per-purpose derivation and no `kid` for rotation. A leaked key
+    still forges a valid, bounded-lifetime STAFF or CUSTOMER token for any account whose current
+    `token_version` the forger also knows — the fixes above close the SERVICE-principal and
+    unbounded-lifetime angles specifically, not the key-compromise scenario as a whole.
+  - Tests: `tests/test_security.py::TestServiceKindRefusal`, the lifetime-bound cases in
+    `TestTokenVerification`, and `test_a_service_token_is_refused_outside_local_and_test`.
 
 ### TM-04: A pre-registered account becomes staff
 

@@ -16,6 +16,7 @@ from fastapi import Request
 
 from app.core.config import Settings, get_settings
 from app.core.security import (
+    REFRESH_TOKEN_TTL_SECONDS,
     AuthenticationError,
     AuthorizationError,
     Principal,
@@ -23,6 +24,7 @@ from app.core.security import (
     TokenState,
     _dev_bypass_principal,
     _principal_from_claims,
+    _service_kind_refusal,
     decode_token,
     get_principal,
     issue_token,
@@ -48,6 +50,7 @@ def valid_claims(**overrides) -> dict:
         "sub": str(uuid4()),
         "kind": "customer",
         "tenants": [],
+        "iat": time.time(),
         "exp": time.time() + 3600,
     }
     claims.update(overrides)
@@ -86,6 +89,32 @@ class TestTokenVerification:
         del claims["exp"]
         with pytest.raises(AuthenticationError):
             decode_token(make_token(claims), secret=SECRET)
+
+    def test_rejects_token_without_an_issue_time(self):
+        claims = valid_claims()
+        del claims["iat"]
+        with pytest.raises(AuthenticationError):
+            decode_token(make_token(claims), secret=SECRET)
+
+    @pytest.mark.parametrize("issued_at", ["0", [0], {"at": 0}, True, float("inf"), float("nan")])
+    def test_rejects_an_issue_time_that_is_not_a_finite_number(self, issued_at):
+        with pytest.raises(AuthenticationError):
+            decode_token(make_token(valid_claims(iat=issued_at)), secret=SECRET)
+
+    def test_rejects_a_lifetime_longer_than_the_refresh_ttl(self):
+        """However far out a forger sets `exp`, this app never mints a token
+        longer-lived than a refresh token — so this bounds even a token forged
+        with a leaked SECRET_KEY (TM-03)."""
+        now = time.time()
+        claims = valid_claims(iat=now, exp=now + REFRESH_TOKEN_TTL_SECONDS + 1)
+        with pytest.raises(AuthenticationError):
+            decode_token(make_token(claims), secret=SECRET)
+
+    def test_accepts_a_lifetime_exactly_at_the_refresh_ttl(self):
+        """The boundary a real refresh token sits on must not be refused."""
+        now = time.time()
+        claims = valid_claims(iat=now, exp=now + REFRESH_TOKEN_TTL_SECONDS)
+        assert decode_token(make_token(claims), secret=SECRET)["sub"] == claims["sub"]
 
     def test_rejects_malformed_token(self):
         for bad in ("", "not-a-token", "a.b", "a.b.c.d"):
@@ -189,6 +218,21 @@ class TestRequestAuthentication:
             _request(_token(uuid4(), kind=PrincipalKind.SERVICE)), token_state=no_lookup
         )
         assert principal.kind is PrincipalKind.SERVICE
+
+    async def test_a_service_token_is_refused_outside_local_and_test(self, monkeypatch):
+        """Only local/test honour it — see TestServiceKindRefusal and TM-03."""
+        import app.core.security as security_module
+
+        deployed = get_settings().model_copy(update={"env": "production"})
+        monkeypatch.setattr(security_module, "get_settings", lambda: deployed)
+
+        async def no_lookup(subject_id):
+            raise AssertionError("a refused service principal never reaches the account check")
+
+        with pytest.raises(AuthenticationError):
+            await get_principal(
+                _request(_token(uuid4(), kind=PrincipalKind.SERVICE)), token_state=no_lookup
+            )
 
 
 class TestTenantAuthorization:
@@ -322,3 +366,17 @@ class TestDevBypass:
     def test_refuses_on_a_stack_a_tunnel_publishes(self):
         with pytest.raises(AuthenticationError):
             _dev_bypass_principal(self._settings(cloudflare_tunnel_token="token"))
+
+
+class TestServiceKindRefusal:
+    """A bearer token naming `kind=service` proves only that its holder has
+    `SECRET_KEY` — the app itself never puts that claim on a token. Honoured
+    in the same environments the dev bypass is (TM-03)."""
+
+    @pytest.mark.parametrize("env", ["local", "test"])
+    def test_allowed_in_development(self, env):
+        assert _service_kind_refusal(env) is None
+
+    @pytest.mark.parametrize("env", ["staging", "production"])
+    def test_refused_when_deployed(self, env):
+        assert _service_kind_refusal(env) is not None
