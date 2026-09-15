@@ -16,12 +16,15 @@ from app.modules.payment.domain import PaymentStatus
 
 class CreatePaymentIntentRequest(ApiSchema):
     booking_id: UUID
+    #: Where the gateway sends the customer afterwards. Must be on the origin of
+    #: PUBLIC_APP_URL; anywhere else would be an open redirect behind a real
+    #: payment page.
     return_url: str = Field(max_length=2000)
     metadata: dict[str, str] | None = None
 
-    #: Staff override only. Left unset, the amount comes from the booking's own
-    #: price and the tenant's deposit policy — a client must not get to decide
-    #: what it owes.
+    #: Staff override only: a customer who sends either field is refused with a
+    #: 403. Left unset, the amount comes from the booking's own price and the
+    #: tenant's deposit policy — a client must not get to decide what it owes.
     amount: Decimal | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 

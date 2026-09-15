@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from app.core.exceptions import ConflictError, ValidationDomainError
@@ -230,6 +231,75 @@ def to_minor_units(amount: Money) -> int:
     `Money` carries a Decimal all the way to this boundary.
     """
     return int((amount.amount * 100).quantize(Decimal("1")))
+
+
+class PaymentAmountMismatchError(ConflictError):
+    """The gateway reports a different sum than this payment asked for.
+
+    Not captured, and so the booking is not confirmed: a capture is what confirms
+    a booking, so it must be for exactly the amount the booking required.
+    """
+
+    code = "payment_amount_mismatch"
+
+    def __init__(self, *, expected: Money, amount_minor: object, currency: object) -> None:
+        super().__init__(
+            f"Expected {to_minor_units(expected)} {expected.currency} in minor units; the "
+            f"gateway reported {amount_minor!r} {currency!r}. The payment was not captured."
+        )
+
+
+def paid_amount_matches(expected: Money, *, amount_minor: object, currency: object) -> bool:
+    """Whether a gateway's report of what was paid is exactly what we asked for.
+
+    The report is integer minor units and a currency code, from a verified
+    webhook. Anything missing or malformed does not match: capture fails closed.
+    """
+    if isinstance(amount_minor, bool) or not isinstance(amount_minor, int):
+        return False
+    if not isinstance(currency, str):
+        return False
+    return (
+        amount_minor == to_minor_units(expected) and currency.upper() == expected.currency.upper()
+    )
+
+
+class ReturnUrlNotAllowedError(ValidationDomainError):
+    code = "return_url_not_allowed"
+
+    def __init__(self) -> None:
+        super().__init__("return_url must be an absolute http(s) URL on the app's own origin.")
+
+
+def assert_return_url_allowed(return_url: str, *, app_url: str) -> None:
+    """Refuses a return URL anywhere but the customer app's own origin.
+
+    The gateway sends the customer's browser here once they have paid. An
+    arbitrary value would make NOVA's checkout a redirect to any site, with a
+    genuine payment page in front of it to lend it trust (CWE-601).
+    """
+    allowed = _origin(app_url)
+    if allowed is None or _origin(return_url) != allowed:
+        raise ReturnUrlNotAllowedError()
+
+
+def _origin(url: str) -> tuple[str, str, int] | None:
+    """`(scheme, host, port)`, or None for anything but a plain http(s) URL.
+
+    Backslashes, whitespace and credentials are refused outright: browsers and
+    `urlsplit` disagree about where such a URL's host ends, and that
+    disagreement is the classic way past an origin check.
+    """
+    if "\\" in url or any(ord(char) <= 0x20 for char in url):
+        return None
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname or "@" in parts.netloc:
+        return None
+    return parts.scheme, parts.hostname.lower(), port or (443 if parts.scheme == "https" else 80)
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,10 @@ from app.modules.payment.domain import (
     PaymentNotCapturedError,
     PaymentStatus,
     RefundExceedsCaptureError,
+    ReturnUrlNotAllowedError,
+    assert_return_url_allowed,
     deposit_for,
+    paid_amount_matches,
     to_minor_units,
 )
 
@@ -149,3 +152,73 @@ class TestMinorUnits:
         # The whole reason Money carries a Decimal to this boundary: 19.99 as a
         # binary float is 19.989999..., which truncates to 1998.
         assert to_minor_units(Money(amount=Decimal("19.99"))) == 1999
+
+
+class TestPaidAmount:
+    """A verified webhook's report is compared to the payment before any capture."""
+
+    EXPECTED = Money(amount=Decimal("150.00"), currency="SAR")
+
+    def test_the_exact_amount_matches(self):
+        assert paid_amount_matches(self.EXPECTED, amount_minor=15000, currency="SAR")
+
+    def test_the_currency_code_is_case_insensitive(self):
+        assert paid_amount_matches(self.EXPECTED, amount_minor=15000, currency="sar")
+
+    @pytest.mark.parametrize(
+        ("amount_minor", "currency"),
+        [
+            (100, "SAR"),  # 1.00 against 150.00
+            (15001, "SAR"),
+            (15000, "USD"),
+            (None, "SAR"),  # a report with no sum on it
+            (15000, None),
+            ("15000", "SAR"),  # the gateway sends a number, not text
+            (15000.0, "SAR"),
+            (True, "SAR"),
+        ],
+    )
+    def test_anything_else_does_not_match(self, amount_minor, currency):
+        assert not paid_amount_matches(self.EXPECTED, amount_minor=amount_minor, currency=currency)
+
+
+class TestReturnUrl:
+    """Where the gateway may send a customer who has just paid."""
+
+    APP = "https://app.nova.sa"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://app.nova.sa/bookings/paid",
+            "https://app.nova.sa:443/bookings/paid?id=1",
+            "https://APP.nova.sa/",
+        ],
+    )
+    def test_the_apps_own_origin_is_allowed(self, url):
+        assert_return_url_allowed(url, app_url=self.APP)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://attacker.example/after-pay",
+            "http://app.nova.sa/bookings/paid",  # another scheme
+            "https://app.nova.sa:8443/",  # another port
+            "https://app.nova.sa.attacker.example/",
+            "https://app.nova.sa@attacker.example/",  # credentials, then another host
+            "https://attacker.example\\@app.nova.sa/",  # a backslash browsers read as /
+            "//attacker.example/after-pay",  # scheme-relative
+            "/bookings/paid",
+            "javascript:alert(1)",
+            "https://app.nova.sa /",
+            "",
+        ],
+    )
+    def test_anywhere_else_is_refused(self, url):
+        with pytest.raises(ReturnUrlNotAllowedError):
+            assert_return_url_allowed(url, app_url=self.APP)
+
+    def test_the_development_app_is_matched_on_its_port(self):
+        assert_return_url_allowed("http://localhost:5173/paid", app_url="http://localhost:5173")
+        with pytest.raises(ReturnUrlNotAllowedError):
+            assert_return_url_allowed("http://localhost:8000/paid", app_url="http://localhost:5173")

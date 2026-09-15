@@ -21,11 +21,14 @@ from app.modules.booking.domain import BookingStatus
 from app.modules.booking.service import BookingService
 from app.modules.payment.domain import (
     Payment,
+    PaymentAmountMismatchError,
     PaymentFact,
     PaymentStatus,
     Refund,
     WebhookSignatureError,
+    assert_return_url_allowed,
     deposit_for,
+    paid_amount_matches,
     to_minor_units,
 )
 from app.modules.payment.events import (
@@ -35,6 +38,7 @@ from app.modules.payment.events import (
     PaymentRefunded,
 )
 from app.modules.payment.exceptions import (
+    PaymentNotConfirmedError,
     PaymentNotFoundError,
     UnknownWebhookPaymentError,
 )
@@ -63,12 +67,15 @@ class PaymentService:
         gateway: PaymentGateway,
         bookings: BookingService,
         tenant_id: UUID,
+        public_app_url: str,
         default_deposit_percent: int = 0,
     ) -> None:
         self.repository = repository
         self.gateway = gateway
         self.bookings = bookings
         self.tenant_id = tenant_id
+        #: The customer app. A payment's `return_url` must be on its origin.
+        self.public_app_url = public_app_url
         self.default_deposit_percent = default_deposit_percent
 
     @property
@@ -90,8 +97,11 @@ class PaymentService:
 
         The amount is derived from the booking's own price and the tenant's
         deposit policy unless staff override it. Taking it from the request
-        body by default would let a client decide what to pay.
+        body by default would let a client decide what to pay, which is why the
+        router refuses an override from anyone else (`refuse_customer_amount`).
         """
+        # First, before anything is written or sent to the gateway.
+        assert_return_url_allowed(return_url, app_url=self.public_app_url)
         booking = await self.bookings.get(booking_id)
 
         if amount is None:
@@ -332,21 +342,43 @@ class PaymentService:
     async def apply_gateway_status(
         self, *, gateway_payment_id: str, gateway_status: str, webhook_verified: bool
     ) -> Payment:
-        """Moves a payment to match what the gateway says it is."""
+        """Moves a payment to match Moyasar's own record of it.
+
+        A webhook is a notification, not the truth: anyone holding the shared
+        secret can sign one. So a claimed capture or failure is checked against
+        the payment Moyasar's API returns, and that record decides:
+
+          - captured there: captured here, but only for exactly the amount and
+            currency this payment asked for (`PaymentAmountMismatchError`);
+          - failed there: failed here;
+          - anything else: `PaymentNotConfirmedError`, which the gateway retries.
+
+        A claim of nothing final (e.g. "initiated") needs no call and changes
+        nothing; the final webhook will follow.
+        """
         payment = await self.repository.get_by_gateway_id(gateway_payment_id)
         if payment is None:
             raise UnknownWebhookPaymentError(gateway_payment_id)
 
-        status = gateway_status.lower()
-        if status in _CAPTURED_GATEWAY_STATUSES:
-            return await self.capture(payment.id, webhook_verified=webhook_verified)
-        if status in _FAILED_GATEWAY_STATUSES:
-            return await self.fail(payment.id, code=status)
+        claimed = gateway_status.lower()
+        if claimed not in _CAPTURED_GATEWAY_STATUSES | _FAILED_GATEWAY_STATUSES:
+            logger.info("payment_webhook_ignored_status", extra={"gateway_status": claimed})
+            return payment
 
-        # An intermediate status (e.g. "initiated") is not an error and needs
-        # no local change — the terminal webhook will follow.
-        logger.info("payment_webhook_ignored_status", extra={"gateway_status": status})
-        return payment
+        remote = await self.gateway.fetch_payment(gateway_payment_id)
+        actual = str(remote.get("status") or "").lower()
+        if actual in _CAPTURED_GATEWAY_STATUSES:
+            amount_minor, currency = remote.get("amount"), remote.get("currency")
+            if not paid_amount_matches(
+                payment.amount, amount_minor=amount_minor, currency=currency
+            ):
+                raise PaymentAmountMismatchError(
+                    expected=payment.amount, amount_minor=amount_minor, currency=currency
+                )
+            return await self.capture(payment.id, webhook_verified=webhook_verified)
+        if actual in _FAILED_GATEWAY_STATUSES:
+            return await self.fail(payment.id, code=actual)
+        raise PaymentNotConfirmedError(gateway_payment_id, claimed=claimed, actual=actual)
 
 
 class PaymentWebhookProcessor:
@@ -386,11 +418,15 @@ class PaymentWebhookProcessor:
     async def record(
         self, *, payload: dict[str, Any], signature_verified: bool
     ) -> tuple[Any, bool]:
-        """Stores the raw event. Returns `(event, is_duplicate)`.
+        """Stores the raw event, less its shared secret. Returns `(event, is_duplicate)`.
 
         The unique (provider, external_event_id) index is what makes delivery
         idempotent — Moyasar retries, and a retried capture must not be applied
         twice.
+
+        `secret_token` is dropped because it authenticates every webhook: stored
+        in a table with no row-level security, anyone who could read the table
+        could sign the next "paid" event.
         """
         external_id = str(payload.get("id") or payload.get("event_id") or "")
         existing = await self.events.find(provider=self.provider, external_event_id=external_id)
@@ -401,7 +437,7 @@ class PaymentWebhookProcessor:
             provider=self.provider,
             external_event_id=external_id,
             event_type=payload.get("type") or payload.get("event"),
-            payload=payload,
+            payload={key: value for key, value in payload.items() if key != "secret_token"},
             signature_verified=signature_verified,
         )
         return event, False

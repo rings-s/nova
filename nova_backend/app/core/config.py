@@ -138,7 +138,8 @@ class Settings(BaseSettings):
     client_ip_header: str | None = None
 
     #: Public base URL of the customer PWA. Used to build `ticket_page_url`
-    #: (docs/07 section 7) — a ticket the customer cannot open is not a ticket.
+    #: (docs/07 section 7) — a ticket the customer cannot open is not a ticket —
+    #: and the only origin a payment's `return_url` may point at.
     public_app_url: str = "http://localhost:5173"
 
     @property
