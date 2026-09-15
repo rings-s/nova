@@ -12,6 +12,7 @@ Business rules live in `domain.py`; this file only sequences them.
 
 import secrets
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -527,6 +528,26 @@ class BookingService:
         """`get_for_principal` read as a guard. Same rule, clearer at a call site
         that is about to mutate rather than return."""
         return await self.get_for_principal(booking_id, principal)
+
+    async def preview_cancellation(
+        self, booking_id: UUID, principal: Principal, *, now: datetime | None = None
+    ) -> Booking:
+        """The caller's booking, if they could cancel it now. Cancels nothing.
+
+        The cancellation runs on a copy, so the answer comes from the rules
+        `cancel` applies to a customer: the booking must be the caller's, its
+        status must allow cancelling, and the policy's deadline holds. Raises
+        what `cancel` would.
+
+        For the AI agents, which may offer a cancellation but never make one. A
+        cancellation cannot be undone, and one made on a model's say-so could be
+        made on text the customer never wrote.
+        """
+        booking = await self.get_for_principal(booking_id, principal)
+        replace(booking).cancel(
+            policy=self.cancellation_policy, now=now or datetime.now(UTC), enforce_policy=True
+        )
+        return booking
 
     async def confirm(self, booking_id: UUID) -> Booking:
         """Confirm a booking.

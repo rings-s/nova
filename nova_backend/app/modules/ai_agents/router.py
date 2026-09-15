@@ -25,6 +25,7 @@ from app.modules.ai_agents.schemas import (
     AgentInfoOut,
     AiChatRequest,
     AiChatResponse,
+    PendingCancellationOut,
     ProposedActionOut,
     QueuePlaceOut,
 )
@@ -55,8 +56,9 @@ async def chat(
 
     Nothing is committed here, because nothing is left to commit: each tool
     committed its own work when it returned. `hold_slot` took a real hold and
-    `cancel_booking` really cancelled, whether or not the model then answered,
-    which is why the holds and queue places come back even with a handoff.
+    `join_queue` a real place, whether or not the model then answered, which is
+    why the holds and queue places come back even with a handoff. No tool
+    cancels: `pending_cancellations` are bookings for the customer to confirm.
     """
     customer_reference_id = resolve_booking_customer(payload.customer_id, principal)
 
@@ -99,6 +101,14 @@ async def chat(
                 estimated_wait_minutes=place.estimated_wait_minutes,
             )
             for place in turn.queue_places
+        ],
+        pending_cancellations=[
+            PendingCancellationOut(
+                booking_id=pending.booking_id,
+                starts_at=pending.starts_at,
+                reason=pending.reason,
+            )
+            for pending in turn.pending_cancellations
         ],
         degraded=result.degraded,
         confidence=result.confidence,

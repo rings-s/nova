@@ -302,15 +302,19 @@ person needs.
 | `list_my_bookings()` | `BookingService.list_for_customer_reference` | no |
 | `get_booking_status(booking_id)` | `BookingService.get_for_principal` | no |
 | `get_payment_status(booking_id)` | `PaymentService.list_for_booking_for_principal` | no |
-| `cancel_booking(booking_id, reason)` | `BookingService.assert_visible_to`, then `cancel` | yes |
+| `request_cancellation(booking_id, reason)` | `BookingService.preview_cancellation` | no |
 | `escalate_to_human(summary)` | records a handoff in `TurnArtifacts` | no |
 
 - **Guardrails:**
   - Every booking and payment read is checked against the principal first. A customer who names
     someone else's booking id gets "not found", exactly as over HTTP. The old `support_agent`
     tools skipped this check; this closes that gap.
-  - Cancellation follows the tenant's cancellation policy. The agent cannot waive it, because
-    `by_staff` is not a parameter it can reach.
+  - The agent never cancels. `request_cancellation` runs the cancellation on a copy of the booking,
+    under the tenant's cancellation policy with no `by_staff` to reach, and returns the booking in
+    `AiChatResponse.pending_cancellations`. The customer confirms through
+    `POST /tenants/{tenant_id}/bookings/{booking_id}/cancel`. A cancellation cannot be undone, and a
+    model can be steered by text the customer never wrote. (It used to cancel directly; removed
+    after the 2026-09-15 security audit, SEC-09.)
   - It cannot refund, change a payment or promise compensation. A refund request becomes an
     escalation with a summary, and a person decides.
   - A complaint about service quality, or a second failed attempt at the same problem, sets

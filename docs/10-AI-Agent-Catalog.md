@@ -204,6 +204,8 @@ class TriageOutput(BaseModel):
   - Cannot hold more than one slot per session.
   - Cannot quote a price it did not read from `CatalogService`.
   - Cannot cancel outside the tenant's `CancellationPolicy`; the domain raises, the agent reports the reason verbatim.
+
+> **Superseded:** no agent cancels a booking any more (2026-09-15 security audit, SEC-09). `customer_service_agent` has `request_cancellation`, which checks the booking and the policy and returns it in `pending_cancellations`; the customer confirms through the booking's cancel route. See docs/13 section 4.2.
   - Cannot book across tenants.
 
 ``` python

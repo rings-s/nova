@@ -8,6 +8,7 @@ that does not validate is not a string to be parsed hopefully, it is a retry
 and then a handoff.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import Field
@@ -87,6 +88,18 @@ class QueuePlaceOut(ApiSchema):
     estimated_wait_minutes: int | None
 
 
+class PendingCancellationOut(ApiSchema):
+    """A booking the customer asked the agent to cancel. Nothing is cancelled yet.
+
+    Show it, and if the customer agrees, call
+    `POST /tenants/{tenant_id}/bookings/{booking_id}/cancel`.
+    """
+
+    booking_id: UUID
+    starts_at: datetime
+    reason: str | None
+
+
 class AiChatResponse(ApiSchema):
     """docs/07 section 10, with docs/13 section 3.4's additions."""
 
@@ -104,6 +117,9 @@ class AiChatResponse(ApiSchema):
     held_slots: list[HoldSlotResult] = []
     #: Places a tool took in a walk-in queue this turn, likewise.
     queue_places: list[QueuePlaceOut] = []
+    #: Bookings the customer asked to cancel. The agent cancels nothing: the
+    #: client asks the customer to confirm, then calls the booking's cancel route.
+    pending_cancellations: list[PendingCancellationOut] = []
 
     #: A client should be able to tell a confident answer from one produced by
     #: the routing model after the reasoning model failed, or by the fallback.
