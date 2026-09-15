@@ -15,6 +15,7 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.core.rate_limit import LOGIN_POLICY
 from app.core.schemas import ErrorResponse
 from app.core.throttling import RateLimitExceeded
+from app.integrations.base import IntegrationNotConfiguredError
 from app.main import create_app
 
 
@@ -57,8 +58,23 @@ async def test_a_missing_resource_is_not_retryable() -> None:
     assert "Retry-After" not in response.headers
 
 
+async def test_an_integration_that_is_not_configured_is_a_503_not_a_crash() -> None:
+    """Nothing is broken on a deployment without Moyasar, and asking again will not help."""
+    response = await _response_to(IntegrationNotConfiguredError("Moyasar"))
+
+    assert response.status_code == 503
+    error = response.json()["error"]
+    assert error["code"] == "integration_not_configured"
+    assert error["retryable"] is False
+
+
 async def test_every_error_body_matches_the_published_schema() -> None:
-    for exc in (RateLimitExceeded(5, LOGIN_POLICY), ConflictError("x"), NotFoundError("y")):
+    for exc in (
+        RateLimitExceeded(5, LOGIN_POLICY),
+        ConflictError("x"),
+        NotFoundError("y"),
+        IntegrationNotConfiguredError("Nextcloud"),
+    ):
         response = await _response_to(exc)
         ErrorResponse.model_validate(response.json())
 
