@@ -505,6 +505,31 @@ class SlotHoldRepository(TenantScopedRepository[SlotHoldRecord]):
         result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
 
+    async def lock_holder(self, held_by: UUID) -> None:
+        """Serialises one holder's hold attempts at this tenant.
+
+        Without it, two holds sent at once both count the same live holds and
+        both slip under the cap. Scope 78, beside the queue lock's 77.
+        """
+        holder_key = (self.tenant_id.int ^ held_by.int) % (2**31)
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(:scope, :holder_key)"),
+            {"scope": 78, "holder_key": holder_key},
+        )
+
+    async def count_active_for_holder(self, held_by: UUID, *, now: datetime) -> int:
+        """Live holds one principal has at this tenant: neither consumed nor expired."""
+        stmt = self._scope(
+            select(func.count())
+            .select_from(SlotHoldRecord)
+            .where(
+                SlotHoldRecord.held_by == held_by,
+                SlotHoldRecord.consumed_at.is_(None),
+                SlotHoldRecord.expires_at > now,
+            )
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
     async def get_by_token(self, hold_token: str) -> SlotHoldRecord | None:
         stmt = self._scope(select(SlotHoldRecord).where(SlotHoldRecord.hold_token == hold_token))
         result = await self.session.execute(stmt)

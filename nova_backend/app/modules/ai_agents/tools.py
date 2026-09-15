@@ -216,6 +216,7 @@ class AgentToolkit:
                 provider_id=provider_id,
                 service_id=service_id,
                 starts_at=starts_at,
+                principal=self.deps.principal,
                 customer_id=self.deps.customer_id,
             )
             held.append(

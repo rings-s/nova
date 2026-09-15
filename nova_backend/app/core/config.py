@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     #: How long an AI-agent or checkout slot hold survives before the slot is
     #: released again (docs/04 section 2A, docs/10 section 5).
     slot_hold_ttl_seconds: int = 300
+    #: How many slots one customer may hold at one tenant at once. A hold blocks
+    #: the slot for everyone, so an uncapped customer could keep a salon's whole
+    #: calendar unbookable. Staff are not capped.
+    slot_hold_max_active_per_customer: int = 3
     booking_free_cancellation_hours: int = 24
 
     # --- Public marketplace (ADR-0010) ---

@@ -67,6 +67,19 @@ class HoldExpiredError(ConflictError):
         super().__init__("That slot hold has expired. Re-check availability and try again.")
 
 
+class HoldLimitReachedError(ConflictError):
+    """A customer already holds as many slots at this tenant as one may.
+
+    A hold blocks a provider's time for everyone else, so without a cap one
+    account could keep a salon unbookable by re-holding each slot as it expired.
+    """
+
+    code = "hold_limit_reached"
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"You already hold {limit} slots here. Book or release one first.")
+
+
 class HorizonTooLargeError(ValidationDomainError):
     """Guards against a request that would generate millions of slots."""
 

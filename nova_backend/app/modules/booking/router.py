@@ -124,9 +124,14 @@ async def hold_slot(
     payload: HoldSlotRequest,
     session: AsyncSession = Depends(get_db_session),
     service: BookingService = Depends(get_booking_service),
+    principal: Principal = Depends(get_principal),
 ) -> HoldSlotResult:
-    """Reserves a slot for a few minutes while checkout completes."""
-    hold = await service.hold_slot(**payload.model_dump())
+    """Reserves a slot for a few minutes while checkout completes.
+
+    Recorded against the caller, and capped for customers: one who already holds
+    the maximum here gets a 409 until a hold is booked, released or expires.
+    """
+    hold = await service.hold_slot(**payload.model_dump(), principal=principal)
     await session.commit()
     return HoldSlotResult(
         hold_token=hold.hold_token,

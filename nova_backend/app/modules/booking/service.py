@@ -48,6 +48,7 @@ from app.modules.booking.events import (
 from app.modules.booking.exceptions import (
     BookingNotFoundError,
     HoldExpiredError,
+    HoldLimitReachedError,
     HoldNotFoundError,
     HorizonTooLargeError,
     ProviderLocationMismatchError,
@@ -82,6 +83,7 @@ class BookingService:
         slot_granularity_minutes: int = 15,
         max_horizon_days: int = 90,
         hold_ttl_seconds: int = 300,
+        max_active_holds_per_customer: int = 3,
     ) -> None:
         self.repository = repository
         self.schedules = schedules
@@ -102,6 +104,7 @@ class BookingService:
         self.slot_granularity_minutes = slot_granularity_minutes
         self.max_horizon_days = max_horizon_days
         self.hold_ttl_seconds = hold_ttl_seconds
+        self.max_active_holds_per_customer = max_active_holds_per_customer
 
     # --- availability -----------------------------------------------------
 
@@ -243,6 +246,7 @@ class BookingService:
         provider_id: UUID,
         service_id: UUID,
         starts_at: datetime,
+        principal: Principal,
         customer_id: UUID | None = None,
         slot_id: str | None = None,
         now: datetime | None = None,
@@ -256,6 +260,13 @@ class BookingService:
 
         If `slot_id` is supplied it must verify — that is how an agent is
         prevented from holding a time the server never offered.
+
+        The hold is recorded against `principal`, and a customer may hold only
+        `max_active_holds_per_customer` slots at this tenant at once
+        (`HoldLimitReachedError`). A hold blocks the slot for everyone, so an
+        uncapped account could keep a salon's calendar unbookable by re-holding
+        each slot as it expired. Staff are not capped: reception holds for
+        whoever is at the desk.
         """
         now = now or datetime.now(UTC)
 
@@ -276,6 +287,15 @@ class BookingService:
         slot = build_slot(starts_at=starts_at, duration_minutes=service.duration_minutes)
         assert_slot_is_bookable(slot, now=now)
 
+        if not principal.is_staff:
+            # Serialised per holder, taken before the calendar lock, so two
+            # holds sent at once cannot both count the same live holds and both
+            # slip under the cap.
+            await self.holds.lock_holder(principal.subject_id)
+            active = await self.holds.count_active_for_holder(principal.subject_id, now=now)
+            if active >= self.max_active_holds_per_customer:
+                raise HoldLimitReachedError(self.max_active_holds_per_customer)
+
         # Same lock as `create`: hold and booking contend for one calendar, so
         # they must serialise against each other, not just among themselves.
         await self.repository.lock_provider_calendar(provider_id)
@@ -294,6 +314,7 @@ class BookingService:
                 service_id=service_id,
                 location_id=provider.location_id,
                 customer_id=customer_id,
+                held_by=principal.subject_id,
                 starts_at=slot.starts_at,
                 ends_at=slot.ends_at,
                 # 32 bytes of urandom: this token is a bearer credential for the
