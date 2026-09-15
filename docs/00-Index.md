@@ -44,6 +44,10 @@ aliases: [Home, Map of Content]
 - [[05-RFC-Template]] - Request for Comments template for major architectural decisions
 - [[09-Final-Definition-of-Project-Completion]] - Acceptance criteria for a complete project
 
+### 6. Security
+- [[14-Threat-Model]] - Trust boundaries, STRIDE per boundary, the findings register, and testable
+  security requirements
+
 ---
 > [!tip] Quick Links
 >
