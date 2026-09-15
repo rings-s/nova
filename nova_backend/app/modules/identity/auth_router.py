@@ -101,9 +101,9 @@ async def logout_everywhere(
 ) -> None:
     """Revokes every outstanding token for the caller.
 
-    Bumps `token_version`, so refresh tokens are rejected immediately. Access
-    tokens already issued remain valid until they expire — at most 15 minutes,
-    the cost of stateless auth.
+    Bumps `token_version`. Every token already issued, access and refresh, is
+    refused from its next use: `get_principal` compares the version on every
+    request, and refresh does too.
     """
     await service.revoke_all_tokens(principal.subject_id)
     await session.commit()

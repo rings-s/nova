@@ -16,24 +16,33 @@ Design notes:
     signature through timing.
   - `alg` is pinned to HS256. Accepting the token's own `alg` header is the
     classic JWT forgery ("alg: none") and is rejected explicitly.
-  - It fails CLOSED. A missing or invalid token is 401 in every environment.
-    The only bypass is an explicit local-development flag, and it refuses to
-    engage outside `local`/`test` or on a stack a Cloudflare tunnel publishes.
+  - It fails CLOSED. A missing, malformed or invalid token is 401 in every
+    environment. The only bypass is an explicit local-development flag, and it
+    refuses to engage outside `local`/`test` or on a stack a Cloudflare tunnel
+    publishes.
+  - Revocation is immediate. Each request re-reads the account's
+    `token_version` and `is_active`, so logout-everywhere, a revoked membership
+    or a deactivated account ends access at once, not when the token expires.
 """
 
 import base64
 import hmac
 import json
+import math
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 from uuid import UUID
 
 from fastapi import Depends, Path, Request
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, dev_bypass_refusal, get_settings
 from app.core.exceptions import DomainError
+from app.db.session import get_session_factory
 
 
 class AuthenticationError(DomainError):
@@ -113,9 +122,9 @@ def issue_token(
 ) -> str:
     """Mints an HS256 token.
 
-    Access tokens are short-lived (15 minutes) because they are stateless: a
-    revoked one stays valid until it expires. `token_version` is embedded so
-    bumping `User.token_version` invalidates every outstanding token at once.
+    Access tokens are short-lived (15 minutes). `token_version` is embedded, and
+    `get_principal` compares it with the account's on every request, so bumping
+    `User.token_version` ends every outstanding token at once.
 
     Tenant memberships are baked in at issue time, which is why the issuer
     must read them from the `memberships` table and never from client input.
@@ -142,36 +151,58 @@ def _b64url_decode(segment: str) -> bytes:
     return base64.urlsafe_b64decode(segment + padding)
 
 
+def _json_object(segment: str) -> dict:
+    """One token segment as a JSON object, or AuthenticationError.
+
+    Anything else is refused here: read as a dict, a JSON array's missing
+    `.get` raised AttributeError, a 500 any anonymous caller could trigger.
+    `ValueError` covers bad base64, bad UTF-8 and bad JSON; `RecursionError`
+    covers JSON nested past the parser's limit.
+    """
+    try:
+        value = json.loads(_b64url_decode(segment))
+    except (ValueError, RecursionError) as exc:
+        raise AuthenticationError("Malformed token.") from exc
+    if not isinstance(value, dict):
+        raise AuthenticationError("Malformed token.")
+    return value
+
+
 def decode_token(token: str, *, secret: str, leeway_seconds: int = 0) -> dict:
     """Verifies an HS256 JWT and returns its claims.
 
-    Raises AuthenticationError for anything malformed, forged, or expired.
+    Raises AuthenticationError for anything malformed, forged, or expired. The
+    claims are parsed only after the signature proves this server wrote them.
     """
     parts = token.split(".")
     if len(parts) != 3:
         raise AuthenticationError("Malformed token.")
 
     header_b64, payload_b64, signature_b64 = parts
-
-    try:
-        header = json.loads(_b64url_decode(header_b64))
-        claims = json.loads(_b64url_decode(payload_b64))
-        signature = _b64url_decode(signature_b64)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise AuthenticationError("Malformed token.") from exc
+    header = _json_object(header_b64)
 
     # Pin the algorithm. Trusting header["alg"] is how "alg: none" forgeries work.
     if header.get("alg") != "HS256":
         raise AuthenticationError("Unsupported token algorithm.")
 
+    try:
+        signature = _b64url_decode(signature_b64)
+    except ValueError as exc:
+        raise AuthenticationError("Malformed token.") from exc
     expected = hmac.new(secret.encode(), f"{header_b64}.{payload_b64}".encode(), sha256).digest()
     if not hmac.compare_digest(signature, expected):
         raise AuthenticationError("Invalid token signature.")
 
+    claims = _json_object(payload_b64)
+
     expiry = claims.get("exp")
     if expiry is None:
         raise AuthenticationError("Token has no expiry.")
-    if time.time() > float(expiry) + leeway_seconds:
+    # A NumericDate. Python's JSON reads NaN and Infinity, and NaN compares
+    # false with everything, so a token expiring at NaN would never expire.
+    if isinstance(expiry, bool) or not isinstance(expiry, int | float) or not math.isfinite(expiry):
+        raise AuthenticationError("Token expiry is invalid.")
+    if time.time() > expiry + leeway_seconds:
         raise AuthenticationError("Token has expired.")
 
     return claims
@@ -185,8 +216,49 @@ def _principal_from_claims(claims: dict) -> Principal:
             tenant_ids=frozenset(UUID(t) for t in claims.get("tenants", [])),
             roles=frozenset(claims.get("roles", [])),
         )
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
         raise AuthenticationError("Token claims are invalid.") from exc
+
+
+@dataclass(frozen=True)
+class TokenState:
+    """What an account's tokens are checked against on every request."""
+
+    token_version: int
+    is_active: bool
+
+
+#: Reads an account's current `TokenState`, or None when there is no such account.
+TokenStateLookup = Callable[[UUID], Awaitable[TokenState | None]]
+
+_TOKEN_STATE_SQL = text("SELECT token_version, is_active FROM users WHERE id = :id")
+
+
+async def token_state_in(session: AsyncSession, subject_id: UUID) -> TokenState | None:
+    """The account's token version and status, read through `session`.
+
+    Raw SQL rather than identity's `User` model, because core imports no module.
+    `users` has no row-level security, so no tenant scope is needed.
+    """
+    row = (await session.execute(_TOKEN_STATE_SQL, {"id": subject_id})).first()
+    if row is None:
+        return None
+    return TokenState(token_version=row.token_version, is_active=row.is_active)
+
+
+async def read_token_state(subject_id: UUID) -> TokenState | None:
+    """`token_state_in`, in a session of its own that closes before the route runs.
+
+    Not the request session: the AI chat holds no request transaction, and this
+    must not open one for it. One primary-key read per authenticated request.
+    """
+    async with get_session_factory()() as session:
+        return await token_state_in(session, subject_id)
+
+
+def get_token_state_lookup() -> TokenStateLookup:
+    """The account reader `get_principal` uses. Tests override it."""
+    return read_token_state
 
 
 def _dev_bypass_principal(settings: Settings) -> Principal | None:
@@ -209,8 +281,31 @@ def _dev_bypass_principal(settings: Settings) -> Principal | None:
     )
 
 
-async def get_principal(request: Request) -> Principal:
-    """Authenticates the request. Fails closed."""
+async def _assert_token_is_current(
+    principal: Principal, claims: dict, lookup: TokenStateLookup
+) -> None:
+    """Refuses a token its account has since revoked.
+
+    The checks `AuthService.refresh` makes, made on every request. Without them
+    a logout-everywhere, a revoked membership or a deactivated account left
+    every access token already issued working for up to 15 minutes.
+    """
+    state = await lookup(principal.subject_id)
+    if state is None or not state.is_active:
+        raise AuthenticationError("Account is no longer active.")
+    if claims.get("ver", 0) != state.token_version:
+        raise AuthenticationError("Token has been revoked.")
+
+
+async def get_principal(
+    request: Request, token_state: TokenStateLookup = Depends(get_token_state_lookup)
+) -> Principal:
+    """Authenticates the request. Fails closed.
+
+    A staff or customer token must still match its account. A service token
+    names no account, so has nothing to check; only a holder of `SECRET_KEY`
+    can mint one.
+    """
     settings = get_settings()
 
     header = request.headers.get("Authorization", "")
@@ -231,7 +326,10 @@ async def get_principal(request: Request) -> Principal:
     if claims.get("typ", "access") != "access":
         raise AuthenticationError("Refresh tokens cannot be used to call the API.")
 
-    return _principal_from_claims(claims)
+    principal = _principal_from_claims(claims)
+    if principal.kind is not PrincipalKind.SERVICE:
+        await _assert_token_is_current(principal, claims, token_state)
+    return principal
 
 
 async def require_tenant_access(

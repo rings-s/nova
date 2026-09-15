@@ -12,15 +12,20 @@ from hashlib import sha256
 from uuid import uuid4
 
 import pytest
+from fastapi import Request
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.security import (
     AuthenticationError,
     AuthorizationError,
     Principal,
     PrincipalKind,
+    TokenState,
     _dev_bypass_principal,
+    _principal_from_claims,
     decode_token,
+    get_principal,
+    issue_token,
     require_tenant_access,
 )
 
@@ -86,6 +91,104 @@ class TestTokenVerification:
         for bad in ("", "not-a-token", "a.b", "a.b.c.d"):
             with pytest.raises(AuthenticationError):
                 decode_token(bad, secret=SECRET)
+
+    @pytest.mark.parametrize("header", ["[]", '["HS256"]', '"HS256"', "1", "null", "[" * 100_000])
+    def test_a_header_that_is_not_an_object_is_refused_not_crashed_on(self, header):
+        """Read as a dict, a JSON array raised AttributeError: a 500 for any anonymous caller."""
+        payload = _b64(json.dumps(valid_claims()).encode())
+        with pytest.raises(AuthenticationError):
+            decode_token(f"{_b64(header.encode())}.{payload}.{_b64(b'sig')}", secret=SECRET)
+
+    @pytest.mark.parametrize("claims", ["[]", "1", '"claims"', "null"])
+    def test_signed_claims_that_are_not_an_object_are_refused(self, claims):
+        header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+        payload = _b64(claims.encode())
+        signature = hmac.new(SECRET.encode(), f"{header}.{payload}".encode(), sha256).digest()
+        with pytest.raises(AuthenticationError):
+            decode_token(f"{header}.{payload}.{_b64(signature)}", secret=SECRET)
+
+    @pytest.mark.parametrize(
+        "exp", ["9999999999", [9999999999], {"at": 9999999999}, True, float("inf"), float("nan")]
+    )
+    def test_an_expiry_that_is_not_a_finite_number_is_refused(self, exp):
+        """NaN compares false with everything, so a token expiring at NaN never expired."""
+        with pytest.raises(AuthenticationError):
+            decode_token(make_token(valid_claims(exp=exp)), secret=SECRET)
+
+    @pytest.mark.parametrize(
+        "claims",
+        [
+            {"sub": 12345},
+            {"sub": str(uuid4()), "tenants": 7},
+            {"sub": str(uuid4()), "roles": [["owner"]]},
+            {"sub": str(uuid4()), "kind": ["staff"]},
+        ],
+    )
+    def test_claims_of_the_wrong_shape_are_refused(self, claims):
+        with pytest.raises(AuthenticationError):
+            _principal_from_claims(claims)
+
+
+def _request(token: str) -> Request:
+    return Request({"type": "http", "headers": [(b"authorization", f"Bearer {token}".encode())]})
+
+
+def _token(subject_id, *, kind: PrincipalKind = PrincipalKind.STAFF, version: int = 0) -> str:
+    return issue_token(
+        subject_id=subject_id, kind=kind, secret=get_settings().secret_key, token_version=version
+    )
+
+
+def _accounts(state: TokenState | None):
+    async def lookup(subject_id):
+        return state
+
+    return lookup
+
+
+class TestRequestAuthentication:
+    """`get_principal` on the real token path, with the account read supplied."""
+
+    async def test_a_malformed_token_is_a_401_not_a_500(self):
+        payload = _b64(json.dumps(valid_claims()).encode())
+        with pytest.raises(AuthenticationError):
+            await get_principal(_request(f"{_b64(b'[]')}.{payload}.x"), token_state=_accounts(None))
+
+    async def test_a_token_matching_its_account_authenticates(self):
+        subject = uuid4()
+        principal = await get_principal(
+            _request(_token(subject, version=3)),
+            token_state=_accounts(TokenState(token_version=3, is_active=True)),
+        )
+        assert principal.subject_id == subject
+
+    async def test_a_token_issued_before_its_account_was_revoked_is_refused(self):
+        """Logout-everywhere or a revoked membership bumped the version: refused now."""
+        with pytest.raises(AuthenticationError):
+            await get_principal(
+                _request(_token(uuid4(), version=2)),
+                token_state=_accounts(TokenState(token_version=3, is_active=True)),
+            )
+
+    async def test_a_deactivated_account_is_refused(self):
+        with pytest.raises(AuthenticationError):
+            await get_principal(
+                _request(_token(uuid4(), kind=PrincipalKind.CUSTOMER)),
+                token_state=_accounts(TokenState(token_version=0, is_active=False)),
+            )
+
+    async def test_a_token_whose_account_is_gone_is_refused(self):
+        with pytest.raises(AuthenticationError):
+            await get_principal(_request(_token(uuid4())), token_state=_accounts(None))
+
+    async def test_a_service_token_has_no_account_to_check(self):
+        async def no_lookup(subject_id):
+            raise AssertionError("a service principal has no account row")
+
+        principal = await get_principal(
+            _request(_token(uuid4(), kind=PrincipalKind.SERVICE)), token_state=no_lookup
+        )
+        assert principal.kind is PrincipalKind.SERVICE
 
 
 class TestTenantAuthorization:
