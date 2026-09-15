@@ -41,6 +41,7 @@
 		"wrangler": "^4.97.0"
 	},
 	"dependencies": {
-		"layerchart": "^2.5.0"
+		"layerchart": "^2.5.0",
+		"plotly.js-dist-min": "^2.35.2"
 	}
 }
