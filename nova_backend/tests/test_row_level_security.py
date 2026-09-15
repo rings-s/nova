@@ -33,7 +33,8 @@ UNPOLICED_TENANT_TABLES = frozenset(
         # The outbox: written inside the publishing request's own transaction,
         # read only by the dispatcher, which crosses tenants by design.
         "domain_events",
-        # Replay records, looked up by client key and endpoint alone.
+        # Replay records. Scoped in code instead: every lookup matches key,
+        # endpoint, tenant and principal (`core/idempotency.py`).
         "idempotency_keys",
         # Recorded by the gateway webhook before it knows which tenant it is for.
         "webhook_events",
