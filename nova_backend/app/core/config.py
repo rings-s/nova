@@ -142,6 +142,17 @@ class Settings(BaseSettings):
     #: and the only origin a payment's `return_url` may point at.
     public_app_url: str = "http://localhost:5173"
 
+    #: Serve `/docs`, `/redoc` and `/openapi.json`. Unset, they are served only in
+    #: local and test: published, the schema maps every route and parameter for
+    #: whoever finds the host.
+    api_docs_enabled: bool | None = None
+
+    @property
+    def serve_api_docs(self) -> bool:
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return self.env in DEVELOPMENT_ENVS
+
     @property
     def trusted_client_ip_header(self) -> str | None:
         """The header a rate limit may read the client address from, if any.

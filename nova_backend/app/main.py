@@ -26,12 +26,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Off outside local and test unless API_DOCS_ENABLED says otherwise.
+    docs = settings.serve_api_docs
     app = FastAPI(
         title="NOVA API",
         version="0.1.0",
         lifespan=lifespan,
         # docs/07 section 2: every error is `{"error": {...}}`, and /docs says so.
         responses=ERROR_RESPONSES,
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
     )
 
     # A wildcard origin with credentials enabled lets any site make
