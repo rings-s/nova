@@ -6,6 +6,11 @@ Note there is no upload endpoint that accepts a file body, and there must never
 be one. The browser PUTs to Nextcloud directly (docs/02 section 4); this API
 only issues and confirms authorisations. An `UploadFile` parameter here would
 quietly move every salon's portfolio through the application server's memory.
+
+Every route is staff-only. A customer principal reaches every tenant on the
+marketplace, and these routes list a salon's whole library, unready and
+unpublished assets included, and mint public share links. Showing published
+images to customers belongs to the discovery surface, not here.
 """
 
 from uuid import UUID
@@ -74,7 +79,7 @@ async def complete_upload(
     return asset
 
 
-@router.get("", response_model=Page[MediaAssetOut])
+@router.get("", response_model=Page[MediaAssetOut], dependencies=[Depends(require_staff)])
 async def list_business_media(
     tenant_id: UUID,
     business_id: UUID,
@@ -88,7 +93,7 @@ async def list_business_media(
     return Page(items=[MediaAssetOut.model_validate(a) for a in assets])
 
 
-@router.get("/{asset_id}", response_model=MediaAssetOut)
+@router.get("/{asset_id}", response_model=MediaAssetOut, dependencies=[Depends(require_staff)])
 async def get_media_asset(
     tenant_id: UUID,
     asset_id: UUID,
@@ -97,13 +102,21 @@ async def get_media_asset(
     return await service.get(asset_id)
 
 
-@router.get("/{asset_id}/link", response_model=MediaLinkOut)
+@router.get(
+    "/{asset_id}/link",
+    response_model=MediaLinkOut,
+    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+)
 async def get_media_link(
     tenant_id: UUID,
     asset_id: UUID,
     service: MediaService = Depends(get_media_service),
 ) -> MediaLinkOut:
-    """A shareable URL, generated on demand rather than stored."""
+    """A shareable URL, generated on demand rather than stored.
+
+    Rate-limited like a write, because it is one: every call creates a new public
+    share in Nextcloud.
+    """
     return MediaLinkOut(asset_id=asset_id, url=await service.public_url(asset_id))
 
 
