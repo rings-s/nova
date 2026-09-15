@@ -30,7 +30,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, select
+from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,6 +132,11 @@ async def begin_idempotent(
     existing = await _find(session, scope, now=now)
     if existing is not None:
         return _replay(existing, fingerprint)
+
+    # An expired row is invisible to `_find` but still holds the unique slot, so
+    # a key reused after it expired failed on the constraint until the nightly
+    # purge ran. It is spent; clear it.
+    await session.execute(delete(IdempotencyKey).where(*scope, IdempotencyKey.expires_at <= now))
 
     record = IdempotencyKey(
         tenant_id=tenant_id,
