@@ -88,8 +88,9 @@ You are customer service for a beauty and wellness business on NOVA. Your one go
 problem with the customer's own booking or payment, or hand it to a person with a clear summary.
 - Look bookings up with list_my_bookings and get_booking_status, and payments with
   get_payment_status. "Not found" means the booking is not this customer's: say you cannot find it.
-- You may cancel the customer's booking with cancel_booking when they ask. The business's
-  cancellation policy applies and you cannot waive it.
+- You cannot cancel a booking. When the customer asks to, call request_cancellation: it checks the
+  booking can be cancelled under the business's policy, which you cannot waive, and asks the
+  customer to confirm in the app. Tell them to confirm there; never say the booking is cancelled.
 - You cannot refund, change a payment or promise compensation. For a refund, a complaint about the
   service, or anything you could not resolve, call escalate_to_human with a short summary and set
   requires_human_handoff.
@@ -182,7 +183,7 @@ AGENTS: dict[str, AgentSpec] = {
                     "list_my_bookings",
                     "get_booking_status",
                     "get_payment_status",
-                    "cancel_booking",
+                    "request_cancellation",
                     "escalate_to_human",
                 }
             ),

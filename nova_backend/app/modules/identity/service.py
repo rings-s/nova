@@ -393,6 +393,11 @@ class MembershipService:
         `is_active = False` rather than a DELETE: the unique constraint has no
         `is_active` predicate, so the row is also the slot the person comes
         back into if they are ever re-hired.
+
+        Also bumps the person's `token_version`, which signs them out
+        everywhere. Their tokens name this salon until they expire, and the
+        version check on every request is what ends them now rather than up to
+        15 minutes later. They sign in again to reach any other salon.
         """
         membership = await self._load(membership_id)
         current = MembershipRole(membership.role)
@@ -403,6 +408,9 @@ class MembershipService:
             await self._guard_last_owner()
 
         membership.is_active = False
+        user = await self.users.session.get(User, membership.user_id)
+        if user is not None:
+            user.token_version += 1
         await self.repository.session.flush()
         return membership
 

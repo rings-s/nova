@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from app.core.events import publish_event
+from app.integrations.base import IntegrationNotConfiguredError
 from app.integrations.storage.nextcloud import MediaStorage
 from app.modules.catalog.service import CatalogService
 from app.modules.media.domain import (
@@ -137,6 +138,10 @@ class MediaService:
         folder_path = webdav_path.rsplit("/", 1)[0]
         try:
             await self.storage.ensure_folder(folder_path=folder_path)
+        except IntegrationNotConfiguredError:
+            # No storage on this deployment: a 503 for the caller, not a
+            # best-effort miss to log a traceback for.
+            raise
         except Exception:
             logger.warning(
                 "nextcloud_ensure_folder_failed", extra={"folder": folder_path}, exc_info=True
@@ -199,7 +204,7 @@ class MediaService:
             try:
                 if not await self.storage.exists(webdav_path=asset.webdav_path):
                     raise MediaNotUploadedError(asset_id)
-            except MediaNotUploadedError:
+            except (MediaNotUploadedError, IntegrationNotConfiguredError):
                 raise
             except Exception:
                 # Storage unreachable is an infrastructure failure, not a

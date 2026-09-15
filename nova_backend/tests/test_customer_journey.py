@@ -15,8 +15,11 @@ that would have caught every wiring mistake the unit tests cannot see.
 """
 
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
+
+from app.core.security import Principal, PrincipalKind, get_principal
 
 pytestmark = pytest.mark.anyio if False else []
 
@@ -266,6 +269,51 @@ async def test_reusing_a_key_with_a_different_body_is_rejected(
     reused = await client.post(f"{base}/bookings", json=changed, headers=headers)
     assert reused.status_code == 422
     assert reused.json()["error"]["code"] == "idempotency_key_reused"
+
+
+async def test_a_key_replays_only_for_the_caller_who_sent_it(
+    app,
+    client,
+    tenant_factory,
+    business_factory,
+    location_factory,
+    service_factory,
+    provider_factory,
+    qualify,
+    customer_factory,
+):
+    """Anyone else sending the same key and body gets their own answer, not the first booking."""
+    tenant = await tenant_factory()
+    business = await business_factory(tenant)
+    location = await location_factory(business)
+    service = await service_factory(location)
+    provider = await provider_factory(location)
+    await qualify(provider, service)
+    customer = await customer_factory(tenant)
+
+    base = f"/api/v1/tenants/{tenant.id}"
+    headers = {"Idempotency-Key": "a-guessable-key"}
+    payload = {
+        "location_id": str(location.id),
+        "service_id": str(service.id),
+        "provider_id": str(provider.id),
+        "starts_at": (datetime.now(UTC) + timedelta(days=5)).replace(microsecond=0).isoformat(),
+        "on_behalf_of_customer_id": str(customer.id),
+    }
+
+    first = await client.post(f"{base}/bookings", json=payload, headers=headers)
+    assert first.status_code == 201
+
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        subject_id=uuid4(), kind=PrincipalKind.SERVICE
+    )
+    second = await client.post(f"{base}/bookings", json=payload, headers=headers)
+
+    # Run rather than replayed: the slot is taken, so it loses, and the first
+    # caller's booking is nowhere in the answer.
+    assert second.headers.get("Idempotent-Replay") is None
+    assert second.status_code == 409
+    assert first.json()["id"] not in second.text
 
 
 async def test_a_held_slot_is_not_offered_to_anyone_else(

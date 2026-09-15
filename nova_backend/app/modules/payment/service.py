@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 from app.core.events import publish_event
 from app.core.security import Principal
 from app.core.values import Money, TimeRange
+from app.integrations.base import IntegrationNotConfiguredError
 from app.integrations.payments.moyasar import PaymentGateway
 from app.modules.booking.domain import BookingStatus
 from app.modules.booking.service import BookingService
@@ -38,6 +39,7 @@ from app.modules.payment.events import (
     PaymentRefunded,
 )
 from app.modules.payment.exceptions import (
+    PaymentNotConfirmedError,
     PaymentNotFoundError,
     UnknownWebhookPaymentError,
 )
@@ -140,6 +142,10 @@ class PaymentService:
             )
             gateway_payment_id = created.get("id")
             redirect_url = (created.get("source") or {}).get("transaction_url")
+        except IntegrationNotConfiguredError:
+            # No gateway on this deployment: the caller gets a 503, and nothing
+            # failed that a traceback on every attempt would help anyone find.
+            raise
         except Exception:
             # The local record stays PENDING so the failure is visible and
             # retryable, rather than vanishing with the exception.
@@ -417,11 +423,15 @@ class PaymentWebhookProcessor:
     async def record(
         self, *, payload: dict[str, Any], signature_verified: bool
     ) -> tuple[Any, bool]:
-        """Stores the raw event. Returns `(event, is_duplicate)`.
+        """Stores the raw event, less its shared secret. Returns `(event, is_duplicate)`.
 
         The unique (provider, external_event_id) index is what makes delivery
         idempotent — Moyasar retries, and a retried capture must not be applied
         twice.
+
+        `secret_token` is dropped because it authenticates every webhook: stored
+        in a table with no row-level security, anyone who could read the table
+        could sign the next "paid" event.
         """
         external_id = str(payload.get("id") or payload.get("event_id") or "")
         existing = await self.events.find(provider=self.provider, external_event_id=external_id)
@@ -432,7 +442,7 @@ class PaymentWebhookProcessor:
             provider=self.provider,
             external_event_id=external_id,
             event_type=payload.get("type") or payload.get("event"),
-            payload=payload,
+            payload={key: value for key, value in payload.items() if key != "secret_token"},
             signature_verified=signature_verified,
         )
         return event, False

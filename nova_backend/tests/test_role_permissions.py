@@ -100,7 +100,11 @@ async def test_each_money_route_admits_exactly_the_roles_holding_its_permissions
 async def test_a_staff_token_with_no_membership_here_is_refused(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession, as_owner, salon
 ):
-    """What a revoked member looks like until their token expires."""
+    """A staff token naming a salon its holder has no role at.
+
+    A revoked member's own token no longer gets this far, since revoking bumps
+    their `token_version`. The gate must hold without relying on that.
+    """
     tenant, _ = salon
     principal = await _staff(db_session, as_owner, tenant, None)
     app.dependency_overrides[get_principal] = lambda: principal

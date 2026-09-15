@@ -179,7 +179,7 @@ class SlotHoldRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     #: Null for an anonymous PWA checkout that has not identified itself yet.
     customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     #: Who took the hold: the principal's subject id. A customer may hold only a
-    #: few slots at a business at once (`BookingService.hold_slot`), so one
+    #: few slots at a tenant at once (`BookingService.hold_slot`), so one
     #: account cannot keep a salon's calendar blocked. Null only on holds taken
     #: before holders were recorded (migration `f1a2b3c4d5e6`).
     held_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

@@ -1,9 +1,11 @@
-"""Payment intents through the API: who names the amount, and where the customer goes back to.
+"""Payment intents through the API: who names the amount, where the customer goes back to,
+and what a deployment without a gateway answers.
 
-Needs Postgres for the booking the return-URL case pays for. The customer case
-is refused before any row is read.
+Needs Postgres for the booking an intent pays for. The customer case is refused
+before any row is read.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -12,14 +14,55 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from app.core.config import get_settings
 from app.core.security import AuthorizationError, Principal, PrincipalKind, get_principal
 from app.db.session import set_tenant_scope
+from app.integrations.payments.moyasar import NotConfiguredPaymentGateway
 from app.modules.booking.models import BookingRecord
-from app.modules.payment.dependencies import refuse_customer_amount
+from app.modules.payment.dependencies import get_payment_gateway, refuse_customer_amount
 
 
 def _customer() -> Principal:
     return Principal(subject_id=uuid4(), kind=PrincipalKind.CUSTOMER)
+
+
+@pytest.fixture
+async def draft_booking(
+    db_session,
+    tenant_factory,
+    business_factory,
+    location_factory,
+    service_factory,
+    provider_factory,
+    qualify,
+    customer_factory,
+) -> BookingRecord:
+    tenant = await tenant_factory()
+    business = await business_factory(tenant)
+    location = await location_factory(business)
+    service = await service_factory(location)
+    provider = await provider_factory(location)
+    await qualify(provider, service)
+    customer = await customer_factory(tenant)
+    # In the tenant's own scope, as the request that made the booking was.
+    await set_tenant_scope(db_session, tenant.id)
+    booking = BookingRecord(
+        tenant_id=tenant.id,
+        business_id=business.id,
+        location_id=location.id,
+        service_id=service.id,
+        provider_id=provider.id,
+        customer_id=customer.id,
+        starts_at=datetime.now(UTC) + timedelta(days=2),
+        ends_at=datetime.now(UTC) + timedelta(days=2, hours=1),
+        price=Decimal("150.00"),
+        currency="SAR",
+        status="draft",
+        source="direct_link",
+    )
+    db_session.add(booking)
+    await db_session.flush()
+    return booking
 
 
 class TestWhoMaySetTheAmount:
@@ -60,47 +103,45 @@ async def test_a_customer_who_sets_the_amount_is_refused(
 
 
 async def test_a_return_url_off_the_app_origin_is_refused(
-    client: AsyncClient,
-    db_session,
-    tenant_factory,
-    business_factory,
-    location_factory,
-    service_factory,
-    provider_factory,
-    qualify,
-    customer_factory,
+    client: AsyncClient, draft_booking: BookingRecord
 ) -> None:
     """Otherwise the gateway's own page would forward a paying customer anywhere."""
-    tenant = await tenant_factory()
-    business = await business_factory(tenant)
-    location = await location_factory(business)
-    service = await service_factory(location)
-    provider = await provider_factory(location)
-    await qualify(provider, service)
-    customer = await customer_factory(tenant)
-    # In the tenant's own scope, as the request that made the booking was.
-    await set_tenant_scope(db_session, tenant.id)
-    booking = BookingRecord(
-        tenant_id=tenant.id,
-        business_id=business.id,
-        location_id=location.id,
-        service_id=service.id,
-        provider_id=provider.id,
-        customer_id=customer.id,
-        starts_at=datetime.now(UTC) + timedelta(days=2),
-        ends_at=datetime.now(UTC) + timedelta(days=2, hours=1),
-        price=Decimal("150.00"),
-        currency="SAR",
-        status="draft",
-        source="direct_link",
-    )
-    db_session.add(booking)
-    await db_session.flush()
-
     response = await client.post(
-        f"/api/v1/tenants/{tenant.id}/payments/intents",
-        json={"booking_id": str(booking.id), "return_url": "https://attacker.example/after-pay"},
+        f"/api/v1/tenants/{draft_booking.tenant_id}/payments/intents",
+        json={
+            "booking_id": str(draft_booking.id),
+            "return_url": "https://attacker.example/after-pay",
+        },
     )
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "return_url_not_allowed"
+
+
+async def test_paying_where_no_gateway_is_configured_is_a_503_and_logs_no_error(
+    app: FastAPI,
+    client: AsyncClient,
+    draft_booking: BookingRecord,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing failed: payments are switched off on this deployment.
+
+    It was a 500 from the catch-all handler, with a traceback logged as an
+    unhandled fault on every attempt.
+    """
+    app.dependency_overrides[get_payment_gateway] = NotConfiguredPaymentGateway
+
+    with caplog.at_level(logging.INFO):
+        response = await client.post(
+            f"/api/v1/tenants/{draft_booking.tenant_id}/payments/intents",
+            json={
+                "booking_id": str(draft_booking.id),
+                "return_url": f"{get_settings().public_app_url}/bookings/paid",
+            },
+        )
+
+    assert response.status_code == 503
+    error = response.json()["error"]
+    assert error["code"] == "integration_not_configured"
+    assert error["retryable"] is False
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []

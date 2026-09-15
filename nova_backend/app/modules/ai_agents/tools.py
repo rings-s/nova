@@ -229,6 +229,7 @@ class AgentToolkit:
                 provider_id=provider_id,
                 service_id=service_id,
                 starts_at=starts_at,
+                principal=self.deps.principal,
                 customer_id=self.deps.customer_id,
             )
             held.append(
@@ -383,21 +384,35 @@ class AgentToolkit:
 
         return await self._call("get_payment_status", work)
 
-    async def cancel_booking(self, booking_id: UUID, reason: str | None = None) -> Result:
-        """Cancels one of the caller's bookings, under the business's cancellation policy.
+    async def request_cancellation(self, booking_id: UUID, reason: str | None = None) -> Result:
+        """Asks the customer to confirm cancelling one of their bookings. Cancels nothing.
 
-        `by_staff` is not a parameter here, so the policy cannot be waived by
-        asking nicely.
+        Checks the booking is theirs and could be cancelled now, under the
+        business's cancellation policy, then hands it to the client, where the
+        customer confirms. An agent that cancelled by itself could be talked
+        into it by text the customer never wrote.
         """
+        pending: list[PendingCancellation] = []
 
         async def work(services: "TenantServices") -> Result:
-            await services.booking.assert_visible_to(booking_id, self.deps.principal)
-            booking = await services.booking.cancel(booking_id, reason=reason)
-            return {"booking_id": str(booking.id), "status": str(booking.status)}
+            booking = await services.booking.preview_cancellation(booking_id, self.deps.principal)
+            pending.append(
+                PendingCancellation(
+                    booking_id=booking.id,
+                    starts_at=booking.slot.starts_at,
+                    reason=reason[:500] if reason else None,
+                )
+            )
+            return {
+                "booking_id": str(booking.id),
+                "starts_at": booking.slot.starts_at.isoformat(),
+                "cancelled": False,
+                "awaiting_customer_confirmation": True,
+            }
 
-        result = await self._call("cancel_booking", work)
+        result = await self._call("request_cancellation", work)
         if "error" not in result:
-            # Recorded only now that the unit of work has committed.
+            self.deps.artifacts.pending_cancellations.extend(pending)
             self.deps.artifacts.booking_ids.append(UUID(result["booking_id"]))
         return result
 
@@ -723,4 +738,4 @@ class AgentToolkit:
         return target_id
 
 
-__all__ = ["AgentToolkit", "HeldSlot", "QueuePlace"]
+__all__ = ["AgentToolkit", "HeldSlot", "PendingCancellation", "QueuePlace"]

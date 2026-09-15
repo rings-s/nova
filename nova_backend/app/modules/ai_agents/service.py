@@ -103,6 +103,8 @@ class TurnArtifacts:
     #: What the client needs to act on a write: a hold's token, a queue place.
     held_slots: list[HeldSlot] = field(default_factory=list)
     queue_places: list[QueuePlace] = field(default_factory=list)
+    #: Cancellations offered for the customer to confirm. Nothing was cancelled.
+    pending_cancellations: list[PendingCancellation] = field(default_factory=list)
     #: Write tools that completed, in order. Each one's unit of work committed.
     committed_writes: list[str] = field(default_factory=list)
     handoff_reason: str | None = None
@@ -110,13 +112,15 @@ class TurnArtifacts:
     def begin_attempt(self) -> None:
         """Clears what one model attempt presented, before the next begins.
 
-        Charts, proposals and cited metrics belong to the answer that named
-        them, and a retry answers afresh. Writes, grounded figures and a
-        requested handoff stay: they happened, whichever attempt caused them.
+        Charts, proposals, cited metrics and offered cancellations belong to the
+        answer that named them, and a retry answers afresh. Writes, grounded
+        figures and a requested handoff stay: they happened, whichever attempt
+        caused them.
         """
         self.charts.clear()
         self.proposed_actions.clear()
         self.metrics_used.clear()
+        self.pending_cancellations.clear()
 
     def nothing_committed(self) -> bool:
         """Whether starting the turn over could not repeat a write."""
@@ -155,6 +159,7 @@ class ChatTurn:
     related_booking_id: UUID | None
     held_slots: list[HeldSlot]
     queue_places: list[QueuePlace]
+    pending_cancellations: list[PendingCancellation]
 
 
 class AiChatService:
@@ -275,6 +280,7 @@ class AiChatService:
             related_booking_id=artifacts.booking_ids[-1] if artifacts.booking_ids else None,
             held_slots=list(artifacts.held_slots),
             queue_places=list(artifacts.queue_places),
+            pending_cancellations=list(artifacts.pending_cancellations),
         )
         logger.info(
             "ai_turn_completed",

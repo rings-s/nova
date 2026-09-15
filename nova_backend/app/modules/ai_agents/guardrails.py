@@ -82,7 +82,13 @@ _INJECTION_PATTERNS = (
     # Direct tool invocation attempts written into message content.
     re.compile(r"\b(?:call|invoke|execute)\s+(?:the\s+)?tool\b", re.I),
     re.compile(r"\bconfirm_booking\b|\bcapture_payment\b|\brefund\b", re.I),
+    # The frame this module puts around suspicious text, written into the text
+    # to close it early and speak from outside it.
+    re.compile(r"<\s*/?\s*untrusted_user_text", re.I),
 )
+
+#: Any spelling of that frame's tags a model might still read as one.
+_FRAME_TAG = re.compile(r"<\s*(/?)\s*untrusted_user_text\s*>?", re.I)
 
 MAX_MESSAGE_LENGTH = 4000
 
@@ -182,7 +188,9 @@ def sanitize_untrusted_text(text: str) -> SanitizedInput:
     if injection:
         # Neutralised by framing, not deletion. The model is told this is
         # quoted user data; the tool allowlist is what actually stops it acting
-        # on anything the text asks for.
+        # on anything the text asks for. A frame tag already in the text is
+        # defused first, or the text could close the frame and write past it.
+        cleaned = _FRAME_TAG.sub(r"[\1untrusted_user_text]", cleaned)
         cleaned = f"<untrusted_user_text>\n{cleaned}\n</untrusted_user_text>"
 
     return SanitizedInput(text=cleaned, redacted=redacted, injection_detected=injection)

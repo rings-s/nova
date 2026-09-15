@@ -129,8 +129,7 @@ async def hold_slot(
     """Reserves a slot for a few minutes while checkout completes.
 
     Recorded against the caller, and capped for customers: one who already holds
-    the maximum at this business gets a 409 until a hold is booked, released or
-    expires.
+    the maximum here gets a 409 until a hold is booked, released or expires.
     """
     hold = await service.hold_slot(**payload.model_dump(), principal=principal)
     await session.commit()

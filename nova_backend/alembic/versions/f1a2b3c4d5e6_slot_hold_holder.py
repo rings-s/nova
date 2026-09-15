@@ -5,7 +5,7 @@ holder, and nothing limited how many slots one account held: a customer could
 keep a salon's calendar blocked by re-holding every slot as its hold expired.
 
 `held_by` is the principal's subject id. `BookingService.hold_slot` counts a
-customer's live holds at a business by it, under an advisory lock per holder.
+customer's live holds at a tenant by it, under an advisory lock per holder.
 It is null only on holds taken before this migration, which expire within
 minutes.
 

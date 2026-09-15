@@ -33,6 +33,7 @@ from app.modules.ai_agents.runtime import InferenceEngine
 from app.modules.booking.domain import BookingSource, BookingStatus
 from app.modules.booking.models import BookingRecord
 from app.modules.catalog.service import CatalogService
+from app.modules.identity.models import User
 from app.modules.queue.models import QueueEntryRecord
 
 FINAL = "final"
@@ -258,7 +259,7 @@ async def test_customer_service_cannot_read_or_cancel_a_strangers_booking(
     )
     script = Script(
         ("get_booking_status", {"booking_id": str(booking_id)}),
-        ("cancel_booking", {"booking_id": str(booking_id), "reason": "Changed my mind"}),
+        ("request_cancellation", {"booking_id": str(booking_id), "reason": "Changed my mind"}),
         (FINAL, {"reply": "I could not find that booking.", "requires_human_handoff": True}),
     )
     use_model(app, script)
@@ -268,10 +269,62 @@ async def test_customer_service_cannot_read_or_cancel_a_strangers_booking(
     assert response.status_code == 200, response.text
     assert len(script.tool_returns) == 2
     assert all("not_found" in result["error"] for result in script.tool_returns)
+    assert response.json()["pending_cancellations"] == []
     status = (
         await db_session.execute(select(BookingRecord.status).where(BookingRecord.id == booking_id))
     ).scalar_one()
     assert status == BookingStatus.CONFIRMED
+
+
+async def test_customer_service_offers_a_cancellation_and_only_the_customer_makes_it(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon, customer_factory
+):
+    user = User(
+        email=f"customer-{uuid4().hex[:8]}@example.com",
+        phone=f"+96650{uuid4().int % 10_000_000:07d}",
+        full_name="Noura",
+        password_hash="not-a-real-hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    salon["customer"] = await customer_factory(salon["tenant"], user_id=user.id)
+    [booking_id] = await add_bookings(
+        db_session, salon, count=1, status=BookingStatus.CONFIRMED, days_from_now=5
+    )
+    # Began at the top of this hour: past any cancellation deadline.
+    [started_id] = await add_bookings(
+        db_session, salon, count=1, status=BookingStatus.CONFIRMED, days_from_now=0
+    )
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        subject_id=user.id, kind=PrincipalKind.CUSTOMER
+    )
+    script = Script(
+        ("request_cancellation", {"booking_id": str(started_id)}),
+        ("request_cancellation", {"booking_id": str(booking_id), "reason": "Changed my mind"}),
+        (FINAL, {"reply": "Please confirm the cancellation in the app."}),
+    )
+    use_model(app, script)
+
+    response = await chat(client, salon, "customer_service_agent", with_business=False)
+
+    assert response.status_code == 200, response.text
+    assert script.tool_returns[0]["error"] == "cancellation_too_late"
+    assert script.tool_returns[1]["cancelled"] is False
+    [pending] = response.json()["pending_cancellations"]
+    assert pending["booking_id"] == str(booking_id)
+    assert pending["reason"] == "Changed my mind"
+    statuses = await db_session.execute(
+        select(BookingRecord.status).where(BookingRecord.id.in_([booking_id, started_id]))
+    )
+    assert set(statuses.scalars()) == {BookingStatus.CONFIRMED}
+
+    # The customer confirms through the route the app already uses.
+    confirmed = await client.post(
+        f"/api/v1/tenants/{salon['tenant'].id}/bookings/{booking_id}/cancel",
+        json={"reason": pending["reason"]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "cancelled"
 
 
 async def test_the_manager_proposes_an_action_and_changes_nothing(

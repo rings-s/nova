@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     #: How long an AI-agent or checkout slot hold survives before the slot is
     #: released again (docs/04 section 2A, docs/10 section 5).
     slot_hold_ttl_seconds: int = 300
-    #: How many slots one customer may hold at a business at once. A hold blocks
+    #: How many slots one customer may hold at one tenant at once. A hold blocks
     #: the slot for everyone, so an uncapped customer could keep a salon's whole
     #: calendar unbookable. Staff are not capped.
     slot_hold_max_active_per_customer: int = 3
@@ -141,6 +141,17 @@ class Settings(BaseSettings):
     #: (docs/07 section 7) — a ticket the customer cannot open is not a ticket —
     #: and the only origin a payment's `return_url` may point at.
     public_app_url: str = "http://localhost:5173"
+
+    #: Serve `/docs`, `/redoc` and `/openapi.json`. Unset, they are served only in
+    #: local and test: published, the schema maps every route and parameter for
+    #: whoever finds the host.
+    api_docs_enabled: bool | None = None
+
+    @property
+    def serve_api_docs(self) -> bool:
+        if self.api_docs_enabled is not None:
+            return self.api_docs_enabled
+        return self.env in DEVELOPMENT_ENVS
 
     @property
     def trusted_client_ip_header(self) -> str | None:
