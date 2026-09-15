@@ -25,9 +25,12 @@ from app.core.security import (
     _dev_bypass_principal,
     _principal_from_claims,
     _service_kind_refusal,
+    decode_purpose_token,
     decode_token,
     get_principal,
+    issue_purpose_token,
     issue_token,
+    purpose_key,
     require_tenant_access,
 )
 
@@ -156,6 +159,88 @@ class TestTokenVerification:
     def test_claims_of_the_wrong_shape_are_refused(self, claims):
         with pytest.raises(AuthenticationError):
             _principal_from_claims(claims)
+
+
+class TestPurposeTokens:
+    """`issue_purpose_token` / `decode_purpose_token` — a narrower JWT for
+    proving one specific fact about an account (docs/14 TM-01), not the full
+    `Principal` shape `issue_token` mints. Used directly by
+    `AuthService.request_phone_verification` / `confirm_phone_verification`.
+    """
+
+    def test_a_token_round_trips_for_its_own_purpose(self):
+        subject = uuid4()
+        token = issue_purpose_token(
+            subject_id=subject, purpose="phone_verification", secret=SECRET, ttl_seconds=600
+        )
+
+        claims = decode_purpose_token(token, purpose="phone_verification", secret=SECRET)
+
+        assert claims["sub"] == str(subject)
+        assert claims["typ"] == "phone_verification"
+        assert "jti" in claims
+
+    def test_a_token_carries_nothing_but_sub_typ_jti_and_time(self):
+        """No PII, no business data — whatever channel this travels over
+        (WhatsApp) is a front channel in the Curity JWT best-practices sense:
+        readable by the provider, visible in a lock-screen preview, sitting
+        in chat history."""
+        token = issue_purpose_token(
+            subject_id=uuid4(), purpose="phone_verification", secret=SECRET, ttl_seconds=600
+        )
+        claims = decode_purpose_token(token, purpose="phone_verification", secret=SECRET)
+
+        assert set(claims) == {"sub", "typ", "jti", "iat", "exp"}
+
+    def test_a_token_does_not_verify_for_a_different_purpose(self):
+        token = issue_purpose_token(
+            subject_id=uuid4(), purpose="phone_verification", secret=SECRET, ttl_seconds=600
+        )
+
+        with pytest.raises(AuthenticationError):
+            decode_purpose_token(token, purpose="something_else", secret=SECRET)
+
+    def test_a_purpose_token_does_not_verify_as_another_purposes_token_even_by_signature(self):
+        """`purpose_key` derives a different signing key per purpose, so this
+        fails at signature verification, before the `typ` claim is even
+        compared — a stronger separation than a shared key with a claim
+        check alone would give."""
+        token = issue_purpose_token(
+            subject_id=uuid4(), purpose="phone_verification", secret=SECRET, ttl_seconds=600
+        )
+        wrong_key = purpose_key(SECRET, "something_else")
+
+        with pytest.raises(AuthenticationError):
+            decode_token(token, secret=wrong_key)
+
+    def test_a_plain_access_token_does_not_verify_as_a_purpose_token(self):
+        """The root secret and a purpose-derived key never coincide."""
+        access_token = issue_token(subject_id=uuid4(), kind=PrincipalKind.CUSTOMER, secret=SECRET)
+
+        with pytest.raises(AuthenticationError):
+            decode_purpose_token(access_token, purpose="phone_verification", secret=SECRET)
+
+    async def test_a_non_access_typ_cannot_authenticate_a_request(self):
+        """Belt and suspenders: even setting `purpose_key` derivation aside,
+        `get_principal` only ever accepts `typ="access"` — a token signed
+        with the plain root secret and `typ="phone_verification"` would
+        still be refused as a bearer token, the same way a refresh token is."""
+        token = make_token(valid_claims(typ="phone_verification"), secret=get_settings().secret_key)
+
+        with pytest.raises(AuthenticationError):
+            await get_principal(_request(token), token_state=_accounts(None))
+
+    def test_an_expired_purpose_token_is_refused(self):
+        token = issue_purpose_token(
+            subject_id=uuid4(), purpose="phone_verification", secret=SECRET, ttl_seconds=-1
+        )
+
+        with pytest.raises(AuthenticationError):
+            decode_purpose_token(token, purpose="phone_verification", secret=SECRET)
+
+    def test_different_purposes_derive_different_keys(self):
+        assert purpose_key(SECRET, "phone_verification") != purpose_key(SECRET, "invite")
+        assert purpose_key(SECRET, "phone_verification") != SECRET
 
 
 def _request(token: str) -> Request:

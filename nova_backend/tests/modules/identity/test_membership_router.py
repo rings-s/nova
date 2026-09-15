@@ -100,84 +100,139 @@ async def _count_rows(session: AsyncSession, user: User, tenant: Tenant) -> int:
     return int((await session.execute(stmt)).scalar_one())
 
 
-# --- granting -------------------------------------------------------------
+async def _invite_and_accept(
+    client: AsyncClient, app, salon: Salon, colleague: User, role: str
+) -> dict:
+    """Invites `colleague` and immediately redeems the invite as them.
+
+    Most of the tests below are about role changes, revocation, and the last
+    owner — not about the invite mechanism itself, which
+    `test_membership_invites.py` covers. This gets them straight to "an
+    active membership exists" without repeating the two-step flow inline.
+    """
+    from app.core.security import PrincipalKind, get_principal
+
+    invited = await client.post(_url(salon), json={"email": colleague.email, "role": role})
+    assert invited.status_code == 201, invited.text
+    body = invited.json()
+
+    previous = app.dependency_overrides.get(get_principal)
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        subject_id=colleague.id, kind=PrincipalKind.CUSTOMER
+    )
+    try:
+        accepted = await client.post(
+            _url(salon, f"/invites/{body['id']}/accept"), json={"token": body["token"]}
+        )
+    finally:
+        if previous is not None:
+            app.dependency_overrides[get_principal] = previous
+        else:
+            del app.dependency_overrides[get_principal]
+
+    assert accepted.status_code == 201, accepted.text
+    return accepted.json()
 
 
-async def test_owner_grants_access_to_an_existing_account(
-    client: AsyncClient, salon: Salon, user_factory
-) -> None:
-    colleague = await user_factory(email="new-hire@example.com", full_name="New Hire")
+# --- inviting --------------------------------------------------------------
+#
+# Granting no longer resolves the grantee by email at all (docs/14 TM-04): it
+# starts a pending invite, redeemable only by whoever holds the token. See
+# test_membership_invites.py for the invite/accept mechanism itself; these
+# cover the same setup this file always has, through the new two-step flow.
 
+
+async def test_owner_invites_an_address(client: AsyncClient, salon: Salon) -> None:
+    """Inviting needs no existing account at all — that is the whole point."""
     response = await client.post(
         _url(salon), json={"email": "new-hire@example.com", "role": "receptionist"}
     )
 
     assert response.status_code == 201
     body = response.json()
-    assert body["user_id"] == str(colleague.id)
-    assert body["role"] == "receptionist"
     assert body["email"] == "new-hire@example.com"
-    assert body["full_name"] == "New Hire"
-    assert body["is_active"] is True
+    assert body["role"] == "receptionist"
+    assert body["token"]
+    assert "user_id" not in body
 
 
-async def test_grant_matches_the_address_case_insensitively(
-    client: AsyncClient, salon: Salon, user_factory
-) -> None:
-    """Emails are stored lowercased at registration; a caller types what they
-    remember."""
-    await user_factory(email="mixed.case@example.com")
-
+async def test_invite_lowercases_the_address(client: AsyncClient, salon: Salon) -> None:
+    """Emails are normalised the same way registration normalises them."""
     response = await client.post(
         _url(salon), json={"email": "Mixed.Case@Example.com", "role": "provider"}
     )
 
     assert response.status_code == 201
+    assert response.json()["email"] == "mixed.case@example.com"
 
 
-async def test_grant_to_an_unknown_address_is_404(client: AsyncClient, salon: Salon) -> None:
-    """There is no invite flow yet: the account has to exist first."""
+async def test_accepting_an_invite_grants_the_invited_role(
+    client: AsyncClient, app, salon: Salon, user_factory
+) -> None:
+    colleague = await user_factory(email="new-hire@example.com", full_name="New Hire")
+
+    membership = await _invite_and_accept(client, app, salon, colleague, "receptionist")
+
+    assert membership["user_id"] == str(colleague.id)
+    assert membership["role"] == "receptionist"
+    assert membership["email"] == "new-hire@example.com"
+    assert membership["is_active"] is True
+
+
+async def test_accepting_twice_is_409_not_a_silent_role_change(
+    client: AsyncClient, app, salon: Salon, user_factory
+) -> None:
+    """Whoever holds a second, independent invite to an address already on
+    staff cannot use it to change that person's role out from under them."""
+    from app.core.security import PrincipalKind, get_principal
+
+    colleague = await user_factory(email="already@example.com")
+    await _invite_and_accept(client, app, salon, colleague, "receptionist")
+
+    second_invite = await client.post(
+        _url(salon), json={"email": "already@example.com", "role": "manager"}
+    )
+    assert second_invite.status_code == 201
+
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        subject_id=colleague.id, kind=PrincipalKind.STAFF, tenant_ids=frozenset({salon.tenant.id})
+    )
+    body = second_invite.json()
+    second_accept = await client.post(
+        _url(salon, f"/invites/{body['id']}/accept"), json={"token": body["token"]}
+    )
+    assert second_accept.status_code == 409
+    assert second_accept.json()["error"]["code"] == "duplicate_membership"
+
+
+async def test_accepting_an_unknown_token_is_401(client: AsyncClient, salon: Salon) -> None:
+    """One answer for wrong, expired, and never-existed — see `InvalidInviteError`."""
     response = await client.post(
-        _url(salon), json={"email": "nobody@example.com", "role": "provider"}
+        _url(salon, f"/invites/{uuid4()}/accept"), json={"token": "not-a-real-token"}
     )
 
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "user_not_found"
-
-
-async def test_granting_twice_is_409_rather_than_a_silent_role_change(
-    client: AsyncClient, salon: Salon, user_factory
-) -> None:
-    await user_factory(email="already@example.com")
-    payload = {"email": "already@example.com", "role": "receptionist"}
-
-    assert (await client.post(_url(salon), json=payload)).status_code == 201
-
-    second = await client.post(_url(salon), json={**payload, "role": "manager"})
-    assert second.status_code == 409
-    assert second.json()["error"]["code"] == "duplicate_membership"
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_invite"
 
 
 async def test_regrant_after_revoke_reinstates_the_same_row(
-    client: AsyncClient, db_session: AsyncSession, salon: Salon, user_factory
+    client: AsyncClient, app, db_session: AsyncSession, salon: Salon, user_factory
 ) -> None:
     """The constraint has no `is_active` predicate, so a second INSERT for the
     same (user, tenant) is an IntegrityError. Re-hiring must flip the row."""
     returner = await user_factory(email="boomerang@example.com")
-    payload = {"email": "boomerang@example.com", "role": "provider"}
 
-    granted = await client.post(_url(salon), json=payload)
-    membership_id = granted.json()["id"]
+    granted = await _invite_and_accept(client, app, salon, returner, "provider")
+    membership_id = granted["id"]
 
     revoked = await client.delete(_url(salon, f"/{membership_id}"))
     assert revoked.status_code == 200
     assert revoked.json()["is_active"] is False
 
-    regranted = await client.post(_url(salon), json={**payload, "role": "manager"})
-    assert regranted.status_code == 201
-    assert regranted.json()["id"] == membership_id
-    assert regranted.json()["role"] == "manager"
-    assert regranted.json()["is_active"] is True
+    regranted = await _invite_and_accept(client, app, salon, returner, "manager")
+    assert regranted["id"] == membership_id
+    assert regranted["role"] == "manager"
+    assert regranted["is_active"] is True
 
     assert await _count_rows(db_session, returner, salon.tenant) == 1
 
@@ -186,16 +241,14 @@ async def test_regrant_after_revoke_reinstates_the_same_row(
 
 
 async def test_list_shows_active_members_only(
-    client: AsyncClient, salon: Salon, user_factory
+    client: AsyncClient, app, salon: Salon, user_factory
 ) -> None:
-    await user_factory(email="stays@example.com")
-    await user_factory(email="leaves@example.com")
+    stays = await user_factory(email="stays@example.com")
+    leaves = await user_factory(email="leaves@example.com")
 
-    await client.post(_url(salon), json={"email": "stays@example.com", "role": "provider"})
-    leaving = await client.post(
-        _url(salon), json={"email": "leaves@example.com", "role": "provider"}
-    )
-    await client.delete(_url(salon, f"/{leaving.json()['id']}"))
+    await _invite_and_accept(client, app, salon, stays, "provider")
+    leaving = await _invite_and_accept(client, app, salon, leaves, "provider")
+    await client.delete(_url(salon, f"/{leaving['id']}"))
 
     listed = await client.get(_url(salon))
     assert listed.status_code == 200
@@ -208,28 +261,26 @@ async def test_list_shows_active_members_only(
 
 
 async def test_owner_changes_a_colleagues_role(
-    client: AsyncClient, salon: Salon, user_factory
+    client: AsyncClient, app, salon: Salon, user_factory
 ) -> None:
-    await user_factory(email="promoted@example.com")
-    granted = await client.post(
-        _url(salon), json={"email": "promoted@example.com", "role": "receptionist"}
-    )
+    promoted = await user_factory(email="promoted@example.com")
+    granted = await _invite_and_accept(client, app, salon, promoted, "receptionist")
 
-    response = await client.patch(_url(salon, f"/{granted.json()['id']}"), json={"role": "manager"})
+    response = await client.patch(_url(salon, f"/{granted['id']}"), json={"role": "manager"})
 
     assert response.status_code == 200
     assert response.json()["role"] == "manager"
 
 
 async def test_patching_a_revoked_membership_is_404(
-    client: AsyncClient, salon: Salon, user_factory
+    client: AsyncClient, app, salon: Salon, user_factory
 ) -> None:
     """A revoked membership is history; the way back is a fresh grant."""
-    await user_factory(email="gone@example.com")
-    granted = await client.post(_url(salon), json={"email": "gone@example.com", "role": "provider"})
-    await client.delete(_url(salon, f"/{granted.json()['id']}"))
+    gone = await user_factory(email="gone@example.com")
+    granted = await _invite_and_accept(client, app, salon, gone, "provider")
+    await client.delete(_url(salon, f"/{granted['id']}"))
 
-    response = await client.patch(_url(salon, f"/{granted.json()['id']}"), json={"role": "manager"})
+    response = await client.patch(_url(salon, f"/{granted['id']}"), json={"role": "manager"})
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "membership_not_found"
@@ -277,10 +328,10 @@ async def test_the_last_owner_cannot_be_demoted(
 
 
 async def test_an_owner_may_step_down_once_there_is_a_second_one(
-    client: AsyncClient, db_session: AsyncSession, salon: Salon, user_factory
+    client: AsyncClient, app, db_session: AsyncSession, salon: Salon, user_factory
 ) -> None:
-    await user_factory(email="co-owner@example.com")
-    await client.post(_url(salon), json={"email": "co-owner@example.com", "role": "owner"})
+    co_owner = await user_factory(email="co-owner@example.com")
+    await _invite_and_accept(client, app, salon, co_owner, "owner")
 
     stmt = select(Membership).where(
         Membership.user_id == salon.owner.id, Membership.tenant_id == salon.tenant.id

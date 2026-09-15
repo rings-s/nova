@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.repository import BaseRepository, TenantScopedRepository
 from app.modules.identity.domain import MembershipRole
-from app.modules.identity.models import Customer, Membership, Tenant, User
+from app.modules.identity.models import Customer, Membership, MembershipInvite, Tenant, User
 
 
 class TenantRepository(BaseRepository[Tenant]):
@@ -177,6 +177,37 @@ class MembershipRepository(BaseRepository[Membership]):
         return result.scalar_one_or_none()
 
 
+class MembershipInviteRepository(TenantScopedRepository[MembershipInvite]):
+    """Pending staff-access offers, redeemable by token (docs/14 TM-04).
+
+    Tenant-scoped like every other `TenantOwnedMixin` table; `get` and `add`
+    come from the base class unchanged.
+    """
+
+    model = MembershipInvite
+
+    async def list_pending(
+        self, tenant_id: UUID, *, limit: int = 20, offset: int = 0
+    ) -> list[MembershipInvite]:
+        """Invites this tenant sent that nobody has redeemed yet.
+
+        Never includes the token itself — that was shown once, at creation,
+        and is not stored anywhere in plaintext to show again.
+        """
+        stmt = (
+            select(MembershipInvite)
+            .where(
+                MembershipInvite.tenant_id == tenant_id,
+                MembershipInvite.accepted_at.is_(None),
+            )
+            .order_by(MembershipInvite.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
 class CustomerRepository(TenantScopedRepository[Customer]):
     model = Customer
 
@@ -192,6 +223,22 @@ class CustomerRepository(TenantScopedRepository[Customer]):
 
     async def get_by_phone(self, phone: str) -> Customer | None:
         stmt = self._active(self._scope(self._base_select().where(Customer.phone == phone)))
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_unclaimed_by_phone(self, phone: str) -> Customer | None:
+        """The record with this phone that no account has claimed yet, if any.
+
+        Distinct from `get_by_phone`, which finds one regardless of who (if
+        anyone) already owns it — that is exactly what let an unverified
+        phone claim to be somebody else's already-linked customer (docs/14
+        TM-01). `ensure_for_user` calls this one for the auto-claim branch.
+        """
+        stmt = self._active(
+            self._scope(
+                self._base_select().where(Customer.phone == phone, Customer.user_id.is_(None))
+            )
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 

@@ -31,6 +31,11 @@ related_code:
 > `app/core/idempotency.py`. Findings TM-01 to TM-05 are **open**. Their descriptions explain the
 > mechanism, enough to fix it. The repository is public, so decide when this document is published
 > relative to those fixes.
+>
+> **Update, same day (later commits):** TM-01 and TM-04 were live-reproduced again against the
+> current code — with sharper detail than the original write-up — and then fixed the same session;
+> see their sections for what changed and how it was re-verified. TM-03 partially fixed — see its
+> section. TM-02 and TM-05 remain open on inspection (not re-run live this pass).
 
 Method: STRIDE per trust boundary. Every finding is marked with how it was established:
 - **live**: reproduced against the local stack, test data removed afterwards;
@@ -150,6 +155,7 @@ Established by SEC-01 to SEC-13 and retested live on the dev stack:
   - `alg` is pinned to HS256, and malformed headers and claims get 401, not 500 (SEC-10).
   - Every staff and customer request re-reads `token_version` and `is_active`, so logout-everywhere and membership revocation take effect immediately (SEC-11).
   - A `kind=service` bearer token is refused outside local/test, and every token's `exp - iat` is capped at the refresh TTL — partial TM-03, 2026-09-15.
+- **Identity claims require proof, not just a claim.** A phone number claims an existing customer record only once verified by a WhatsApp one-time code (TM-01); staff access is granted through a redeemable invite token rather than by matching an unverified email string against whoever registered it first (TM-04). Both fixed and re-verified live, 2026-09-15.
 - **Tenant isolation has three layers.** Path-only `tenant_id` with authorization, `TenantScopedRepository`, and forced RLS on 24 tables for `nova_app`.
   - The live policy map shows `tenant_isolation` on every tenant table.
   - `public_discovery` is a `SELECT` policy on five catalog tables, and only rows that are published match.
@@ -282,10 +288,10 @@ privilege escalation. Evidence is `live`, `code` or `design` (see the top of thi
 
 | ID | Sev | Finding | Evidence |
 | :--- | :--- | :--- | :--- |
-| TM-01 | **High** | An unverified phone number claims another person's customer record, at every tenant | live |
+| TM-01 | **High** — fixed 2026-09-15 | An unverified phone number claims another person's customer record, at every tenant | live |
 | TM-02 | **High** | The production image makes `X-Forwarded-For` the client address, so every per-IP limit can be bypassed | live (uvicorn 0.52.3) |
 | TM-03 | **High** — partially fixed 2026-09-15 | `SECRET_KEY` mints non-revocable, platform-wide service tokens, and the same key signs everything | code |
-| TM-04 | **High** | No email verification, and memberships are granted by email: a pre-registered account becomes staff | code |
+| TM-04 | **High** — fixed 2026-09-15 | No email verification, and memberships are granted by email: a pre-registered account becomes staff | code |
 | TM-05 | **High** | The media upload authorisation cannot be enforced by Nextcloud, and one service account holds every tenant's media | code, design |
 | TM-06 | Medium | Share links never expire, survive deletion, and binaries are never purged | code |
 | TM-07 | Medium | The tunnel token is given to `backend` and `worker` | code |
@@ -354,6 +360,58 @@ async def list_for_customer_reference(self, reference_id, *, self_service, limit
 A second customer record with the same phone number must then be allowed at a tenant, or refused
 clearly. Check the uniqueness rules on `customers.phone` before changing this.
 
+- **Re-reproduced live, 2026-09-15, before the fix, with two refinements over the original
+  write-up:**
+  - The read alone (`GET /bookings`) does **not** persist the claim — `resolve_for_booking` only
+    `flush()`es, and the router never calls `session.commit()` on a GET, so `customers.user_id`
+    stayed `NULL` after the leak. Confirmed by reading the row directly. The leak of booking
+    history and notes to an unrelated principal was real and immediate regardless.
+  - Any *committing* self-service path made it permanent: a plain self-service `POST /bookings`
+    (no `on_behalf_of_customer_id`, never having visited the tenant before) was enough —
+    `customers.user_id` was set to the attacker's account on commit, confirmed directly in the
+    database. From that point the attacker could `POST .../cancel` the victim's original,
+    staff-made booking — proven live.
+
+- **Fixed, 2026-09-15**, essentially as sketched above, then reworked the same day (still 2026-09-15)
+  to sign the verification credential as a JWT rather than a numeric one-time code, at the user's
+  request, following https://curity.io/resources/learn/jwt-best-practices/:
+  - `users.phone_verified_at`, set only by `AuthService.confirm_phone_verification` after a
+    short-lived (`PHONE_VERIFY_TTL_SECONDS`, 10 minutes), purpose-signed JWT
+    (`security.issue_purpose_token` / `decode_purpose_token`, `request_phone_verification`) comes
+    back verified — a new, tenant-less capability in identity, using the same
+    `app/integrations/whatsapp/client.py` adapter `notification` uses, called directly rather than
+    through that module (identity is the root context and must depend on nothing else in
+    `app.modules`).
+  - No table backs the token: verification is a pure signature check (`decode_purpose_token`),
+    so there is nothing to hash, store, or count wrong guesses against — the first version's
+    `phone_verification_codes` table (a hashed 6-digit code with an attempt counter) is gone. The
+    token is not tracked as single-use either: replaying it before expiry only re-confirms an
+    already-idempotent fact, so the state that would buy is not worth keeping.
+  - `security.purpose_key(secret, purpose)` derives a distinct signing key per purpose from the
+    root `SECRET_KEY` — a first concrete step on TM-03's still-open "per-purpose key derivation"
+    item, applied here first. `issue_purpose_token` carries only `sub`, `typ` (the purpose itself),
+    `jti`, and the time claims — no phone number, no name, nothing PII — because whatever channel
+    carries it (WhatsApp) is a front channel in that article's sense: readable by the messaging
+    provider, visible in a lock-screen notification preview, sitting in chat history. `typ` set to
+    the purpose also means `get_principal` already refuses one of these as a bearer token with no
+    extra code (it only accepts `typ="access"`), matching the article's practice #7 — a token
+    minted for one job must not work as another.
+  - `CustomerRepository.get_unclaimed_by_phone` filters `user_id IS NULL`; `ensure_for_user` only
+    calls it once `phone_verified_at is not None`. An unverified phone that matches *any* existing
+    record (claimed or not) is refused with `PhoneVerificationRequiredError` rather than being told
+    which case it is — an unverified caller learns nothing about whether the number is free,
+    walk-in, or somebody else's, until they actually prove they control it.
+  - `list_for_customer_reference`, `BookingService.create`, `QueueService.join`, and the AI tools
+    all funnel through this one choke point (`CustomerService.ensure_for_user` /
+    `resolve_for_booking`), so fixing it there closed every reachable path at once.
+  - Migration `4a6c151e23df`. Tests: `tests/modules/identity/test_customer_claims.py`
+    (`test_an_unverified_phone_cannot_claim_an_existing_record` proves the walk-in's `user_id`
+    stays `NULL`; `test_a_verified_phone_claims_the_matching_unclaimed_record` proves the intended
+    path still works).
+  - Re-verified live against the fix: an unverified attacker now gets 422
+    `phone_verification_required` on both the read and the committing self-service booking; the
+    victim's `customers.user_id` stayed `NULL` in the database throughout.
+
 ### TM-02: The production image makes `X-Forwarded-For` the client address
 
 - **Where:** `nova_backend/Dockerfile` runtime `CMD` passes `--proxy-headers --forwarded-allow-ips "*"`.
@@ -408,11 +466,13 @@ def purpose_key(secret: str, purpose: str) -> bytes:
   - `decode_token` now requires an `iat` claim and refuses `exp - iat > REFRESH_TOKEN_TTL_SECONDS`
     (30 days), for every token — access, refresh, and any forged one. A leaked key can no longer
     mint a token that outlives the longest one this app ever issues itself.
-  - **Still open:** one root key signs access tokens, refresh tokens, slot ids, QR tickets and
-    upload authorisations, with no per-purpose derivation and no `kid` for rotation. A leaked key
-    still forges a valid, bounded-lifetime STAFF or CUSTOMER token for any account whose current
-    `token_version` the forger also knows — the fixes above close the SERVICE-principal and
-    unbounded-lifetime angles specifically, not the key-compromise scenario as a whole.
+  - **Still open:** the *access and refresh tokens themselves* — the ones that matter most, since
+    they carry a live `Principal` — still sign with the plain root key, with no `kid` for
+    rotation. A leaked key still forges a valid, bounded-lifetime STAFF or CUSTOMER token for any
+    account whose current `token_version` the forger also knows. `security.purpose_key` (added for
+    TM-01's phone-verification token) now exists and is proven in `TestPurposeTokens`, so extending
+    per-purpose derivation to access/refresh tokens, slot ids, QR tickets and upload
+    authorisations is mechanical rather than a new design — just not yet done for those.
   - Tests: `tests/test_security.py::TestServiceKindRefusal`, the lifetime-bound cases in
     `TestTokenVerification`, and `test_a_service_token_is_refused_outside_local_and_test`.
 
@@ -430,6 +490,40 @@ user = await self.users.find_by_email(validate_email(email))
 if user is None or user.email_verified_at is None:
     raise UserNotFoundError(email)  # the same answer, so grants are not an enumeration oracle
 ```
+
+- **Re-reproduced live, 2026-09-15, before the fix.** Pre-registered an email before the
+  (simulated) owner granted it `manager`; the pre-registered account received a STAFF token for
+  the tenant on its next login, with no verification step anywhere in between. Confirmed the
+  resulting access was not cosmetic: with that token the account read every customer record at
+  the tenant (PII and free-text notes included) and successfully called `GET .../billing/payouts`
+  and `GET .../analytics/financial-summary` — both permission-gated on `VIEW_FINANCIALS`, which
+  `manager` carries per `_ROLE_PERMISSIONS`, alongside `REFUND_PAYMENTS`.
+
+- **Fixed, 2026-09-15 — the second option above, not the first:** an invite-token flow
+  (`membership_invites`) replaced grant-by-email rather than adding email verification. NOVA has
+  no email-sending integration at all (only Moyasar, Nextcloud, WhatsApp, and the Cloudflare
+  tunnel), so "verify an email" would have meant building one from nothing; a token is the
+  standard invite-link model (Slack, GitHub) and needs no delivery channel of NOVA's own.
+  - `POST /memberships` no longer resolves `users.find_by_email` at all — it creates a
+    `MembershipInvite` (tenant-owned, RLS-forced) with a random 32-byte token and returns the
+    token once, in the response. Relaying it to the actual person is the inviter's job, by
+    whatever channel they would use anyway.
+  - `POST /memberships/invites/{id}/accept` redeems it: any authenticated principal (not SERVICE)
+    presenting the correct token gets the membership. Deliberately does **not** check the
+    invite's `email` against the accepting principal — matching that field is exactly the
+    unverified-string trust this closes. The token is the entire credential.
+  - This route reaches a tenant the caller is not yet authorized for by design, so it cannot
+    depend on `get_authorized_tenant`/`get_tenant_context` — see
+    `SELF_AUTHORIZING_TENANT_ROUTES` in `tests/test_route_guards.py`. It opens the same narrow
+    `bypass_tenant_scope` window `AuthService._issue_pair` already uses to read `memberships`
+    before any tenant is authorized, closes it once the token has checked out, and only then
+    writes.
+  - Migration `4a6c151e23df`. Tests: `tests/modules/identity/test_membership_invites.py`
+    (`test_pre_registering_the_invited_address_gains_nothing_without_the_token` is the direct
+    regression), plus the invite/accept coverage in `test_membership_router.py`.
+  - Re-verified live against the fix: the pre-registered account, logging in with no token,
+    listed zero tenants and got 403 on the staff customer list; redeeming the invite with the
+    correct token, as the actual intended account, succeeded and returned an active membership.
 
 ### TM-05: Media upload authorisation cannot be enforced by storage
 

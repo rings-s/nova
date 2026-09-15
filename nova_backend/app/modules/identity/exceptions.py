@@ -1,5 +1,5 @@
 from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainError
-from app.core.security import AuthorizationError
+from app.core.security import AuthenticationError, AuthorizationError
 
 
 class TenantNotFoundError(NotFoundError):
@@ -45,20 +45,24 @@ class CustomerPhoneRequiredError(ValidationDomainError):
         )
 
 
-class UserNotFoundError(NotFoundError):
-    """No account exists for the address an owner tried to add.
+class PhoneVerificationRequiredError(ValidationDomainError):
+    """This account's phone matches an existing, unclaimed customer record —
+    but the number has not been proven yet (docs/14 TM-01).
 
-    NOVA has no invite flow yet — `POST /memberships` grants access to an
-    account that already exists, so an unknown address is a 404 rather than a
-    pending invitation. That does make the endpoint answer "is this address
-    registered?", but only for a caller who has already proven they administer
-    a salon, and only at the write rate limit.
+    Before this existed, a self-service booking claimed that record on the
+    strength of a phone number nobody had verified, which read (and, on any
+    committing path, permanently took over) whoever the salon already knew by
+    that number. `AuthService.request_phone_verification` /
+    `confirm_phone_verification` are the way past this.
     """
 
-    code = "user_not_found"
+    code = "phone_verification_required"
 
-    def __init__(self, email: str) -> None:
-        super().__init__(f"No NOVA account is registered for '{email}'.")
+    def __init__(self) -> None:
+        super().__init__(
+            "Verify your phone number (POST /auth/phone/verify/request, then "
+            "/confirm) before this can be linked to your account."
+        )
 
 
 class MembershipNotFoundError(NotFoundError):
@@ -83,6 +87,20 @@ class DuplicateMembershipError(ConflictError):
             f"'{email}' already has access to this business. "
             "Change their role instead of granting it again."
         )
+
+
+class InvalidInviteError(AuthenticationError):
+    """The token presented to accept an invite proves nothing.
+
+    One answer for "no such invite", "wrong token", "already accepted" and
+    "expired" — same reasoning as `InvalidCredentialsError`: distinguishing
+    them would let a caller probe which invite ids exist and are still live.
+    """
+
+    code = "invalid_invite"
+
+    def __init__(self) -> None:
+        super().__init__("This invite is invalid, expired, or already used.")
 
 
 class LastOwnerError(ConflictError):

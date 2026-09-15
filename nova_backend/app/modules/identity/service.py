@@ -8,12 +8,16 @@ the router (see `app.core.deps.get_db_session`), so one endpoint can compose
 several service calls into a single atomic unit.
 """
 
+import hashlib
+import hmac
+import secrets
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from app.core.events import publish_event
 from app.core.security import AuthorizationError, Principal, PrincipalKind
 from app.core.validators import validate_email
-from app.db.session import set_tenant_scope
+from app.db.session import bypass_tenant_scope, set_tenant_scope
 from app.modules.identity.domain import (
     MembershipRole,
     StaffPermission,
@@ -31,18 +35,31 @@ from app.modules.identity.exceptions import (
     DuplicatePhoneError,
     DuplicateSlugError,
     InsufficientRoleError,
+    InvalidInviteError,
     LastOwnerError,
     MembershipNotFoundError,
+    PhoneVerificationRequiredError,
     TenantNotFoundError,
-    UserNotFoundError,
 )
-from app.modules.identity.models import Customer, Membership, Tenant, User
+from app.modules.identity.models import Customer, Membership, MembershipInvite, Tenant, User
 from app.modules.identity.repository import (
     CustomerRepository,
+    MembershipInviteRepository,
     MembershipRepository,
     TenantRepository,
     UserRepository,
 )
+
+
+def _hash_invite_token(token: str) -> str:
+    """Hashes an invite token for storage.
+
+    Unsalted, unlike a password hash: the token is 32 random bytes
+    (`secrets.token_urlsafe(32)`, ~256 bits), so there is nothing short to
+    precompute a table against. A salt defends against a small search space;
+    this one has none.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 class TenantService:
@@ -276,17 +293,36 @@ class CustomerService:
         Matched by `user_id` first, then by phone: if reception already typed
         this person in as a walk-in, that existing record is claimed rather than
         creating a duplicate that splits their history in two.
+
+        The phone match is gated on `user.phone_verified_at` (docs/14 TM-01).
+        Before this existed, registering with someone else's phone number
+        claimed their unlinked customer record on the strength of that claim
+        alone — no proof required — which read their booking history
+        immediately and, on any committing self-service path, permanently
+        took over their identity at that salon. `AuthService.
+        request_phone_verification` / `confirm_phone_verification` are the
+        way to earn the claim; an unverified number that already belongs to
+        someone else's record falls through to `create()` below, which
+        raises `DuplicatePhoneError` rather than silently duplicating or
+        stealing it.
         """
         existing = await self.repository.get_by_user_id(user.id)
         if existing is not None:
             return existing
 
-        if user.phone:
-            by_phone = await self.repository.get_by_phone(user.phone)
+        if user.phone and user.phone_verified_at is not None:
+            by_phone = await self.repository.get_unclaimed_by_phone(user.phone)
             if by_phone is not None:
                 by_phone.user_id = user.id
                 await self.repository.session.flush()
                 return by_phone
+        elif user.phone:
+            # A record with this exact number may already exist — claimed or
+            # not, staff-authored notes and all. Whether it does is exactly
+            # the fact an unverified caller must not be able to read, so this
+            # asks nothing and simply requires verification before proceeding.
+            if await self.repository.get_by_phone(user.phone) is not None:
+                raise PhoneVerificationRequiredError()
 
         if not user.phone:
             # Booking needs a reachable phone number for the ticket and the
@@ -318,16 +354,34 @@ class MembershipService:
     connection for RLS.
     """
 
+    #: How long an invite is redeemable. Generous — an owner inviting someone
+    #: who is on leave should not have to reissue it — but not indefinite:
+    #: a stale, forgotten invite is a standing credential nobody is watching.
+    INVITE_TTL = timedelta(days=7)
+
     def __init__(
         self,
         repository: MembershipRepository,
         *,
         users: UserRepository,
+        invites: MembershipInviteRepository,
         tenant_id: UUID,
     ) -> None:
         self.repository = repository
         self.users = users
+        self.invites = invites
         self.tenant_id = tenant_id
+
+    # `list_invites` is defined ahead of `list` below on purpose: a class-body
+    # annotation naming the bare `list` type resolves against names already
+    # bound in that class's namespace, and `list` (the method just below)
+    # would otherwise shadow the builtin for every annotation after it.
+    async def list_invites(
+        self, principal: Principal, *, limit: int = 20, offset: int = 0
+    ) -> list[MembershipInvite]:
+        """Pending invites this tenant has sent — never their tokens."""
+        await self._require_member(principal)
+        return await self.invites.list_pending(self.tenant_id, limit=limit, offset=offset)
 
     async def list(
         self, principal: Principal, *, limit: int = 20, offset: int = 0
@@ -341,27 +395,89 @@ class MembershipService:
         await self._require_member(principal)
         return await self.repository.list_for_tenant(self.tenant_id, limit=limit, offset=offset)
 
-    async def grant(self, principal: Principal, *, email: str, role: MembershipRole) -> Membership:
-        """Gives an existing account access to this salon.
+    async def invite(
+        self, principal: Principal, *, email: str, role: MembershipRole
+    ) -> tuple[MembershipInvite, str]:
+        """Starts staff access for `email`, redeemable only by whoever holds
+        the returned token.
 
-        The grantee's outstanding access token does not carry the new tenant —
-        tokens bake memberships in at issue time. They pick it up on their next
-        `/auth/refresh`, so within the 15-minute access token lifetime. Forcing
-        a revocation to shorten that would log them out of everything else for
-        no security gain, since the change only ever adds access.
+        Replaces granting straight to whichever account currently holds
+        `email` (docs/14 TM-04): that account might not be who the inviter
+        means, if someone else registered the address first — NOVA has no
+        way to tell "the real new hire" from "whoever typed this email in
+        first", and a token is what makes that distinction unnecessary.
+
+        The token is returned once, here, and is not stored anywhere in
+        plaintext — only `token_hash` is. Relaying it to the actual person is
+        the inviter's job, through whatever channel they would use anyway.
         """
         await self._require_may_manage(principal, role)
 
-        user = await self.users.find_by_email(validate_email(email))
-        if user is None:
-            raise UserNotFoundError(email)
+        email = validate_email(email)
+        token = secrets.token_urlsafe(32)
+        invited_by = None if principal.kind is PrincipalKind.SERVICE else principal.subject_id
+
+        record = MembershipInvite(
+            tenant_id=self.tenant_id,
+            email=email,
+            role=role,
+            token_hash=_hash_invite_token(token),
+            invited_by=invited_by,
+            expires_at=datetime.now(UTC) + self.INVITE_TTL,
+        )
+        self.invites.add(record)
+        await self.repository.session.flush()
+        return record, token
+
+    async def accept_invite(
+        self, principal: Principal, *, invite_id: UUID, token: str
+    ) -> Membership:
+        """Redeems an invite. The token is the entire credential.
+
+        Deliberately does not check that `principal`'s email matches the
+        invite's `email` — that field is the inviter's memo to themselves,
+        never an authorization input, or this would be exactly the
+        email-string trust TM-04 exists to remove. Whoever presents the
+        correct token gets the membership, the same model as a Slack or
+        GitHub invite link.
+
+        This is the one route that reaches a tenant the caller is not yet
+        authorized for — that is the whole point of accepting an invite — so
+        it is not built on `get_tenant_context`. It opens the same narrow
+        `bypass_tenant_scope` window `AuthService._issue_pair` already uses
+        to read `memberships` before any tenant is known, closes it the
+        moment the token has actually checked out, and only then writes.
+        See the `SELF_AUTHORIZING_TENANT_ROUTES` comment in
+        `tests/test_route_guards.py`.
+        """
+        if principal.kind is PrincipalKind.SERVICE:
+            # Platform machinery already reaches every tenant; an invite is
+            # for a person, and SERVICE has no `users` row to hold one.
+            raise AuthorizationError("A service principal cannot accept an invite.")
+
+        await bypass_tenant_scope(self.repository.session)
+        record = await self.invites.get(invite_id)
+        now = datetime.now(UTC)
+        if (
+            record is None
+            or record.tenant_id != self.tenant_id
+            or record.accepted_at is not None
+            or record.expires_at < now
+            or not hmac.compare_digest(_hash_invite_token(token), record.token_hash)
+        ):
+            raise InvalidInviteError()
+
+        await set_tenant_scope(self.repository.session, self.tenant_id)
 
         membership_id = await self.repository.grant(
-            user_id=user.id, tenant_id=self.tenant_id, role=role
+            user_id=principal.subject_id, tenant_id=self.tenant_id, role=MembershipRole(record.role)
         )
         if membership_id is None:
-            raise DuplicateMembershipError(email)
+            raise DuplicateMembershipError(record.email)
 
+        record.accepted_at = now
+        record.accepted_by = principal.subject_id
+        await self.repository.session.flush()
         return await self._load(membership_id)
 
     async def change_role(

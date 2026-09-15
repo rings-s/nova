@@ -1,16 +1,18 @@
 from uuid import UUID
 
-from fastapi import Depends
+from fastapi import Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_db_session, get_tenant_context
 from app.core.rate_limit import get_rate_limiter
 from app.core.security import Principal, require_staff
+from app.integrations.whatsapp.client import WhatsAppClient, build_whatsapp_client
 from app.modules.identity.auth_service import AuthService
 from app.modules.identity.domain import StaffPermission
 from app.modules.identity.repository import (
     CustomerRepository,
+    MembershipInviteRepository,
     MembershipRepository,
     TenantRepository,
     UserRepository,
@@ -40,6 +42,7 @@ def get_membership_service(
     memberships: MembershipRepository = Depends(get_membership_repository),
     users: UserRepository = Depends(get_user_repository),
     tenant_id: UUID = Depends(get_tenant_context),
+    session: AsyncSession = Depends(get_db_session),
 ) -> MembershipService:
     """Scoped to the path tenant, which `get_tenant_context` has authorized.
 
@@ -47,7 +50,33 @@ def get_membership_service(
     `memberships` reads below are bounded by the database as well as by the
     explicit `tenant_id` the service passes into every query.
     """
-    return MembershipService(memberships, users=users, tenant_id=tenant_id)
+    return MembershipService(
+        memberships,
+        users=users,
+        invites=MembershipInviteRepository(session, tenant_id),
+        tenant_id=tenant_id,
+    )
+
+
+def get_membership_service_unauthorized(
+    tenant_id: UUID = Path(...),
+    session: AsyncSession = Depends(get_db_session),
+) -> MembershipService:
+    """For `accept_invite` alone: the one route that grants access to a
+    tenant the caller does not have yet, so it cannot depend on
+    `get_tenant_context` proving they already do.
+
+    `tenant_id` is the raw path value, unauthorized and with the connection's
+    RLS scope untouched — `MembershipService.accept_invite` is what proves it,
+    by validating the invite token before trusting it for anything. See
+    `SELF_AUTHORIZING_TENANT_ROUTES` in `tests/test_route_guards.py`.
+    """
+    return MembershipService(
+        MembershipRepository(session),
+        users=UserRepository(session),
+        invites=MembershipInviteRepository(session, tenant_id),
+        tenant_id=tenant_id,
+    )
 
 
 def build_membership_service(session: AsyncSession, tenant_id: UUID) -> MembershipService:
@@ -58,7 +87,10 @@ def build_membership_service(session: AsyncSession, tenant_id: UUID) -> Membersh
     scopes that session to the tenant first.
     """
     return MembershipService(
-        MembershipRepository(session), users=UserRepository(session), tenant_id=tenant_id
+        MembershipRepository(session),
+        users=UserRepository(session),
+        invites=MembershipInviteRepository(session, tenant_id),
+        tenant_id=tenant_id,
     )
 
 
@@ -126,6 +158,28 @@ def get_customer_service(
     return build_customer_service(session, tenant_id)
 
 
-def get_auth_service(session: AsyncSession = Depends(get_db_session)) -> AuthService:
+def get_identity_whatsapp_client() -> WhatsAppClient:
+    """Identity's own instance, built the same way `notification`'s is.
+
+    Not imported from `notification/dependencies.py`: identity is the root
+    context and must depend on nothing else in `app.modules` (see
+    `identity/__init__.py`) — `app.integrations` is shared infrastructure,
+    not another module's internals, so building the same adapter here is the
+    correct duplication rather than a backward import.
+    """
+    settings = get_settings()
+    return build_whatsapp_client(
+        api_key=settings.whatsapp_bsp_api_key,
+        phone_number_id=settings.whatsapp_phone_number_id,
+        base_url=settings.whatsapp_bsp_base_url,
+    )
+
+
+def get_auth_service(
+    session: AsyncSession = Depends(get_db_session),
+    whatsapp: WhatsAppClient = Depends(get_identity_whatsapp_client),
+) -> AuthService:
     """Not tenant-scoped: signing in happens before any tenant is chosen."""
-    return AuthService(session, secret_key=get_settings().secret_key, limiter=get_rate_limiter())
+    return AuthService(
+        session, secret_key=get_settings().secret_key, limiter=get_rate_limiter(), whatsapp=whatsapp
+    )

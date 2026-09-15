@@ -59,14 +59,47 @@ class CustomerOut(ApiSchema):
 
 
 class CreateMembershipRequest(ApiSchema):
-    """Grant by email address, to an account that already exists.
+    """Starts an invite to `email`, for whoever redeems its token.
 
     No `user_id`: an owner adding a colleague knows their email, not their
     internal id, and accepting an id would let a caller probe for valid ones.
+    `email` is the inviter's own record of intent — never checked against
+    whoever accepts (docs/14 TM-04).
     """
 
     email: str = Field(max_length=255)
     role: MembershipRole
+
+
+class MembershipInviteOut(ApiSchema):
+    """The invite, plus its one-time token.
+
+    `token` is returned here and nowhere else — only its hash is stored.
+    Relaying it to the actual person is the inviter's job.
+    """
+
+    id: UUID
+    tenant_id: UUID
+    email: str
+    role: MembershipRole
+    token: str
+    expires_at: datetime
+    created_at: datetime
+
+
+class MembershipInviteSummary(ApiSchema):
+    """A pending invite, listed without its token."""
+
+    id: UUID
+    tenant_id: UUID
+    email: str
+    role: MembershipRole
+    expires_at: datetime
+    created_at: datetime
+
+
+class AcceptInviteRequest(ApiSchema):
+    token: str = Field(min_length=1, max_length=128)
 
 
 class UpdateMembershipRoleRequest(ApiSchema):
@@ -114,6 +147,14 @@ class LoginRequest(ApiSchema):
 
 class RefreshRequest(ApiSchema):
     refresh_token: str
+
+
+class ConfirmPhoneVerificationRequest(ApiSchema):
+    #: The purpose-signed JWT `request_phone_verification` sent over WhatsApp
+    #: (`security.issue_purpose_token`), not a typed-in code. A generous cap
+    #: rather than none: request bodies have no size limit yet (docs/14
+    #: TM-10), so an unbounded string field is a small, free thing to bound.
+    token: str = Field(min_length=1, max_length=4096)
 
 
 class TokenOut(ApiSchema):

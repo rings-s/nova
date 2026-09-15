@@ -19,14 +19,18 @@ from app.core.throttling import write_rate_limit
 from app.modules.identity.dependencies import (
     get_customer_service,
     get_membership_service,
+    get_membership_service_unauthorized,
     get_tenant_service,
 )
-from app.modules.identity.models import Customer, Membership, Tenant
+from app.modules.identity.models import Customer, Membership, MembershipInvite, Tenant
 from app.modules.identity.schemas import (
+    AcceptInviteRequest,
     CreateCustomerRequest,
     CreateMembershipRequest,
     CreateTenantRequest,
     CustomerOut,
+    MembershipInviteOut,
+    MembershipInviteSummary,
     MembershipOut,
     TenantOut,
     UpdateCustomerConsentRequest,
@@ -198,30 +202,87 @@ async def list_memberships(
     return Page(items=[_membership_out(r) for r in rows])
 
 
+def _invite_out(invite: MembershipInvite, token: str) -> MembershipInviteOut:
+    return MembershipInviteOut(
+        id=invite.id,
+        tenant_id=invite.tenant_id,
+        email=invite.email,
+        role=invite.role,
+        token=token,
+        expires_at=invite.expires_at,
+        created_at=invite.created_at,
+    )
+
+
 @memberships_router.post(
     "",
-    response_model=MembershipOut,
+    response_model=MembershipInviteOut,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_staff), Depends(write_rate_limit)],
 )
-async def grant_membership(
+async def invite_membership(
     tenant_id: UUID,
     payload: CreateMembershipRequest,
     session: AsyncSession = Depends(get_db_session),
     service: MembershipService = Depends(get_membership_service),
     principal: Principal = Depends(get_principal),
-) -> MembershipOut:
-    """Adds an existing NOVA account to this business.
+) -> MembershipInviteOut:
+    """Starts staff access for `email`. Nobody has it yet.
 
-    404 on an unknown address: there is no invite flow yet, so the person must
-    already have registered. 409 if they already work here — changing somebody
-    already on staff is `PATCH`, so a mistyped role cannot silently demote a
-    colleague.
-
-    The grantee's current access token does not carry this tenant; they pick it
-    up on their next `/auth/refresh`, within the 15-minute access token life.
+    The response's `token` is shown once, here, and is the entire credential
+    for accepting the invite (`POST .../invites/{id}/accept`) — relaying it to
+    the actual person is the caller's job, by whatever means they would use
+    anyway. NOVA never resolves this by matching `email` against an existing
+    account (docs/14 TM-04): whoever registered that address first no longer
+    matters, only whoever holds the token does.
     """
-    membership = await service.grant(principal, email=payload.email, role=payload.role)
+    invite, token = await service.invite(principal, email=payload.email, role=payload.role)
+    await session.commit()
+    return _invite_out(invite, token)
+
+
+@memberships_router.get(
+    "/invites",
+    response_model=Page[MembershipInviteSummary],
+    dependencies=[Depends(require_staff)],
+)
+async def list_pending_invites(
+    tenant_id: UUID,
+    params: PageParams = Depends(),
+    service: MembershipService = Depends(get_membership_service),
+    principal: Principal = Depends(get_principal),
+) -> Page[MembershipInviteSummary]:
+    """Invites this business has sent that nobody has redeemed yet.
+
+    Never includes a token — those are shown exactly once, at creation.
+    """
+    rows = await service.list_invites(principal, limit=params.limit, offset=params.offset)
+    return Page(items=[MembershipInviteSummary.model_validate(r) for r in rows])
+
+
+@memberships_router.post(
+    "/invites/{invite_id}/accept",
+    response_model=MembershipOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def accept_membership_invite(
+    tenant_id: UUID,
+    invite_id: UUID,
+    payload: AcceptInviteRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: MembershipService = Depends(get_membership_service_unauthorized),
+    principal: Principal = Depends(get_principal),
+) -> MembershipOut:
+    """Redeems an invite token. The token is the entire credential.
+
+    Deliberately reachable by a principal with no existing tie to this
+    tenant — see `get_membership_service_unauthorized` and
+    `SELF_AUTHORIZING_TENANT_ROUTES` in `tests/test_route_guards.py`. Any
+    authenticated account may call this; whether the token checks out is
+    where the actual authorization happens.
+    """
+    membership = await service.accept_invite(principal, invite_id=invite_id, token=payload.token)
     await session.commit()
     return _membership_out(membership)
 

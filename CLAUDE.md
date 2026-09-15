@@ -90,7 +90,7 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
    - **Autogenerate does not emit RLS.** A migration that creates a tenant-owned table must enable and force RLS and create the `tenant_isolation` policy itself. Copy the `_TENANT_TABLES` loop in `alembic/versions/e5f6a7b8c9d0_*.py`.
 
 There are two sanctioned exceptions:
-- **`bypass_tenant_scope`**: for the worker, the outbox and maintenance jobs only. Never use it on a request path.
+- **`bypass_tenant_scope`**: for the worker, the outbox and maintenance jobs — and, narrowly, for the two request paths whose entire job is to answer "which tenant" before any tenant is known or authorized: `AuthService._issue_pair` reading `memberships` at login, and `MembershipService.accept_invite` validating an invite token before trusting the tenant it names (`SELF_AUTHORIZING_TENANT_ROUTES` in `tests/test_route_guards.py`). Both close the bypass (via `set_tenant_scope`) before any other read or write. Do not add a third without the same justification.
 - **`set_discovery_scope`**: for the public marketplace (`discovery`, ADR-0010). It is SELECT-only and sees only published listings, through catalog's `PublicCatalogService`.
 
 **Never connect the app as a role RLS exempts.** Postgres skips every policy for a superuser or a `BYPASSRLS` role, `FORCE` or not.
@@ -101,6 +101,10 @@ There are two sanctioned exceptions:
 - `tests/test_row_level_security.py` fails when a tenant table lacks a forced `tenant_isolation` policy, or when `nova_app` lacks DML on a table.
 
 Caller identity is never read from the request. `customer_id` is derived from the principal. Only staff and service principals may pass `on_behalf_of_customer_id` (see `resolve_booking_customer`).
+
+A self-service booking or queue join resolves the caller's own customer record through `CustomerService.ensure_for_user`, which may *claim* an existing, unclaimed record by phone match — but only once `User.phone_verified_at` is set (`AuthService.request_phone_verification` / `confirm_phone_verification`, a short-lived JWT sent over WhatsApp, signed with a purpose-derived key via `security.purpose_key`/`issue_purpose_token`/`decode_purpose_token` rather than a stored, hashed one-time code — nothing backs the token but its own signature). An unverified phone that matches any existing record, claimed or not, is refused (`PhoneVerificationRequiredError`) rather than told which case it is.
+
+Staff access is granted through a redeemable invite (`MembershipService.invite` / `accept_invite`), never by matching an email string against whoever already holds a NOVA account with it. The token returned at invite time is the entire credential — NOVA does not deliver it; the inviter relays it out of band.
 
 ### Auth, rate limits, idempotency
 

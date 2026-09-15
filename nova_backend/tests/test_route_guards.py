@@ -54,6 +54,21 @@ TRANSACTIONLESS_TENANT_ROUTES: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+#: Tenant routes that authorize *themselves* rather than depending on
+#: `get_authorized_tenant`/`get_tenant_context` — because reaching a tenant
+#: the caller is not yet authorized for is the entire point of the route.
+#: `MembershipService.accept_invite` proves the right to act on the path's
+#: tenant_id by validating the invite token, inside its own narrow
+#: `bypass_tenant_scope` window — the same pattern `AuthService._issue_pair`
+#: already uses to read `memberships` before any tenant is authorized. It
+#: still depends on `get_principal` (any authenticated account may present a
+#: token) and on `get_db_session` (it does write, and commits) — it is just
+#: not gated on the caller already belonging to this tenant. See docs/14
+#: TM-04.
+SELF_AUTHORIZING_TENANT_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {("POST", "/tenants/{tenant_id}/memberships/invites/{invite_id}/accept")}
+)
+
 _BILLING = "/tenants/{tenant_id}/billing"
 _ANALYTICS = "/tenants/{tenant_id}/analytics"
 _MANAGE = frozenset({StaffPermission.MANAGE_SUBSCRIPTION})
@@ -126,6 +141,7 @@ def test_every_tenant_route_is_authorized_for_its_tenant() -> None:
         f"{method} {path}"
         for method, path, route in _routes()
         if path.startswith("/tenants/{tenant_id}")
+        and (method, path) not in SELF_AUTHORIZING_TENANT_ROUTES
         and not _depends_on(route.dependant, get_authorized_tenant)
     ]
     assert unauthorized == []
@@ -137,9 +153,21 @@ def test_every_tenant_route_scopes_its_connection_unless_it_holds_none() -> None
         for method, path, route in _routes()
         if path.startswith("/tenants/{tenant_id}")
         and (method, path) not in TRANSACTIONLESS_TENANT_ROUTES
+        and (method, path) not in SELF_AUTHORIZING_TENANT_ROUTES
         and not _depends_on(route.dependant, get_tenant_context)
     ]
     assert unscoped == []
+
+
+def test_self_authorizing_routes_still_authenticate_and_hold_a_transaction() -> None:
+    """The exemption above is from tenant *authorization*, not from
+    authentication or from having a session — `accept_invite` still needs
+    both, it just proves tenant access itself instead of assuming it."""
+    for method, path, route in _routes():
+        if (method, path) not in SELF_AUTHORIZING_TENANT_ROUTES:
+            continue
+        assert _depends_on(route.dependant, get_principal), f"{method} {path}"
+        assert _depends_on(route.dependant, get_db_session), f"{method} {path}"
 
 
 def test_the_ai_routes_hold_no_request_transaction() -> None:
@@ -192,5 +220,6 @@ def test_every_exemption_still_names_a_real_route() -> None:
     routes = {(method, path) for method, path, _ in _routes()}
     assert routes >= PUBLIC_ROUTES
     assert routes >= TRANSACTIONLESS_TENANT_ROUTES
+    assert routes >= SELF_AUTHORIZING_TENANT_ROUTES
     assert routes >= set(ROLE_GATED_ROUTES) | UNGATED_BILLING_ROUTES
     assert any(path.startswith(PUBLIC_PREFIX) for _, path in routes)

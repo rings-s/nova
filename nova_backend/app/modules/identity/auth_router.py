@@ -18,6 +18,7 @@ from app.core.throttling import (
 from app.modules.identity.auth_service import AuthService, InvalidCredentialsError
 from app.modules.identity.dependencies import get_auth_service
 from app.modules.identity.schemas import (
+    ConfirmPhoneVerificationRequest,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
@@ -106,4 +107,40 @@ async def logout_everywhere(
     request, and refresh does too.
     """
     await service.revoke_all_tokens(principal.subject_id)
+    await session.commit()
+
+
+@router.post(
+    "/phone/verify/request",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def request_phone_verification(
+    session: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
+    principal: Principal = Depends(get_principal),
+) -> None:
+    """Sends a short-lived, purpose-signed JWT to the account's own phone over
+    WhatsApp (docs/14 TM-01).
+
+    Proving the number is what lets a later self-service booking claim an
+    existing, unclaimed customer record that phone matches — see
+    `CustomerService.ensure_for_user`.
+    """
+    await service.request_phone_verification(principal.subject_id)
+    await session.commit()
+
+
+@router.post(
+    "/phone/verify/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def confirm_phone_verification(
+    payload: ConfirmPhoneVerificationRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
+    principal: Principal = Depends(get_principal),
+) -> None:
+    await service.confirm_phone_verification(principal.subject_id, payload.token)
     await session.commit()

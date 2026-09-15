@@ -37,6 +37,7 @@ import base64
 import hmac
 import json
 import math
+import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -216,17 +217,81 @@ def decode_token(token: str, *, secret: str, leeway_seconds: int = 0) -> dict:
         issued_at
     ):
         raise AuthenticationError("Token has no valid issue time.")
-    # However far out `exp` claims to be, it did not get there from
-    # `issue_token`: every token this app mints has `exp - iat` equal to one of
-    # ACCESS_TOKEN_TTL_SECONDS or REFRESH_TOKEN_TTL_SECONDS. A forged token —
-    # possible only with the signing key itself (TM-03) — is bounded to the
-    # longer of the two regardless of what its forger set `exp` to.
+    # However far out `exp` claims to be, it did not get there from anything
+    # this app mints: every token type here (access, refresh, and the
+    # purpose tokens below) has `exp - iat` well under REFRESH_TOKEN_TTL_
+    # SECONDS, the longest-lived one. A forged token — possible only with
+    # the signing key itself (TM-03) — is bounded to that regardless of what
+    # its forger set `exp` to.
     if expiry - issued_at > REFRESH_TOKEN_TTL_SECONDS:
         raise AuthenticationError("Token lifetime exceeds the maximum allowed.")
 
     if time.time() > expiry + leeway_seconds:
         raise AuthenticationError("Token has expired.")
 
+    return claims
+
+
+def purpose_key(secret: str, purpose: str) -> str:
+    """Derives a signing key for one narrow purpose from the root secret.
+
+    docs/14 TM-03's own fix sketch: "derive a key per purpose from the root
+    key". A token signed with `purpose_key(secret, "phone_verification")`
+    does not verify against the plain root secret, and vice versa — so even
+    if a purpose-token secret were somehow exposed on its own, it would not
+    forge an access token, and a leaked access-token flow does not touch
+    this derivation at all. Still HMAC-SHA256 under the hood (ADR-0006's
+    stdlib-only choice), just keyed differently per purpose.
+    """
+    return hmac.new(secret.encode(), f"nova:{purpose}".encode(), sha256).hexdigest()
+
+
+def issue_purpose_token(*, subject_id: UUID, purpose: str, secret: str, ttl_seconds: int) -> str:
+    """Mints a single-purpose JWT: no `kind`, no `tenants`, no `roles`.
+
+    For actions that need to prove *something narrow* about one account —
+    "this request came from whoever controls this session" — rather than
+    reissue the full `Principal` shape `issue_token` mints. Signed with
+    `purpose_key`, not the root secret, and `typ` is `purpose` itself, so
+    `get_principal` already refuses one of these outright (it only accepts
+    `typ="access"`) without any extra code — see practice #7 of
+    https://curity.io/resources/learn/jwt-best-practices/: a token minted for
+    one job must not be usable as another.
+
+    Carries nothing beyond `sub`, `typ`, `jti` and the time claims — no PII,
+    no business data. Whatever channel a purpose token travels over (a
+    WhatsApp message, for phone verification) is a front channel exactly in
+    that article's sense: readable by the messaging provider, visible in a
+    lock-screen notification preview, sitting in chat history. A claim that
+    would be sensitive on that channel does not belong in the token; look it
+    up server-side from `sub` instead.
+    """
+    now = int(time.time())
+    claims = {
+        "sub": str(subject_id),
+        "typ": purpose,
+        "jti": secrets.token_urlsafe(16),
+        "iat": now,
+        "exp": now + ttl_seconds,
+    }
+    header = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload = _b64url_encode(json.dumps(claims).encode())
+    key = purpose_key(secret, purpose)
+    signature = hmac.new(key.encode(), f"{header}.{payload}".encode(), sha256).digest()
+    return f"{header}.{payload}.{_b64url_encode(signature)}"
+
+
+def decode_purpose_token(token: str, *, purpose: str, secret: str) -> dict:
+    """Verifies a token minted by `issue_purpose_token` for exactly `purpose`.
+
+    Refuses a token minted for any other purpose (including a stolen access
+    or refresh token) with the same `AuthenticationError` a bad signature
+    gets — there is nothing useful in distinguishing "wrong purpose" from
+    "forged" to whoever presents one.
+    """
+    claims = decode_token(token, secret=purpose_key(secret, purpose))
+    if claims.get("typ") != purpose:
+        raise AuthenticationError("Token was not issued for this purpose.")
     return claims
 
 

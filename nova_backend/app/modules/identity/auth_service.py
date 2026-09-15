@@ -14,18 +14,26 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import DomainError
+from app.core.exceptions import DomainError, ValidationDomainError
 from app.core.passwords import hash_password, needs_rehash, verify_password
-from app.core.rate_limit import LOGIN_FAILURE_POLICY, RateLimiter, RateLimitExceeded
+from app.core.rate_limit import (
+    LOGIN_FAILURE_POLICY,
+    RateLimiter,
+    RateLimitExceeded,
+    RateLimitPolicy,
+)
 from app.core.security import (
     ACCESS_TOKEN_TTL_SECONDS,
     REFRESH_TOKEN_TTL_SECONDS,
     AuthenticationError,
     PrincipalKind,
+    decode_purpose_token,
     decode_token,
+    issue_purpose_token,
     issue_token,
 )
 from app.db.session import bypass_tenant_scope
+from app.integrations.whatsapp.client import NotConfiguredWhatsAppClient, WhatsAppClient
 from app.modules.identity.models import Membership, User
 
 logger = logging.getLogger(__name__)
@@ -38,6 +46,22 @@ logger = logging.getLogger(__name__)
 #: it could lock anybody out on its own.
 MAX_FAILED_LOGINS = 20
 LOCKOUT_DURATION = timedelta(minutes=15)
+
+#: docs/14 TM-01. A short-lived, purpose-signed JWT (`issue_purpose_token`),
+#: not a numeric one-time code in a database table: verifying the signature
+#: is the whole check, so there is nothing to hash, store, or count wrong
+#: guesses against — a valid signature cannot be brute-forced in any
+#: practical time, unlike a 6-digit code. The token is not tracked as
+#: single-use: replaying it before it expires only re-confirms an already-
+#: idempotent fact (`phone_verified_at`), so the state that would buy is not
+#: worth keeping.
+PHONE_VERIFY_PURPOSE = "phone_verification"
+PHONE_VERIFY_TTL_SECONDS = 10 * 60
+#: Per account, not per client address: the account owner is the one who
+#: should be requesting these, however many devices they use, and an
+#: attacker who can only see the account (never its phone) should not be
+#: able to ring it with WhatsApp messages indefinitely.
+PHONE_VERIFY_REQUEST_POLICY = RateLimitPolicy(limit=3, window_seconds=15 * 60)
 
 
 class InvalidCredentialsError(AuthenticationError):
@@ -58,6 +82,24 @@ class EmailAlreadyRegisteredError(DomainError):
         super().__init__("That email address is already registered.")
 
 
+class NoPhoneToVerifyError(ValidationDomainError):
+    code = "no_phone_to_verify"
+
+    def __init__(self) -> None:
+        super().__init__("Add a phone number to your account before verifying it.")
+
+
+class InvalidVerificationTokenError(ValidationDomainError):
+    """One answer for wrong, expired, wrong-purpose, and missing — same
+    reasoning as `InvalidCredentialsError`: distinguishing them tells a
+    guesser which one they got right."""
+
+    code = "invalid_verification_token"
+
+    def __init__(self) -> None:
+        super().__init__("That verification link or code is invalid or has expired.")
+
+
 class TokenPair:
     __slots__ = ("access_token", "expires_in", "refresh_token", "token_type")
 
@@ -74,10 +116,18 @@ def _email_digest(email: str) -> str:
 
 
 class AuthService:
-    def __init__(self, session: AsyncSession, *, secret_key: str, limiter: RateLimiter) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        secret_key: str,
+        limiter: RateLimiter,
+        whatsapp: WhatsAppClient | None = None,
+    ) -> None:
         self.session = session
         self.secret_key = secret_key
         self.limiter = limiter
+        self.whatsapp = whatsapp or NotConfiguredWhatsAppClient()
 
     # --- registration ------------------------------------------------------
 
@@ -167,6 +217,72 @@ class AuthService:
         if user is not None:
             user.token_version += 1
             await self.session.flush()
+
+    # --- phone verification (docs/14 TM-01) --------------------------------
+
+    async def request_phone_verification(self, user_id: UUID) -> None:
+        """Sends a short-lived, purpose-signed JWT to the account's own phone.
+
+        Required before `CustomerService.ensure_for_user` will let a
+        self-service booking claim an existing, unclaimed customer record by
+        phone match — otherwise the claim rests on nothing but the caller's
+        say-so. Rate-limited per account: the account owner is the one who
+        should be asking, however many devices they use.
+
+        No server-side row is written for the token itself — `decode_
+        purpose_token` verifies it by signature alone, so there is nothing to
+        invalidate here the way an OTP row would need clearing on a fresh
+        request. A replay before expiry only re-confirms an already-true
+        fact; see `PHONE_VERIFY_PURPOSE`'s comment above.
+        """
+        user = await self.session.get(User, user_id)
+        if user is None or not user.phone:
+            raise NoPhoneToVerifyError()
+
+        allowance = await self.limiter.check(
+            f"phone-verify-request:{user_id}", PHONE_VERIFY_REQUEST_POLICY
+        )
+        if not allowance.allowed:
+            raise RateLimitExceeded(allowance.retry_after_seconds, PHONE_VERIFY_REQUEST_POLICY)
+
+        token = issue_purpose_token(
+            subject_id=user_id,
+            purpose=PHONE_VERIFY_PURPOSE,
+            secret=self.secret_key,
+            ttl_seconds=PHONE_VERIFY_TTL_SECONDS,
+        )
+        # No PII in the WhatsApp message body beyond the token: the phone
+        # number and account name stay server-side (Curity JWT best practice
+        # #2 — a front-channel message should not carry sensitive data, and
+        # the token itself carries none either, only `sub`/`typ`/`jti`/times).
+        await self.whatsapp.send_template_message(
+            to_phone=user.phone,
+            template_name="phone_verification",
+            params={"token": token},
+        )
+
+    async def confirm_phone_verification(self, user_id: UUID, token: str) -> None:
+        """Marks the account's phone verified, if `token` is live and its own.
+
+        Checking `claims["sub"] == user_id` (not just that the token is
+        valid for *some* account) matters: without it, a token that leaked
+        from one account's WhatsApp thread could verify a different,
+        already-authenticated caller's phone instead of its own.
+        """
+        try:
+            claims = decode_purpose_token(
+                token, purpose=PHONE_VERIFY_PURPOSE, secret=self.secret_key
+            )
+        except AuthenticationError as exc:
+            raise InvalidVerificationTokenError() from exc
+
+        if claims.get("sub") != str(user_id):
+            raise InvalidVerificationTokenError()
+
+        user = await self.session.get(User, user_id)
+        if user is not None:
+            user.phone_verified_at = datetime.now(UTC)
+        await self.session.flush()
 
     # --- internals ---------------------------------------------------------
 

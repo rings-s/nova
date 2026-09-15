@@ -73,6 +73,18 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     # change, suspected compromise).
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Proven by a short-lived, purpose-signed JWT sent over WhatsApp
+    # (identity/auth_service.py: request_phone_verification /
+    # confirm_phone_verification), not by merely typing a number at
+    # registration. `CustomerService.ensure_for_user` checks this before
+    # letting a self-service booking claim an existing, unclaimed customer
+    # record by phone match — see docs/14 TM-01. There is currently no
+    # "change my phone" endpoint; if one is added, it must reset this to
+    # NULL, since a verified *old* number proves nothing about a new one.
+    phone_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     memberships: Mapped[list["Membership"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -99,6 +111,45 @@ class Membership(Base, UUIDPKMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     user: Mapped["User"] = relationship(back_populates="memberships")
+
+
+class MembershipInvite(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
+    """An offer of staff access, redeemable only by whoever holds `token`.
+
+    Replaces granting straight to `users.find_by_email(email)` (docs/14
+    TM-04): that trusted an unverified string to decide who administers a
+    salon, and whoever registered that address first — not necessarily the
+    person the inviter meant — received it. `email` here is informational
+    only, for the inviter's own record of who they meant to reach; accepting
+    an invite is authorized by the token alone, the same trust model as a
+    Slack or GitHub invite link. NOVA does not deliver the token anywhere —
+    the inviter relays it themselves, by whatever channel they would use
+    regardless (their own email, WhatsApp, in person).
+    """
+
+    __tablename__ = "membership_invites"
+    __table_args__ = (
+        # `list_pending` filters on exactly this pair. Declared here too, or
+        # autogenerate proposes dropping it on every run (see `User` above).
+        Index("ix_membership_invites_tenant_pending", "tenant_id", "accepted_at"),
+    )
+
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[MembershipRole] = mapped_column(String(32), nullable=False)
+    #: A hash (`identity.service._hash_invite_token`), never the token itself.
+    #: The token is high-entropy (32 random bytes), so unlike the OTP above,
+    #: the hash alone is the real defense — there is nothing short to guess.
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: Null for a SERVICE principal, which has no `users` row (see `Tenant`'s
+    #: `owner_user_id` for the same situation).
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class Customer(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMixin):
