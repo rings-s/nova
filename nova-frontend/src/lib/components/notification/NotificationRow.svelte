@@ -17,7 +17,9 @@
 	};
 </script>
 
-<div class="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-0 dark:border-slate-800">
+<div
+	class="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-0 dark:border-slate-800"
+>
 	<div>
 		<p class="text-sm font-medium text-slate-900 dark:text-slate-100">
 			{notification.template.replaceAll('_', ' ')}

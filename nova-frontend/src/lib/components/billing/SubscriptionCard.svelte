@@ -11,12 +11,17 @@
 	let { subscription, locale = 'en' } = $props();
 
 	/** @type {Record<string, 'neutral'|'success'|'warning'|'error'|'info'|'accent'>} */
-	const statusTone = { trialing: 'info', active: 'success', past_due: 'warning', cancelled: 'neutral' };
+	const statusTone = {
+		trialing: 'info',
+		active: 'success',
+		past_due: 'warning',
+		cancelled: 'neutral'
+	};
 </script>
 
 <Card>
 	<div class="flex items-center justify-between">
-		<h3 class="text-lg font-semibold capitalize text-slate-900 dark:text-slate-100">
+		<h3 class="text-lg font-semibold text-slate-900 capitalize dark:text-slate-100">
 			{subscription.tier} plan
 		</h3>
 		<Badge tone={statusTone[subscription.status] ?? 'neutral'}>{subscription.status}</Badge>
@@ -42,8 +47,8 @@
 	{/if}
 	{#if subscription.marketplace_listing_hidden}
 		<Alert tone="error" class="mt-3">
-			The marketplace listing is hidden for non-payment. Calendar, queue and existing bookings
-			keep working.
+			The marketplace listing is hidden for non-payment. Calendar, queue and existing bookings keep
+			working.
 		</Alert>
 	{/if}
 </Card>

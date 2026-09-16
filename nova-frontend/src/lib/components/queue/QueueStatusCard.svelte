@@ -8,6 +8,7 @@
 	import Card from '../ui/Card.svelte';
 	import Badge from '../ui/Badge.svelte';
 	import Spinner from '../ui/Spinner.svelte';
+	import { errorMessage } from '../../utils/errors.js';
 
 	/** @type {{ tenantId: string, entryId: string, pollIntervalMs?: number }} */
 	let { tenantId, entryId, pollIntervalMs = 15000 } = $props();
@@ -37,7 +38,7 @@
 					error = null;
 				}
 			} catch (err) {
-				if (!cancelled) error = err?.message ?? 'Could not check the queue.';
+				if (!cancelled) error = errorMessage(err);
 			}
 		}
 

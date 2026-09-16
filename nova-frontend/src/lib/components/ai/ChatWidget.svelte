@@ -14,6 +14,7 @@
 	import Badge from '../ui/Badge.svelte';
 	import Alert from '../ui/Alert.svelte';
 	import Spinner from '../ui/Spinner.svelte';
+	import { errorMessage } from '../../utils/errors.js';
 
 	/**
 	 * @type {{
@@ -44,6 +45,7 @@
 	let sending = $state(false);
 	let error = $state(/** @type {string|null} */ (null));
 
+	/** @param {SubmitEvent} event */
 	async function send(event) {
 		event.preventDefault();
 		const text = draft.trim();
@@ -65,14 +67,16 @@
 			});
 			messages = [...messages, { role: 'assistant', text: response.reply, response }];
 		} catch (err) {
-			error = err?.message ?? 'The assistant is unavailable right now.';
+			error = errorMessage(err);
 		} finally {
 			sending = false;
 		}
 	}
 </script>
 
-<div class="flex h-[32rem] flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+<div
+	class="flex h-[32rem] flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+>
 	<div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
 		<p class="font-medium text-slate-900 dark:text-slate-100">{title}</p>
 	</div>
@@ -84,7 +88,7 @@
 					class={[
 						'max-w-[85%] rounded-lg px-3 py-2 text-sm',
 						message.role === 'user'
-							? 'bg-rose-600 text-white'
+							? 'bg-brand-600 text-white'
 							: 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
 					].join(' ')}
 				>
@@ -114,8 +118,8 @@
 						{/each}
 						{#each r.pending_cancellations as pending (pending.booking_id)}
 							<Alert tone="warning" class="mt-2">
-								Cancel the booking on {formatDateTime(pending.starts_at, locale)}? Confirm from
-								your bookings list.
+								Cancel the booking on {formatDateTime(pending.starts_at, locale)}? Confirm from your
+								bookings list.
 							</Alert>
 						{/each}
 						{#if r.proposed_actions.length > 0}

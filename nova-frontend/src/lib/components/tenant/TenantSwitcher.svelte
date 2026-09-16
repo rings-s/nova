@@ -33,8 +33,9 @@
 		};
 	});
 
+	/** @param {Event & { currentTarget: HTMLSelectElement }} event */
 	function handleChange(event) {
-		const tenantId = event.target.value;
+		const tenantId = event.currentTarget.value;
 		tenantStore.set(tenantId);
 		onchange?.(tenantId);
 	}

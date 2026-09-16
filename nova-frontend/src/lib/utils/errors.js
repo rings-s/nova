@@ -20,7 +20,7 @@ export function errorField(error) {
 	return error instanceof ApiError ? error.field : null;
 }
 
-/** `"field: message"` when the server named a field, else just the message. */
+/** `"field: message"` when the server named a field, else just the message. @param {unknown} error */
 export function formatApiError(error) {
 	const field = errorField(error);
 	const message = errorMessage(error);

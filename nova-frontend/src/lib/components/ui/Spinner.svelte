@@ -6,7 +6,7 @@
 </script>
 
 <svg
-	class={`animate-spin text-rose-600 ${sizeClasses[size]}`}
+	class={`animate-spin text-brand-600 ${sizeClasses[size]}`}
 	viewBox="0 0 24 24"
 	fill="none"
 	role="status"

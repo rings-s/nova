@@ -78,7 +78,11 @@ export async function uploadMediaFile(authorisation, file) {
 	}
 }
 
-/** Confirms the bytes landed, and makes the asset renderable. @returns {Promise<MediaAsset>} */
+/**
+ * Confirms the bytes landed, and makes the asset renderable.
+ * @param {string} tenantId @param {string} assetId @param {string} uploadToken
+ * @returns {Promise<MediaAsset>}
+ */
 export function completeMediaUpload(tenantId, assetId, uploadToken) {
 	return http.post(tenantPath(tenantId, `/media/uploads/${assetId}/complete`), {
 		upload_token: uploadToken
@@ -104,24 +108,32 @@ export async function uploadMediaAsset(tenantId, { businessId, locationId = null
 	return completeMediaUpload(tenantId, authorisation.asset_id, authorisation.upload_token);
 }
 
-/** @returns {Promise<{ items: MediaAsset[] }>} */
-export function listBusinessMedia(tenantId, businessId, { kind = null, limit = 20, offset = 0 } = {}) {
+/**
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ kind?: MediaAssetKind|null, limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: MediaAsset[] }>}
+ */
+export function listBusinessMedia(
+	tenantId,
+	businessId,
+	{ kind = null, limit = 20, offset = 0 } = {}
+) {
 	return http.get(tenantPath(tenantId, '/media'), {
 		query: { business_id: businessId, kind, limit, offset }
 	});
 }
 
-/** @returns {Promise<MediaAsset>} */
+/** @param {string} tenantId @param {string} assetId @returns {Promise<MediaAsset>} */
 export function getMediaAsset(tenantId, assetId) {
 	return http.get(tenantPath(tenantId, `/media/${assetId}`));
 }
 
-/** A shareable URL, generated fresh on every call. @returns {Promise<MediaLink>} */
+/** A shareable URL, generated fresh on every call. @param {string} tenantId @param {string} assetId @returns {Promise<MediaLink>} */
 export function getMediaLink(tenantId, assetId) {
 	return http.get(tenantPath(tenantId, `/media/${assetId}/link`));
 }
 
-/** Soft delete — the worker removes the binary afterwards. */
+/** Soft delete — the worker removes the binary afterwards. @param {string} tenantId @param {string} assetId */
 export function deleteMediaAsset(tenantId, assetId) {
 	return http.delete(tenantPath(tenantId, `/media/${assetId}`));
 }

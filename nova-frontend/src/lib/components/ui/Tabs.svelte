@@ -8,6 +8,7 @@
 	 */
 	let { tabs = [], active = $bindable(''), onchange } = $props();
 
+	/** @param {string} id */
 	function select(id) {
 		active = id;
 		onchange?.(id);
@@ -24,7 +25,7 @@
 			class={[
 				'-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors',
 				active === tab.id
-					? 'border-rose-600 text-rose-600'
+					? 'border-brand-600 text-brand-600'
 					: 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
 			].join(' ')}
 		>

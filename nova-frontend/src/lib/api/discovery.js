@@ -118,8 +118,8 @@ import { http } from './client.js';
 
 /**
  * Finds bookable branches. The marketplace's front door.
- * @param {{ q?: string, city?: string, category?: string, latitude?: number,
- *   longitude?: number, radiusKm?: number, limit?: number, offset?: number }} [params]
+ * @param {{ q?: string|null, city?: string|null, category?: string|null, latitude?: number|null,
+ *   longitude?: number|null, radiusKm?: number|null, limit?: number, offset?: number }} [params]
  * @returns {Promise<{ items: ListingCard[] }>}
  */
 export function searchBusinesses({
@@ -137,13 +137,15 @@ export function searchBusinesses({
 	});
 }
 
-/** @returns {Promise<Storefront>} */
+/** @param {string} slug @returns {Promise<Storefront>} */
 export function getStorefront(slug) {
 	return http.get(`/discovery/businesses/${slug}`);
 }
 
 /**
  * Free slots for one service, across every qualified provider.
+ * @param {string} slug @param {string} serviceId
+ * @param {{ dateFrom: string, dateTo: string }} params
  * @returns {Promise<PublicAvailability>}
  */
 export function getPublicAvailability(slug, serviceId, { dateFrom, dateTo }) {
@@ -155,7 +157,7 @@ export function getPublicAvailability(slug, serviceId, { dateFrom, dateTo }) {
 /**
  * Records that NOVA sent this customer to this storefront. Call when a
  * customer opens a listing; keep the token for the eventual `createBooking`.
- * @returns {Promise<Referral>}
+ * @param {string} slug @returns {Promise<Referral>}
  */
 export function recordReferral(slug) {
 	return http.post(`/discovery/businesses/${slug}/referrals`);

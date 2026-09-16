@@ -25,6 +25,7 @@ function loadPersisted() {
 	}
 }
 
+/** @param {{ accessToken: string, refreshToken: string }|null} value */
 function persist(value) {
 	if (!browser) return;
 	try {
@@ -56,6 +57,7 @@ function clear() {
 	save();
 }
 
+/** @param {import('../api/auth.js').TokenPair} tokens */
 function applyTokens(tokens) {
 	accessToken = tokens.access_token;
 	refreshToken = tokens.refresh_token;
@@ -132,6 +134,16 @@ export const authStore = {
 	/** @param {{ email: string, password: string, fullName: string, phone?: string|null }} params */
 	register(params) {
 		return authApi.register(params);
+	},
+
+	/**
+	 * Re-mints the token pair from the current refresh token — `_issue_pair`
+	 * re-reads `memberships` fresh, so this is what picks up a tenant just
+	 * created (`createTenant`'s own docs: "refresh your token before you can
+	 * use the tenant-scoped endpoints").
+	 */
+	refreshSession() {
+		return refresh();
 	},
 
 	/** Ends every outstanding token for this account, everywhere, then clears locally. */

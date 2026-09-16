@@ -20,7 +20,7 @@
 	<img {src} alt={name} class={`rounded-full object-cover ${sizeClasses[size]}`} />
 {:else}
 	<div
-		class={`flex items-center justify-center rounded-full bg-rose-100 font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 ${sizeClasses[size]}`}
+		class={`flex items-center justify-center rounded-full bg-brand-100 font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 ${sizeClasses[size]}`}
 		title={name}
 	>
 		{initials}

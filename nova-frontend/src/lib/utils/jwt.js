@@ -7,7 +7,7 @@
  * anything read here as a display hint, never as an authorization decision.
  */
 
-/** @returns {Record<string, unknown>|null} */
+/** @param {string|null|undefined} token @returns {Record<string, unknown>|null} */
 export function decodeJwtPayload(token) {
 	if (!token) return null;
 	try {

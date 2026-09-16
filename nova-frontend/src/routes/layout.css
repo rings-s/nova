@@ -1,3 +1,97 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+/*
+ * Design theme. One brand color (rose — beauty/wellness), registered through
+ * Tailwind v4's CSS-first theme so `bg-brand-600`, `text-brand-700`,
+ * `ring-brand-500`, etc. exist as real utilities everywhere in the app rather
+ * than components hardcoding a Tailwind palette name directly — swapping the
+ * brand later is a one-file edit here, not a find-and-replace across
+ * components. Inter pairs with Noto Sans Arabic (loaded in app.html) so
+ * English and Arabic sit at a matched weight and x-height — the same pairing
+ * the backend's own chart figures specify (analytics/charts.py::_layout).
+ */
+@theme {
+	--default-font-family:
+		'Inter', 'Noto Sans Arabic', ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--font-sans: 'Inter', 'Noto Sans Arabic', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+	--color-brand-50: #fff1f2;
+	--color-brand-100: #ffe4e6;
+	--color-brand-200: #fecdd3;
+	--color-brand-300: #fda4af;
+	--color-brand-400: #fb7185;
+	--color-brand-500: #f43f5e;
+	--color-brand-600: #e11d48;
+	--color-brand-700: #be123c;
+	--color-brand-800: #9f1239;
+	--color-brand-900: #881337;
+	--color-brand-950: #4c0519;
+}
+
+@layer base {
+	html {
+		color-scheme: light dark;
+	}
+	body {
+		@apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+	}
+}
+
+/*
+ * Chart color tokens (dataviz skill's validated reference palette). Charts
+ * reference these by role rather than raw hex, so light/dark swap in one
+ * place. Categorical order is fixed — never cycle or reassign it — and is
+ * chosen so adjacent series clear the colorblind-safety gates in both modes.
+ * Sequential is a single blue hue, light-to-dark, for magnitude (heatmaps).
+ */
+:root {
+	--chart-series-1: #2a78d6; /* blue */
+	--chart-series-2: #eb6834; /* orange */
+	--chart-series-3: #1baf7a; /* aqua */
+	--chart-series-4: #eda100; /* yellow */
+	--chart-series-5: #e87ba4; /* magenta */
+	--chart-series-6: #008300; /* green */
+	--chart-series-7: #4a3aa7; /* violet */
+	--chart-series-8: #e34948; /* red */
+
+	--chart-sequential-100: #cde2fb;
+	--chart-sequential-200: #9ec5f4;
+	--chart-sequential-300: #6da7ec;
+	--chart-sequential-400: #3987e5;
+	--chart-sequential-500: #256abf;
+	--chart-sequential-600: #184f95;
+	--chart-sequential-700: #0d366b;
+
+	--chart-status-good: #0ca30c;
+	--chart-status-warning: #fab219;
+	--chart-status-serious: #ec835a;
+	--chart-status-critical: #d03b3b;
+
+	--chart-muted: #898781;
+	--chart-grid: #e1e0d9;
+	--chart-axis: #c3c2b7;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--chart-series-1: #3987e5;
+		--chart-series-2: #d95926;
+		--chart-series-3: #199e70;
+		--chart-series-4: #c98500;
+		--chart-series-5: #d55181;
+		--chart-series-6: #008300;
+		--chart-series-7: #9085e9;
+		--chart-series-8: #e66767;
+
+		--chart-status-good: #0ca30c;
+		--chart-status-warning: #fab219;
+		--chart-status-serious: #ec835a;
+		--chart-status-critical: #d03b3b;
+
+		--chart-muted: #898781;
+		--chart-grid: #2c2c2a;
+		--chart-axis: #383835;
+	}
+}

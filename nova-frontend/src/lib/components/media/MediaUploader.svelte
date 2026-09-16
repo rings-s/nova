@@ -7,6 +7,7 @@
 	import { uploadMediaAsset } from '../../api/media.js';
 	import Button from '../ui/Button.svelte';
 	import Alert from '../ui/Alert.svelte';
+	import { errorMessage } from '../../utils/errors.js';
 
 	/**
 	 * @type {{
@@ -33,7 +34,7 @@
 			const asset = await uploadMediaAsset(tenantId, { businessId, locationId, kind, file });
 			onuploaded?.(asset);
 		} catch (err) {
-			error = err?.message ?? 'Upload failed.';
+			error = errorMessage(err);
 		} finally {
 			uploading = false;
 			if (fileInput) fileInput.value = '';
@@ -45,7 +46,13 @@
 	{#if error}
 		<Alert tone="error">{error}</Alert>
 	{/if}
-	<input bind:this={fileInput} type="file" accept="image/*" class="hidden" onchange={handleChange} />
+	<input
+		bind:this={fileInput}
+		type="file"
+		accept="image/*"
+		class="hidden"
+		onchange={handleChange}
+	/>
 	<Button loading={uploading} onclick={() => fileInput?.click()} variant="outline">
 		{uploading ? 'Uploading…' : 'Upload image'}
 	</Button>

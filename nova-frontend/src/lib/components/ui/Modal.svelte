@@ -15,6 +15,7 @@
 		onclose?.();
 	}
 
+	/** @param {KeyboardEvent} event */
 	function handleKeydown(event) {
 		if (event.key === 'Escape') close();
 	}
@@ -24,18 +25,16 @@
 
 {#if open}
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-		<div
-			class="absolute inset-0 bg-slate-950/50"
-			onclick={close}
-			role="presentation"
-		></div>
+		<div class="absolute inset-0 bg-slate-950/50" onclick={close} role="presentation"></div>
 		<div
 			role="dialog"
 			aria-modal="true"
 			aria-label={title ?? undefined}
 			class="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-slate-900"
 		>
-			<div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+			<div
+				class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800"
+			>
 				<h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
 				<button
 					type="button"
@@ -54,7 +53,9 @@
 				{@render children?.()}
 			</div>
 			{#if footer}
-				<div class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+				<div
+					class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800"
+				>
 					{@render footer()}
 				</div>
 			{/if}

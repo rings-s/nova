@@ -18,7 +18,7 @@
 </script>
 
 <button type="button" class="block w-full text-start" onclick={() => onselect?.(provider)}>
-	<Card padding="sm" class={`transition-colors ${selected ? 'ring-2 ring-rose-500' : ''}`}>
+	<Card padding="sm" class={`transition-colors ${selected ? 'ring-2 ring-brand-500' : ''}`}>
 		<div class="flex items-center gap-3">
 			<Avatar {name} size="sm" />
 			<div>

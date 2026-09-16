@@ -174,6 +174,39 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # SvelteKit (Svelte 5), dev target: `vite dev` reloads on save, same as the
+  # backend's bind-mounted dev image. Never given `env_file: .env` — that file
+  # carries the schema owner's password and SECRET_KEY, and this container has
+  # no use for either; see the backend's own note about POSTGRES_PASSWORD above.
+  frontend:
+    build:
+      context: ../nova-frontend
+      dockerfile: Dockerfile
+      target: dev
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: nova-frontend:dev
+    restart: unless-stopped
+    environment:
+      # The browser, not this container, makes these requests — so this has
+      # to be an origin the host can reach, never a compose service name.
+      PUBLIC_API_BASE_URL: http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      # Loopback only; see `postgres`.
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      # Bind mount for reload-on-save, `:z` for the same SELinux reason as the
+      # backend's.
+      - ../nova-frontend:/app:z
+      # Keeps the image's own node_modules — built for linux/glibc, matching
+      # this container — from being shadowed by the host tree the mount above
+      # brings in. The Node equivalent of the backend's venv-outside-/app trick.
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
   # On demand and never started by `up`: `docker compose run --rm tools
   # <command>`, which is what `make test`, `make migrate` and `make revision`
   # do. It holds the schema owner's credentials, so it lives only as long as
@@ -209,3 +242,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  frontend_node_modules:

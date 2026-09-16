@@ -33,7 +33,8 @@ export const toastStore = {
 	/** @param {string} message @param {{ duration?: number }} [options] */
 	success: (message, options) => push(message, { ...options, type: 'success' }),
 	/** @param {string} message @param {{ duration?: number }} [options] */
-	error: (message, options) => push(message, { ...options, type: 'error', duration: options?.duration ?? 6000 }),
+	error: (message, options) =>
+		push(message, { ...options, type: 'error', duration: options?.duration ?? 6000 }),
 	/** @param {string} message @param {{ duration?: number }} [options] */
 	info: (message, options) => push(message, { ...options, type: 'info' }),
 	/**

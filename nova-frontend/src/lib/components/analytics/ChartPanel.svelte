@@ -1,13 +1,28 @@
 <script>
 	/**
-	 * Fetches one chart (docs/13 section 7) and hands its Plotly figure JSON
-	 * straight to plotly.js — the backend builds `figure` for exactly this.
-	 * `plotly.js-dist-min` is loaded lazily so it never weighs on a page that
-	 * doesn't render a chart.
+	 * Fetches one chart (docs/13 section 7) and renders it with layerchart,
+	 * picking the mark set from `chart.kind` (nova_backend's `ChartKind`:
+	 * bar, stacked_bar, combo, donut, heatmap, forecast). The backend's
+	 * `figure` is Plotly JSON — `$lib/utils/chartData.js` reads it structurally
+	 * so this never needs plotly.js on the client.
 	 */
 	import { getChart } from '../../api/analytics.js';
+	import { ApiError } from '../../api/client.js';
+	import {
+		barSeriesFromFigure,
+		donutDataFromFigure,
+		comboSeriesFromFigure,
+		forecastFromFigure,
+		heatmapDataFromFigure
+	} from '../../utils/chartData.js';
+	import { errorMessage } from '../../utils/errors.js';
 	import Spinner from '../ui/Spinner.svelte';
 	import Alert from '../ui/Alert.svelte';
+	import BarSeriesChart from './charts/BarSeriesChart.svelte';
+	import DonutChart from './charts/DonutChart.svelte';
+	import ComboChart from './charts/ComboChart.svelte';
+	import ForecastChart from './charts/ForecastChart.svelte';
+	import HeatmapChart from './charts/HeatmapChart.svelte';
 
 	/**
 	 * @type {{
@@ -29,27 +44,31 @@
 		dateTo = null,
 		granularity = null,
 		locale = 'en',
-		height = 320
+		height = 280
 	} = $props();
 
-	/** @type {HTMLDivElement|undefined} */
-	let container;
 	let loading = $state(true);
 	let error = $state(/** @type {string|null} */ (null));
+	/** `insufficient_data` (a fresh business with no history yet, docs/13's
+	 * forecast needs 8 complete weeks) is an expected state, not a failure —
+	 * shown as a quiet note rather than an alarming red banner. */
+	let errorIsExpected = $state(false);
 	let chart = $state(/** @type {import('../../api/analytics.js').Chart|null} */ (null));
-	/** @type {any} Cached module handle, so cleanup doesn't need a second import. */
-	let plotly = null;
 
 	$effect(() => {
 		let cancelled = false;
 		loading = true;
 		error = null;
+		errorIsExpected = false;
 		getChart(tenantId, chartId, { businessId, dateFrom, dateTo, granularity, locale })
 			.then((result) => {
 				if (!cancelled) chart = result;
 			})
 			.catch((err) => {
-				if (!cancelled) error = err?.message ?? 'Could not load this chart.';
+				if (!cancelled) {
+					error = errorMessage(err);
+					errorIsExpected = err instanceof ApiError && err.code === 'insufficient_data';
+				}
 			})
 			.finally(() => {
 				if (!cancelled) loading = false;
@@ -58,32 +77,36 @@
 			cancelled = true;
 		};
 	});
-
-	$effect(() => {
-		if (!chart || !container) return;
-		let disposed = false;
-		import('plotly.js-dist-min').then((module) => {
-			if (disposed) return;
-			plotly = module.default ?? module;
-			plotly.newPlot(
-				container,
-				chart.figure.data ?? [],
-				{ ...chart.figure.layout, autosize: true },
-				{ responsive: true, displaylogo: false }
-			);
-		});
-		return () => {
-			disposed = true;
-			if (plotly && container) plotly.purge(container);
-		};
-	});
 </script>
 
-<div class="relative">
+<div>
+	<p class="text-sm font-medium text-slate-700 dark:text-slate-200">{chart?.title ?? ''}</p>
+	{#if chart?.description}
+		<p class="mb-2 text-xs text-slate-500 dark:text-slate-400">{chart.description}</p>
+	{/if}
+
 	{#if loading}
 		<div class="flex justify-center py-8"><Spinner /></div>
 	{:else if error}
-		<Alert tone="error">{error}</Alert>
+		<Alert tone={errorIsExpected ? 'info' : 'error'}>{error}</Alert>
+	{:else if chart}
+		{#if chart.kind === 'bar' || chart.kind === 'stacked_bar'}
+			{@const { orientation, series } = barSeriesFromFigure(chart.figure)}
+			<BarSeriesChart {orientation} {series} {height} />
+		{:else if chart.kind === 'donut'}
+			{@const { slices, hole } = donutDataFromFigure(chart.figure)}
+			<DonutChart {slices} {hole} {height} />
+		{:else if chart.kind === 'combo'}
+			{@const { bar, line } = comboSeriesFromFigure(chart.figure)}
+			<ComboChart {bar} {line} height={height / 2} />
+		{:else if chart.kind === 'forecast'}
+			{@const { history, band, trend } = forecastFromFigure(chart.figure)}
+			<ForecastChart {history} {band} {trend} {height} />
+		{:else if chart.kind === 'heatmap'}
+			{@const { columns, rows, cells, min, max } = heatmapDataFromFigure(chart.figure)}
+			<HeatmapChart {columns} {rows} {cells} {min} {max} {height} />
+		{:else}
+			<Alert tone="warning">Unsupported chart kind: {chart.kind}</Alert>
+		{/if}
 	{/if}
-	<div bind:this={container} style={`height: ${height}px`} class={loading || error ? 'hidden' : ''}></div>
 </div>

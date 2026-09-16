@@ -3,6 +3,10 @@
  *
  * A business's own numbers, and the Plotly charts that show them. Gated by
  * `view_analytics` throughout; the financial summary also needs `view_financials`.
+ *
+ * Every `dateFrom`/`dateTo` below is a plain date (`YYYY-MM-DD`) — the router
+ * declares them as `date`, not `datetime`, unlike booking.js and queue.js
+ * (full ISO instants throughout). A datetime string 422s here.
  */
 import { http, tenantPath } from './client.js';
 
@@ -76,7 +80,7 @@ import { http, tenantPath } from './client.js';
  * @property {string} currency
  * @property {number} data_points
  * @property {string} generated_at
- * @property {Record<string, unknown>} figure Plotly figure JSON — hand to plotly.js as-is.
+ * @property {{ data: any[], layout: Record<string, unknown> }} figure Plotly figure JSON — hand to plotly.js as-is.
  */
 
 /**
@@ -122,13 +126,20 @@ import { http, tenantPath } from './client.js';
  * @property {string} outstanding_total
  */
 
-/** The chart catalog, with the plan feature each needs. @returns {Promise<{ items: ChartCatalogEntry[] }>} */
+/**
+ * The chart catalog, with the plan feature each needs.
+ * @param {string} tenantId @returns {Promise<{ items: ChartCatalogEntry[] }>}
+ */
 export function listCharts(tenantId) {
 	return http.get(tenantPath(tenantId, '/analytics/charts'));
 }
 
 /**
  * One chart as Plotly JSON.
+ * @param {string} tenantId
+ * @param {string} chartId
+ * @param {{ businessId: string, dateFrom?: string|null, dateTo?: string|null,
+ *   granularity?: Granularity|null, locale?: 'en'|'ar' }} params
  * @returns {Promise<Chart>}
  */
 export function getChart(
@@ -141,14 +152,24 @@ export function getChart(
 	});
 }
 
-/** Every KPI, with a null value where the sample was too small to report. @returns {Promise<Overview>} */
+/**
+ * Every KPI, with a null value where the sample was too small to report.
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ dateFrom?: string|null, dateTo?: string|null }} [params]
+ * @returns {Promise<Overview>}
+ */
 export function getOverview(tenantId, businessId, { dateFrom = null, dateTo = null } = {}) {
 	return http.get(tenantPath(tenantId, '/analytics/overview'), {
 		query: { business_id: businessId, date_from: dateFrom, date_to: dateTo }
 	});
 }
 
-/** Per service, provider, source, or (on Chain) branch. @returns {Promise<{ items: BreakdownRow[] }>} */
+/**
+ * Per service, provider, source, or (on Chain) branch.
+ * @param {string} tenantId @param {string} businessId @param {Dimension} dimension
+ * @param {{ dateFrom?: string|null, dateTo?: string|null, locale?: 'en'|'ar' }} [params]
+ * @returns {Promise<{ items: BreakdownRow[] }>}
+ */
 export function getBreakdown(
 	tenantId,
 	businessId,
@@ -160,18 +181,24 @@ export function getBreakdown(
 	});
 }
 
-/** A linear trend over complete weeks — never a promise. @returns {Promise<Forecast>} */
-export function getForecast(
-	tenantId,
-	businessId,
-	{ metric = 'bookings', horizonWeeks = 4 } = {}
-) {
+/**
+ * A linear trend over complete weeks — never a promise.
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ metric?: ForecastMetric, horizonWeeks?: number }} [params]
+ * @returns {Promise<Forecast>}
+ */
+export function getForecast(tenantId, businessId, { metric = 'bookings', horizonWeeks = 4 } = {}) {
 	return http.get(tenantPath(tenantId, '/analytics/forecast'), {
 		query: { business_id: businessId, metric, horizon_weeks: horizonWeeks }
 	});
 }
 
-/** The accountant's ledger for one window. Needs `view_financials` too. @returns {Promise<FinancialSummary>} */
+/**
+ * The accountant's ledger for one window. Needs `view_financials` too.
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ dateFrom?: string|null, dateTo?: string|null }} [params]
+ * @returns {Promise<FinancialSummary>}
+ */
 export function getFinancialSummary(tenantId, businessId, { dateFrom = null, dateTo = null } = {}) {
 	return http.get(tenantPath(tenantId, '/analytics/financial-summary'), {
 		query: { business_id: businessId, date_from: dateFrom, date_to: dateTo }

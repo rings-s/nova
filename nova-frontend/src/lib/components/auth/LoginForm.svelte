@@ -3,6 +3,7 @@
 	import Button from '../ui/Button.svelte';
 	import Alert from '../ui/Alert.svelte';
 	import { authStore } from '../../stores/auth.svelte.js';
+	import { errorMessage } from '../../utils/errors.js';
 
 	/** @type {{ onsuccess?: () => void }} */
 	let { onsuccess } = $props();
@@ -12,6 +13,7 @@
 	let error = $state(/** @type {string|null} */ (null));
 	let loading = $state(false);
 
+	/** @param {SubmitEvent} event */
 	async function handleSubmit(event) {
 		event.preventDefault();
 		error = null;
@@ -23,7 +25,7 @@
 			// The backend answers every login refusal — bad password, or a
 			// locked account — with the same `invalid_credentials` message, on
 			// purpose (CLAUDE.md, "Login"): it must not tell an attacker which.
-			error = err?.message ?? 'Could not sign in.';
+			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}

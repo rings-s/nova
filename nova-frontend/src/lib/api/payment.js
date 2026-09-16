@@ -62,12 +62,15 @@ export function createPaymentIntent(
 	);
 }
 
-/** Visibility is inherited from the payment's booking. @returns {Promise<Payment>} */
+/**
+ * Visibility is inherited from the payment's booking.
+ * @param {string} tenantId @param {string} paymentId @returns {Promise<Payment>}
+ */
 export function getPayment(tenantId, paymentId) {
 	return http.get(tenantPath(tenantId, `/payments/${paymentId}`));
 }
 
-/** @returns {Promise<{ items: Payment[], total: number }>} */
+/** @param {string} tenantId @param {string} bookingId @returns {Promise<{ items: Payment[], total: number }>} */
 export function listPaymentsForBooking(tenantId, bookingId) {
 	return http.get(tenantPath(tenantId, '/payments'), { query: { booking_id: bookingId } });
 }

@@ -44,7 +44,7 @@ export function login({ email, password }) {
 	return http.post('/auth/login', { email, password }, { skipAuth: true });
 }
 
-/** @returns {Promise<TokenPair>} */
+/** @param {string} refreshToken @returns {Promise<TokenPair>} */
 export function refresh(refreshToken) {
 	return http.post('/auth/refresh', { refresh_token: refreshToken }, { skipAuth: true });
 }

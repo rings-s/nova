@@ -72,7 +72,11 @@ import { newIdempotencyKey } from '../utils/idempotency.js';
 
 // --- Queue administration (staff only) ---------------------------------------
 
-/** @returns {Promise<Queue>} */
+/**
+ * @param {string} tenantId
+ * @param {{ locationId: string, nameEn?: string, nameAr?: string, averageServiceMinutes?: number }} params
+ * @returns {Promise<Queue>}
+ */
 export function createQueue(
 	tenantId,
 	{ locationId, nameEn = 'Main Queue', nameAr = 'الطابور الرئيسي', averageServiceMinutes = 30 }
@@ -85,12 +89,16 @@ export function createQueue(
 	});
 }
 
-/** @returns {Promise<{ items: Queue[] }>} */
+/** @param {string} tenantId @param {string} locationId @returns {Promise<{ items: Queue[] }>} */
 export function listQueues(tenantId, locationId) {
 	return http.get(tenantPath(tenantId, '/queues'), { query: { location_id: locationId } });
 }
 
-/** Closing a queue stops new joins; people already waiting are still served. @returns {Promise<Queue>} */
+/**
+ * Closing a queue stops new joins; people already waiting are still served.
+ * @param {string} tenantId @param {string} queueId @param {boolean} isOpen
+ * @returns {Promise<Queue>}
+ */
 export function setQueueOpen(tenantId, queueId, isOpen) {
 	return http.patch(tenantPath(tenantId, `/queues/${queueId}/open`), { is_open: isOpen });
 }
@@ -130,17 +138,22 @@ export function joinQueue(
 	);
 }
 
-/** The live line. Staff-only. @returns {Promise<{ items: QueueEntry[], total: number }>} */
+/**
+ * The live line. Staff-only.
+ * @param {string} tenantId @param {string} queueId
+ * @param {{ limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: QueueEntry[], total: number }>}
+ */
 export function listQueueEntries(tenantId, queueId, { limit = 50, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, `/queues/${queueId}/entries`), { query: { limit, offset } });
 }
 
-/** "How much longer?" — the caller's own entry only. @returns {Promise<QueueEntry>} */
+/** "How much longer?" — the caller's own entry only. @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>} */
 export function getQueueEntry(tenantId, entryId) {
 	return http.get(tenantPath(tenantId, `/queues/entries/${entryId}`));
 }
 
-/** @returns {Promise<QueueEntry>} */
+/** @param {string} tenantId @param {string} queueId @param {string|null} [providerId] @returns {Promise<QueueEntry>} */
 export function callNext(tenantId, queueId, providerId = null) {
 	return http.post(
 		tenantPath(tenantId, `/queues/${queueId}/call-next`),
@@ -149,27 +162,33 @@ export function callNext(tenantId, queueId, providerId = null) {
 	);
 }
 
-/** @returns {Promise<QueueEntry>} */
+/** @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>} */
 export function markMissed(tenantId, entryId) {
 	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/missed`));
 }
 
-/** Someone who stepped outside and came back, rather than losing their place. @returns {Promise<QueueEntry>} */
+/**
+ * Someone who stepped outside and came back, rather than losing their place.
+ * @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>}
+ */
 export function requeue(tenantId, entryId) {
 	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/requeue`));
 }
 
-/** @returns {Promise<QueueEntry>} */
+/** @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>} */
 export function startQueueService(tenantId, entryId) {
 	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/start`));
 }
 
-/** @returns {Promise<QueueEntry>} */
+/** @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>} */
 export function completeQueueEntry(tenantId, entryId) {
 	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/complete`));
 }
 
-/** A customer leaving the line themselves, or staff removing them. @returns {Promise<QueueEntry>} */
+/**
+ * A customer leaving the line themselves, or staff removing them.
+ * @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>}
+ */
 export function cancelQueueEntry(tenantId, entryId) {
 	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/cancel`));
 }
@@ -178,6 +197,8 @@ export function cancelQueueEntry(tenantId, entryId) {
 
 /**
  * Issues a QR ticket for the caller's own booking or queue entry.
+ * @param {string} tenantId
+ * @param {{ bookingId?: string|null, queueEntryId?: string|null }} params
  * @returns {Promise<Ticket>}
  */
 export function issueTicket(tenantId, { bookingId = null, queueEntryId = null }) {
@@ -187,12 +208,15 @@ export function issueTicket(tenantId, { bookingId = null, queueEntryId = null })
 	});
 }
 
-/** Reception scans a QR ticket. Staff-only. @returns {Promise<CheckInResult>} */
+/**
+ * Reception scans a QR ticket. Staff-only.
+ * @param {string} tenantId @param {string} qrPayload @returns {Promise<CheckInResult>}
+ */
 export function checkInWithTicket(tenantId, qrPayload) {
 	return http.post(tenantPath(tenantId, '/tickets/check-in'), { qr_payload: qrPayload });
 }
 
-/** @returns {Promise<TicketState>} */
+/** @param {string} tenantId @param {string} ticketId @returns {Promise<TicketState>} */
 export function revokeTicket(tenantId, ticketId) {
 	return http.post(tenantPath(tenantId, `/tickets/${ticketId}/revoke`));
 }

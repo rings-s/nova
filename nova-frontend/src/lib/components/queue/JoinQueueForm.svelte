@@ -5,6 +5,7 @@
 	import Input from '../ui/Input.svelte';
 	import Button from '../ui/Button.svelte';
 	import Alert from '../ui/Alert.svelte';
+	import { errorMessage } from '../../utils/errors.js';
 
 	/**
 	 * @type {{
@@ -24,6 +25,7 @@
 	let error = $state(/** @type {string|null} */ (null));
 	let loading = $state(false);
 
+	/** @param {SubmitEvent} event */
 	async function handleSubmit(event) {
 		event.preventDefault();
 		error = null;
@@ -36,7 +38,7 @@
 			});
 			onjoined?.(entry);
 		} catch (err) {
-			error = err?.message ?? 'Could not join the queue.';
+			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}

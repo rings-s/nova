@@ -8,20 +8,17 @@
 	 * Renders either a tenant-side `Service` (catalog.js) or a public
 	 * `StorefrontService` (discovery.js) — the two share every field this uses.
 	 * @type {{
-	 *   service: import('../../api/catalog.js').Service,
+	 *   service: import('../../api/catalog.js').Service|import('../../api/discovery.js').StorefrontService,
 	 *   locale?: 'en'|'ar',
 	 *   selected?: boolean,
-	 *   onselect?: (service: import('../../api/catalog.js').Service) => void
+	 *   onselect?: (service: import('../../api/catalog.js').Service|import('../../api/discovery.js').StorefrontService) => void
 	 * }}
 	 */
 	let { service, locale = 'en', selected = false, onselect } = $props();
 </script>
 
 <button type="button" class="block w-full text-start" onclick={() => onselect?.(service)}>
-	<Card
-		padding="sm"
-		class={`transition-colors ${selected ? 'ring-2 ring-rose-500' : ''}`}
-	>
+	<Card padding="sm" class={`transition-colors ${selected ? 'ring-2 ring-brand-500' : ''}`}>
 		<div class="flex items-start justify-between gap-3">
 			<div>
 				<p class="font-medium text-slate-900 dark:text-slate-100">
@@ -38,7 +35,9 @@
 			</div>
 			<div class="flex flex-col items-end gap-1">
 				<Badge tone="accent">{formatMoney(service.price, service.currency, locale)}</Badge>
-				<span class="text-xs text-slate-500 dark:text-slate-400">{service.duration_minutes} min</span>
+				<span class="text-xs text-slate-500 dark:text-slate-400"
+					>{service.duration_minutes} min</span
+				>
 			</div>
 		</div>
 	</Card>

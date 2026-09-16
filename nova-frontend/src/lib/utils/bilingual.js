@@ -16,7 +16,7 @@ export function pickBilingual(record, field, locale = 'en') {
 	return /** @type {string} */ (primary ?? fallback ?? '');
 }
 
-/** Text direction for the active locale, for a `dir` attribute. */
+/** Text direction for the active locale, for a `dir` attribute. @param {'en'|'ar'} locale */
 export function directionFor(locale) {
 	return locale === 'ar' ? 'rtl' : 'ltr';
 }

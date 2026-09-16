@@ -6,6 +6,7 @@
 
 const FORMATTER_CACHE = new Map();
 
+/** @param {'en'|'ar'} locale @param {string} currency */
 function formatterFor(locale, currency) {
 	const key = `${locale}:${currency}`;
 	let formatter = FORMATTER_CACHE.get(key);
@@ -37,7 +38,7 @@ export function formatMoney(amount, currency = 'SAR', locale = 'en') {
 	}
 }
 
-/** @param {string|number|null|undefined} value */
+/** @param {string|number|null|undefined} value @param {{ locale?: 'en'|'ar', fractionDigits?: number }} [options] */
 export function formatPercent(value, { locale = 'en', fractionDigits = 1 } = {}) {
 	if (value === null || value === undefined) return '—';
 	const number = typeof value === 'string' ? Number(value) : value;

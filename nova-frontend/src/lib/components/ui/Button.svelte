@@ -29,7 +29,7 @@
 	} = $props();
 
 	const variantClasses = {
-		primary: 'bg-rose-600 text-white hover:bg-rose-700 focus-visible:outline-rose-600',
+		primary: 'bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline-brand-600',
 		secondary: 'bg-slate-900 text-white hover:bg-slate-800 focus-visible:outline-slate-900',
 		outline:
 			'bg-transparent text-slate-900 border border-slate-300 hover:bg-slate-50 focus-visible:outline-slate-400 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-slate-800',
@@ -58,6 +58,11 @@
 </script>
 
 {#if href && !disabled}
+	<!-- `href` is an opaque prop forwarded from the caller — it may be an
+	     internal route or an external URL, so it can't be checked against
+	     SvelteKit's resolve() here. A caller linking to one of this app's own
+	     routes should pass an already-resolved path. -->
+	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 	<a {href} class={classes} {...rest}>
 		{@render children?.()}
 	</a>

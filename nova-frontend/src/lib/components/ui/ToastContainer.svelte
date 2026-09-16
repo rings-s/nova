@@ -12,7 +12,9 @@
 	};
 </script>
 
-<div class="fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4 sm:items-end sm:pe-6">
+<div
+	class="fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4 sm:items-end sm:pe-6"
+>
 	{#each toastStore.all as toast (toast.id)}
 		<div
 			class={`flex w-full max-w-sm items-start justify-between gap-3 rounded-lg px-4 py-3 text-sm shadow-lg ${toneClasses[toast.type]}`}

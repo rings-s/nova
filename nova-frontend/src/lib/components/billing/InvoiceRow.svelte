@@ -13,7 +13,13 @@
 	let { invoice, locale = 'en', onviewlines } = $props();
 
 	/** @type {Record<string, 'neutral'|'success'|'warning'|'error'|'info'|'accent'>} */
-	const statusTone = { draft: 'neutral', issued: 'info', paid: 'success', overdue: 'error', void: 'neutral' };
+	const statusTone = {
+		draft: 'neutral',
+		issued: 'info',
+		paid: 'success',
+		overdue: 'error',
+		void: 'neutral'
+	};
 </script>
 
 <button

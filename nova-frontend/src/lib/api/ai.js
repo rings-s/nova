@@ -110,7 +110,7 @@ export function sendChatMessage(
  * The agent roster this deployment runs. Can legitimately answer "none that
  * work" when the optional AI extra or Ollama is offline — hide the chat entry
  * point rather than let a customer discover it only ever hands off.
- * @returns {Promise<AgentCatalog>}
+ * @param {string} tenantId @returns {Promise<AgentCatalog>}
  */
 export function listAgents(tenantId) {
 	return http.get(tenantPath(tenantId, '/ai/agents'));

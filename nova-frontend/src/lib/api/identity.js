@@ -92,7 +92,7 @@ export function listMyTenants({ limit = 20, offset = 0 } = {}) {
 	return http.get('/tenants', { query: { limit, offset } });
 }
 
-/** @returns {Promise<Tenant>} */
+/** @param {string} tenantId @returns {Promise<Tenant>} */
 export function getTenant(tenantId) {
 	return http.get(tenantPath(tenantId));
 }
@@ -128,18 +128,24 @@ export function createCustomer(
 	});
 }
 
-/** @returns {Promise<{ items: Customer[], total: number|null }>} */
+/**
+ * @param {string} tenantId
+ * @param {{ q?: string|null, limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: Customer[], total: number|null }>}
+ */
 export function listCustomers(tenantId, { q = null, limit = 20, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, '/customers'), { query: { q, limit, offset } });
 }
 
-/** @returns {Promise<Customer>} */
+/** @param {string} tenantId @param {string} customerId @returns {Promise<Customer>} */
 export function getCustomer(tenantId, customerId) {
 	return http.get(tenantPath(tenantId, `/customers/${customerId}`));
 }
 
 /**
  * PDPL: withdrawing consent must be as easy as giving it.
+ * @param {string} tenantId @param {string} customerId
+ * @param {{ marketingConsent?: boolean|null, whatsappConsent?: boolean|null }} params
  * @returns {Promise<Customer>}
  */
 export function updateCustomerConsent(
@@ -155,7 +161,11 @@ export function updateCustomerConsent(
 
 // --- Memberships (staff only) ------------------------------------------------
 
-/** @returns {Promise<{ items: Membership[], total: number|null }>} */
+/**
+ * @param {string} tenantId
+ * @param {{ limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: Membership[], total: number|null }>}
+ */
 export function listMemberships(tenantId, { limit = 20, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, '/memberships'), { query: { limit, offset } });
 }
@@ -163,28 +173,36 @@ export function listMemberships(tenantId, { limit = 20, offset = 0 } = {}) {
 /**
  * Starts staff access for `email`. The returned token is the entire
  * credential — relay it to the person out of band; NOVA never delivers it.
+ * @param {string} tenantId @param {{ email: string, role: MembershipRole }} params
  * @returns {Promise<MembershipInvite>}
  */
 export function inviteMembership(tenantId, { email, role }) {
 	return http.post(tenantPath(tenantId, '/memberships'), { email, role });
 }
 
-/** @returns {Promise<{ items: MembershipInviteSummary[], total: number|null }>} */
+/**
+ * @param {string} tenantId
+ * @param {{ limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: MembershipInviteSummary[], total: number|null }>}
+ */
 export function listPendingInvites(tenantId, { limit = 20, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, '/memberships/invites'), { query: { limit, offset } });
 }
 
-/** @returns {Promise<Membership>} */
+/** @param {string} tenantId @param {string} inviteId @param {string} token @returns {Promise<Membership>} */
 export function acceptMembershipInvite(tenantId, inviteId, token) {
 	return http.post(tenantPath(tenantId, `/memberships/invites/${inviteId}/accept`), { token });
 }
 
-/** @returns {Promise<Membership>} */
+/** @param {string} tenantId @param {string} membershipId @param {MembershipRole} role @returns {Promise<Membership>} */
 export function changeMembershipRole(tenantId, membershipId, role) {
 	return http.patch(tenantPath(tenantId, `/memberships/${membershipId}`), { role });
 }
 
-/** 409 when it would leave the business with no owner. @returns {Promise<Membership>} */
+/**
+ * 409 when it would leave the business with no owner.
+ * @param {string} tenantId @param {string} membershipId @returns {Promise<Membership>}
+ */
 export function revokeMembership(tenantId, membershipId) {
 	return http.delete(tenantPath(tenantId, `/memberships/${membershipId}`));
 }

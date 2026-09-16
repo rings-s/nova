@@ -26,7 +26,12 @@ import { http, tenantPath } from './client.js';
  * @property {string} created_at
  */
 
-/** The delivery log for one customer — "did they actually get told?". @returns {Promise<{ items: Notification[] }>} */
+/**
+ * The delivery log for one customer — "did they actually get told?".
+ * @param {string} tenantId @param {string} customerId
+ * @param {{ limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: Notification[] }>}
+ */
 export function listCustomerNotifications(tenantId, customerId, { limit = 20, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, '/notifications'), {
 		query: { customer_id: customerId, limit, offset }

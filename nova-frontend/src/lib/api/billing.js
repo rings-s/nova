@@ -109,12 +109,20 @@ import { http, tenantPath } from './client.js';
  * @property {string} reversed
  */
 
-/** The published price list. Open to any authenticated caller on the tenant. @returns {Promise<{ items: Plan[] }>} */
+/**
+ * The published price list. Open to any authenticated caller on the tenant.
+ * @param {string} tenantId @returns {Promise<{ items: Plan[] }>}
+ */
 export function listPlans(tenantId) {
 	return http.get(tenantPath(tenantId, '/billing/plans'));
 }
 
-/** @returns {Promise<Subscription>} */
+/**
+ * @param {string} tenantId
+ * @param {{ businessId: string, tier?: PlanTier, seats?: number, locations?: number,
+ *   annual?: boolean, trialDays?: number }} params
+ * @returns {Promise<Subscription>}
+ */
 export function createSubscription(
 	tenantId,
 	{ businessId, tier = 'solo', seats = 1, locations = 1, annual = false, trialDays = 0 }
@@ -129,12 +137,17 @@ export function createSubscription(
 	});
 }
 
-/** @returns {Promise<Subscription>} */
+/** @param {string} tenantId @param {string} businessId @returns {Promise<Subscription>} */
 export function getSubscription(tenantId, businessId) {
 	return http.get(tenantPath(tenantId, `/billing/subscriptions/${businessId}`));
 }
 
-/** A downgrade below current seats or locations is refused with 409. @returns {Promise<Subscription>} */
+/**
+ * A downgrade below current seats or locations is refused with 409.
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ tier: PlanTier, annual?: boolean }} params
+ * @returns {Promise<Subscription>}
+ */
 export function changePlan(tenantId, businessId, { tier, annual = false }) {
 	return http.post(tenantPath(tenantId, `/billing/subscriptions/${businessId}/plan`), {
 		tier,
@@ -142,36 +155,52 @@ export function changePlan(tenantId, businessId, { tier, annual = false }) {
 	});
 }
 
-/** @returns {Promise<Subscription>} */
+/** @param {string} tenantId @param {string} businessId @param {boolean} [atPeriodEnd] @returns {Promise<Subscription>} */
 export function cancelSubscription(tenantId, businessId, atPeriodEnd = true) {
 	return http.post(tenantPath(tenantId, `/billing/subscriptions/${businessId}/cancel`), {
 		at_period_end: atPeriodEnd
 	});
 }
 
-/** @returns {Promise<{ items: Invoice[] }>} */
+/**
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: Invoice[] }>}
+ */
 export function listInvoices(tenantId, businessId, { limit = 20, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, '/billing/invoices'), {
 		query: { business_id: businessId, limit, offset }
 	});
 }
 
-/** @returns {Promise<Invoice>} */
+/** @param {string} tenantId @param {string} invoiceId @returns {Promise<Invoice>} */
 export function getInvoice(tenantId, invoiceId) {
 	return http.get(tenantPath(tenantId, `/billing/invoices/${invoiceId}`));
 }
 
-/** Every line behind an invoice total — each traceable to one booking. @returns {Promise<{ items: CommissionLine[], total: number }>} */
+/**
+ * Every line behind an invoice total — each traceable to one booking.
+ * @param {string} tenantId @param {string} invoiceId
+ * @returns {Promise<{ items: CommissionLine[], total: number }>}
+ */
 export function listInvoiceLines(tenantId, invoiceId) {
 	return http.get(tenantPath(tenantId, `/billing/invoices/${invoiceId}/lines`));
 }
 
-/** Why one line cost what it cost, in words an owner can read. @returns {Promise<CommissionExplanation>} */
+/**
+ * Why one line cost what it cost, in words an owner can read.
+ * @param {string} tenantId @param {string} lineId @returns {Promise<CommissionExplanation>}
+ */
 export function explainCommissionLine(tenantId, lineId) {
 	return http.get(tenantPath(tenantId, `/billing/commission-lines/${lineId}/explain`));
 }
 
-/** Daily settlements, newest first. @returns {Promise<{ items: Payout[] }>} */
+/**
+ * Daily settlements, newest first.
+ * @param {string} tenantId @param {string} businessId
+ * @param {{ limit?: number, offset?: number }} [params]
+ * @returns {Promise<{ items: Payout[] }>}
+ */
 export function listPayouts(tenantId, businessId, { limit = 20, offset = 0 } = {}) {
 	return http.get(tenantPath(tenantId, '/billing/payouts'), {
 		query: { business_id: businessId, limit, offset }

@@ -10,7 +10,9 @@
 	let { title, description = null, action, icon } = $props();
 </script>
 
-<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center dark:border-slate-700">
+<div
+	class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center dark:border-slate-700"
+>
 	{#if icon}
 		<div class="text-slate-400 dark:text-slate-500">{@render icon()}</div>
 	{/if}

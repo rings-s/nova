@@ -5,8 +5,9 @@
  * salon's own time regardless of the viewer's device.
  */
 
-const DEFAULT_TIMEZONE = 'Asia/Riyadh';
+export const DEFAULT_TIMEZONE = 'Asia/Riyadh';
 
+/** @param {'en'|'ar'} locale */
 function localeTag(locale) {
 	return locale === 'ar' ? 'ar-SA' : 'en-US';
 }
@@ -36,34 +37,24 @@ export function formatTime(value, locale = 'en', { timeZone = DEFAULT_TIMEZONE }
 	return new Intl.DateTimeFormat(localeTag(locale), { timeZone, timeStyle: 'short' }).format(date);
 }
 
-/** "in 12 minutes" / "3 days ago" — for holds, waits, and expiries. */
+/**
+ * "in 12 minutes" / "3 days ago" — for holds, waits, and expiries.
+ * @param {string|Date} value @param {'en'|'ar'} [locale]
+ */
 export function formatRelative(value, locale = 'en') {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return '—';
 	const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
 	const rtf = new Intl.RelativeTimeFormat(localeTag(locale), { numeric: 'auto' });
+	const absSeconds = Math.abs(diffSeconds);
 
-	const thresholds = [
-		[60, 'second'],
-		[60 * 60, 'minute'],
-		[60 * 60 * 24, 'hour'],
-		[60 * 60 * 24 * 30, 'day']
-	];
-	let unit = 'second';
-	let divisor = 1;
-	for (const [limit, unitName] of thresholds) {
-		if (Math.abs(diffSeconds) < limit) {
-			unit = unitName;
-			break;
-		}
-		divisor = limit;
-	}
-	const value_ =
-		unit === 'second' ? diffSeconds : Math.round(diffSeconds / (divisor || 1));
-	return rtf.format(value_, /** @type {Intl.RelativeTimeFormatUnit} */ (unit));
+	if (absSeconds < 60) return rtf.format(diffSeconds, 'second');
+	if (absSeconds < 3600) return rtf.format(Math.round(diffSeconds / 60), 'minute');
+	if (absSeconds < 86400) return rtf.format(Math.round(diffSeconds / 3600), 'hour');
+	return rtf.format(Math.round(diffSeconds / 86400), 'day');
 }
 
-/** Minutes-from-midnight (booking's `WorkingWindow` shape) as `HH:MM`. */
+/** Minutes-from-midnight (booking's `WorkingWindow` shape) as `HH:MM`. @param {number} minutes */
 export function formatMinutesOfDay(minutes) {
 	const wrapped = ((minutes % 1440) + 1440) % 1440;
 	const hours = Math.floor(wrapped / 60)
@@ -73,10 +64,31 @@ export function formatMinutesOfDay(minutes) {
 	return `${hours}:${mins}`;
 }
 
-/** `HH:MM` (or `HH:MM:SS`) back to minutes-from-midnight, for schedule forms. */
+/**
+ * `HH:MM` (or `HH:MM:SS`) back to minutes-from-midnight, for schedule forms.
+ * @param {string} hhmm
+ */
 export function parseMinutesOfDay(hhmm) {
 	const [hours, minutes] = hhmm.split(':').map(Number);
 	return hours * 60 + (minutes || 0);
+}
+
+/**
+ * An instant's calendar date, as `YYYY-MM-DD` in a timezone — for grouping
+ * or comparing instants by day (string comparison sorts correctly). `en-CA`
+ * is a locale that happens to format dates this way; the locale itself is
+ * otherwise irrelevant here.
+ * @param {string|Date} value @param {{ timeZone?: string }} [options]
+ */
+export function dateKey(value, { timeZone = DEFAULT_TIMEZONE } = {}) {
+	const date = value instanceof Date ? value : new Date(value);
+	if (Number.isNaN(date.getTime())) return '';
+	return new Intl.DateTimeFormat('en-CA', {
+		timeZone,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit'
+	}).format(date);
 }
 
 export const WEEKDAY_LABELS = {
@@ -87,4 +99,15 @@ export const WEEKDAY_LABELS = {
 /** @param {number} weekday Monday = 0. @param {'en'|'ar'} [locale] */
 export function weekdayLabel(weekday, locale = 'en') {
 	return WEEKDAY_LABELS[locale]?.[weekday] ?? WEEKDAY_LABELS.en[weekday] ?? '';
+}
+
+/** Calendar column headers — a compact calendar has no room for full names. */
+export const SHORT_WEEKDAY_LABELS = {
+	en: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
+	ar: ['ن', 'ث', 'ر', 'خ', 'ج', 'س', 'ح']
+};
+
+/** @param {number} weekday Monday = 0. @param {'en'|'ar'} [locale] */
+export function shortWeekdayLabel(weekday, locale = 'en') {
+	return SHORT_WEEKDAY_LABELS[locale]?.[weekday] ?? SHORT_WEEKDAY_LABELS.en[weekday] ?? '';
 }
