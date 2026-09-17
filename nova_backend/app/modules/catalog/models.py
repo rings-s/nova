@@ -39,13 +39,6 @@ class Business(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     description_en: Mapped[str | None] = mapped_column(Text)
     description_ar: Mapped[str | None] = mapped_column(Text)
 
-    # Media lives in Nextcloud; Postgres holds references only (docs/01).
-    # Not a ForeignKey: media_assets is owned by the media module and the
-    # dependency must not point that way.
-    logo_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    cover_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    nextcloud_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     #: Whether this business appears on the public marketplace (ADR-0010).
     #:
@@ -144,7 +137,6 @@ class Provider(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     name_ar: Mapped[str] = mapped_column(String(255), nullable=False)
     title_en: Mapped[str | None] = mapped_column(String(255))
     title_ar: Mapped[str | None] = mapped_column(String(255))
-    image_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

@@ -1,4 +1,4 @@
-"""Shared conventions for external system adapters (WhatsApp, Moyasar, Nextcloud, ...).
+"""Shared conventions for external system adapters (WhatsApp, Moyasar, ...).
 
 Each integration defines:
 - A `Protocol` describing only the operations NOVA actually calls, not the

@@ -1,7 +1,7 @@
 <script>
 	/**
 	 * @type {{
-	 *   variant?: 'primary'|'secondary'|'outline'|'ghost'|'danger',
+	 *   variant?: 'primary'|'secondary'|'outline'|'ghost'|'danger'|'inverse'|'outline-inverse',
 	 *   size?: 'sm'|'md'|'lg',
 	 *   type?: 'button'|'submit'|'reset',
 	 *   href?: string|null,
@@ -35,7 +35,12 @@
 			'bg-transparent text-slate-900 border border-slate-300 hover:bg-slate-50 focus-visible:outline-slate-400 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-slate-800',
 		ghost:
 			'bg-transparent text-slate-700 hover:bg-slate-100 focus-visible:outline-slate-400 dark:text-slate-200 dark:hover:bg-slate-800',
-		danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600'
+		danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600',
+		// For a button placed on a colored/dark background (e.g. a marketing CTA
+		// band) — new, additive; no existing call site uses either variant.
+		inverse: 'bg-white text-brand-700 hover:bg-white/90 focus-visible:outline-white',
+		'outline-inverse':
+			'bg-transparent text-white border border-white/40 hover:bg-white/10 focus-visible:outline-white'
 	};
 
 	const sizeClasses = {

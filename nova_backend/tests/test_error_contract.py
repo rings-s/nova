@@ -73,7 +73,7 @@ async def test_every_error_body_matches_the_published_schema() -> None:
         RateLimitExceeded(5, LOGIN_POLICY),
         ConflictError("x"),
         NotFoundError("y"),
-        IntegrationNotConfiguredError("Nextcloud"),
+        IntegrationNotConfiguredError("WhatsApp"),
     ):
         response = await _response_to(exc)
         ErrorResponse.model_validate(response.json())

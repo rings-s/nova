@@ -33,8 +33,6 @@ from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.identity.auth_router import router as auth_router
 from app.modules.identity.router import customers_router, memberships_router
 from app.modules.identity.router import router as identity_router
-from app.modules.media import models as media_models  # noqa: F401
-from app.modules.media.router import router as media_router
 from app.modules.notification import models as notification_models  # noqa: F401
 from app.modules.notification.router import router as notification_router
 from app.modules.payment import models as payment_models  # noqa: F401
@@ -57,7 +55,6 @@ routers = [
     ticket_router,
     payment_router,
     webhook_router,
-    media_router,
     notification_router,
     billing_router,
     analytics_router,

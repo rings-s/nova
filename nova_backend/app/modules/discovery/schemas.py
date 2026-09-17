@@ -29,8 +29,6 @@ class ListingCardOut(ApiSchema):
     name_ar: str
     description_en: str | None = None
     description_ar: str | None = None
-    logo_asset_id: UUID | None = None
-    cover_asset_id: UUID | None = None
 
     location_id: UUID
     location_name_en: str
@@ -80,7 +78,6 @@ class StorefrontProviderOut(ApiSchema):
     name_ar: str
     title_en: str | None = None
     title_ar: str | None = None
-    image_asset_id: UUID | None = None
 
 
 class StorefrontOut(ApiSchema):
@@ -94,8 +91,6 @@ class StorefrontOut(ApiSchema):
     name_ar: str
     description_en: str | None = None
     description_ar: str | None = None
-    logo_asset_id: UUID | None = None
-    cover_asset_id: UUID | None = None
 
     locations: list[StorefrontLocationOut]
     services: list[StorefrontServiceOut]

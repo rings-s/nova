@@ -97,14 +97,6 @@ class Settings(BaseSettings):
     #: 0 means bookings confirm without payment (docs/11 allows both).
     default_deposit_percent: int = 0
 
-    # --- Media / Nextcloud ---
-    nextcloud_url: str | None = None
-    nextcloud_username: str | None = None
-    nextcloud_app_password: str | None = None
-    nextcloud_root_folder: str = "nova-media"
-    media_upload_url_ttl_seconds: int = 900
-    media_max_upload_bytes: int = 100 * 1024 * 1024
-
     # --- Notifications / WhatsApp ---
     whatsapp_bsp_api_key: str | None = None
     whatsapp_bsp_base_url: str | None = None

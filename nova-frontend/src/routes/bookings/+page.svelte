@@ -16,6 +16,7 @@
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Container from '$lib/components/marketing/Container.svelte';
 
 	$effect(() => {
 		if (!authStore.isAuthenticated) goto(resolve('/login'));
@@ -74,7 +75,7 @@
 
 <svelte:head><title>My bookings — NOVA</title></svelte:head>
 
-<div class="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+<Container size="md" class="py-10 sm:py-14">
 	<PageHeader title="My bookings" />
 
 	{#if loading}
@@ -92,7 +93,9 @@
 		<div class="flex flex-col gap-3">
 			{#each rows as row (row.booking.id)}
 				<div>
-					<p class="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+					<p
+						class="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400"
+					>
 						{row.businessName}
 					</p>
 					<BookingCard booking={row.booking}>
@@ -113,4 +116,4 @@
 			{/each}
 		</div>
 	{/if}
-</div>
+</Container>

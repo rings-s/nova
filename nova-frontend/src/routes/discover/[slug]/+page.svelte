@@ -30,6 +30,8 @@
 	import ServiceCard from '$lib/components/catalog/ServiceCard.svelte';
 	import SlotPicker from '$lib/components/booking/SlotPicker.svelte';
 	import BookingStatusBadge from '$lib/components/booking/BookingStatusBadge.svelte';
+	import Container from '$lib/components/marketing/Container.svelte';
+	import Section from '$lib/components/marketing/Section.svelte';
 
 	let slug = $derived(/** @type {string} */ (page.params.slug));
 
@@ -141,27 +143,35 @@
 	></svelte:head
 >
 
-<div class="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-	{#if loading}
-		<div class="flex justify-center py-16"><Spinner /></div>
-	{:else if loadError}
+{#if loading}
+	<Container size="lg" class="py-16 sm:py-24">
+		<div class="flex justify-center"><Spinner /></div>
+	</Container>
+{:else if loadError}
+	<Container size="lg" class="py-10 sm:py-14">
 		<Alert tone="error">{loadError}</Alert>
-	{:else if storefront}
-		<h1 class="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-			{pickBilingual(storefront, 'name', 'en')}
-		</h1>
-		{#if pickBilingual(storefront, 'description', 'en')}
-			<p class="mt-2 text-slate-500 dark:text-slate-400">
-				{pickBilingual(storefront, 'description', 'en')}
-			</p>
-		{/if}
-		{#if storefront.locations.length > 0}
-			<p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
-				{storefront.locations.map((l) => pickBilingual(l, 'name', 'en')).join(' · ')}
-			</p>
-		{/if}
+	</Container>
+{:else if storefront}
+	<Section tone="sunken" padding="tight">
+		<Container size="lg">
+			<h1 class="text-display-md font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+				{pickBilingual(storefront, 'name', 'en')}
+			</h1>
+			{#if pickBilingual(storefront, 'description', 'en')}
+				<p class="mt-2 text-slate-600 dark:text-slate-400">
+					{pickBilingual(storefront, 'description', 'en')}
+				</p>
+			{/if}
+			{#if storefront.locations.length > 0}
+				<p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+					{storefront.locations.map((l) => pickBilingual(l, 'name', 'en')).join(' · ')}
+				</p>
+			{/if}
+		</Container>
+	</Section>
 
-		<div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+	<Container size="lg" class="py-10 sm:py-14">
+		<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
 			<div>
 				<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Services</h2>
 				{#if storefront.services.length === 0}
@@ -248,5 +258,5 @@
 				{/if}
 			</div>
 		</div>
-	{/if}
-</div>
+	</Container>
+{/if}

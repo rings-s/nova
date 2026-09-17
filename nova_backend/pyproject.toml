@@ -17,7 +17,7 @@ dependencies = [
     # transitive-only dependency would degrade rate limiting to per-process
     # in-memory buckets silently instead of failing the build.
     "redis>=5.0",
-    # Outbound HTTP for the Moyasar / Nextcloud / WhatsApp adapters.
+    # Outbound HTTP for the Moyasar / WhatsApp adapters.
     "httpx>=0.28",
     "numpy>=2.5",
     "pandas>=3.0",

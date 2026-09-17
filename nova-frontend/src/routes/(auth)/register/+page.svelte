@@ -5,6 +5,7 @@
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import Card from '$lib/components/ui/Card.svelte';
 	import RegisterForm from '$lib/components/auth/RegisterForm.svelte';
+	import Logo from '$lib/components/layout/Logo.svelte';
 
 	$effect(() => {
 		if (authStore.isAuthenticated) goto(resolve('/'));
@@ -28,6 +29,7 @@
 <svelte:head><title>Create an account — NOVA</title></svelte:head>
 
 <Card padding="lg">
+	<Logo class="mb-6" />
 	<h1 class="text-xl font-semibold text-slate-900 dark:text-slate-100">Create your account</h1>
 	<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
 		Book with any salon on NOVA, or list your own.

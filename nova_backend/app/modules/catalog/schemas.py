@@ -22,8 +22,6 @@ class BusinessOut(ApiSchema):
     slug: str
     description_en: str | None
     description_ar: str | None
-    logo_asset_id: UUID | None
-    cover_asset_id: UUID | None
     is_active: bool
     #: Whether this business is advertised on the public marketplace.
     is_listed: bool
@@ -110,7 +108,6 @@ class ProviderOut(ApiSchema):
     name_ar: str
     title_en: str | None
     title_ar: str | None
-    image_asset_id: UUID | None
     is_active: bool
     created_at: datetime
     updated_at: datetime

@@ -189,7 +189,7 @@
 
 	let selectedDaySlots = $derived(selectedDayKey ? (slotsByDay.get(selectedDayKey) ?? []) : []);
 
-	const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6, 7];
+	const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 
 	const PERIOD_ORDER = /** @type {const} */ (['morning', 'afternoon', 'evening']);
 	const PERIOD_LABELS = {

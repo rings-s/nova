@@ -5,8 +5,8 @@ belongs on a request path.
 
   - The OUTBOX DISPATCHER delivers domain events. A WhatsApp call inside a
     booking request would put a third party's latency on the customer's tap.
-  - MAINTENANCE jobs sweep expired state — tickets, slot holds, deleted media —
-    which nobody's request should ever pay for.
+  - MAINTENANCE jobs sweep expired state — tickets, slot holds, idempotency
+    keys — which nobody's request should ever pay for.
 
 Everything is scheduled by cron rather than triggered, so a job that fails
 simply runs again next tick.
@@ -37,7 +37,6 @@ from app.db.session import (
     get_session_factory,
     set_tenant_scope,
 )
-from app.modules.media.models import MediaAssetRecord
 from app.modules.notification.dependencies import build_notification_service
 from app.modules.notification.domain import NotificationStatus
 from app.modules.notification.models import NotificationRecord
@@ -203,34 +202,6 @@ async def purge_expired_idempotency_keys(ctx: dict) -> int:
         stale = list(result.scalars().all())
         for key in stale:
             await session.delete(key)
-        await session.commit()
-
-    return len(stale)
-
-
-async def abandon_stale_media_uploads(ctx: dict) -> int:
-    """Soft-deletes assets whose upload window closed with nothing uploaded.
-
-    These are rows pointing at bytes that were never written — a business's
-    media list would otherwise fill with permanently-loading placeholders.
-    """
-    now = datetime.now(UTC)
-    session_factory = get_session_factory()
-
-    async with session_factory() as session:
-        await bypass_tenant_scope(session)
-        result = await session.execute(
-            select(MediaAssetRecord)
-            .where(
-                MediaAssetRecord.is_ready.is_(False),
-                MediaAssetRecord.is_deleted.is_(False),
-                MediaAssetRecord.upload_expires_at < now,
-            )
-            .limit(500)
-        )
-        stale = list(result.scalars().all())
-        for asset in stale:
-            asset.mark_deleted(now=now)
         await session.commit()
 
     return len(stale)
@@ -474,7 +445,6 @@ class WorkerSettings:
         expire_stale_tickets,
         purge_expired_slot_holds,
         purge_expired_idempotency_keys,
-        abandon_stale_media_uploads,
         close_monthly_invoices,
         settle_daily_payouts,
         advance_dunning,
@@ -494,7 +464,6 @@ class WorkerSettings:
         cron(expire_stale_tickets, minute={7, 37}),
         cron(purge_expired_slot_holds, hour={3}, minute={11}),
         cron(purge_expired_idempotency_keys, hour={3}, minute={21}),
-        cron(abandon_stale_media_uploads, minute={17, 47}),
         # docs/11 section 7 step 3: the 1st of each month. 02:00 rather than
         # midnight so a booking completed late on the last night of the month
         # has had its outbox event delivered and its commission accrued before
