@@ -5,7 +5,10 @@
 	 * rather than each inventing its own page chrome.
 	 */
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
+<<<<<<< HEAD
 	import Icon from '$lib/components/ui/Icon.svelte';
+=======
+>>>>>>> 52cf860 (the clean about page design)
 	let { children } = $props();
 </script>
 
@@ -15,7 +18,10 @@
 >
 	<GradientBlob variant="hero" />
 
+<<<<<<< HEAD
 	<!-- Auth Shell Container -->
+=======
+>>>>>>> 52cf860 (the clean about page design)
 	<div class="relative z-10 w-full max-w-md">
 		{@render children()}
 

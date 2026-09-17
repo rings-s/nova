@@ -8,6 +8,7 @@
 	import SectionHeading from '$lib/components/marketing/SectionHeading.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
 
+<<<<<<< HEAD
 	// Interactive Architecture Inspector Tab
 	let activeLayer = $state('holds'); // 'holds' | 'bilingual' | 'whatsapp' | 'banking'
 
@@ -18,12 +19,35 @@
 			metric: '0 Double-Bookings',
 			metricSub: 'Over 120,000 peak slots locked',
 			codeSnippet: `// Cryptographic Lock Engine
+=======
+	/** @typedef {'holds'|'bilingual'|'whatsapp'|'banking'} LayerId */
+
+	/** @type {LayerId} */
+	let activeLayer = $state('holds');
+
+	/** @type {{ id: LayerId, label: string }[]} */
+	const layerTabs = [
+		{ id: 'holds', label: '1. Slot holds' },
+		{ id: 'bilingual', label: '2. Bilingual data' },
+		{ id: 'whatsapp', label: '3. WhatsApp' },
+		{ id: 'banking', label: '4. Payments' }
+	];
+
+	/** @type {Record<LayerId, { title: string, tag: string, highlight: string, codeSnippet: string, description: string }>} */
+	const architectureLayers = {
+		holds: {
+			title: 'Deterministic slot holds',
+			tag: 'Concurrency control',
+			highlight: 'A short-lived lock, held per slot',
+			codeSnippet: `// Simplified example
+>>>>>>> 52cf860 (the clean about page design)
 await redis.set(
   \`hold:\${tenantId}:\${slotId}\`,
   JSON.stringify({ clientId, expiresAt: Date.now() + 600000 }),
   'EX', 600, 'NX'
 );`,
 			description:
+<<<<<<< HEAD
 				'Every appointment intent acquires a 10-minute deterministic lock in distributed memory. If a walk-in at reception touches the same slot while an Instagram client checks out on Apple Pay, the first lock wins, completely eliminating awkward customer collisions.'
 		},
 		bilingual: {
@@ -140,6 +164,106 @@ POST /v1/payments
 			legacy:
 				'Zero deposits or manual bank transfers requiring screenshots sent back and forth over WhatsApp.',
 			nova: 'Automated 1-tap Mada/Apple Pay deposits securely processed via Moyasar and credited to the bill.'
+=======
+				'The moment a customer starts checkout, that slot is held for a few minutes in distributed memory. If a walk-in at reception and an online customer reach for the same slot, the first hold wins — never a double-booking.'
+		},
+		bilingual: {
+			title: 'Bilingual by design',
+			tag: 'Regional data model',
+			highlight: 'Arabic and English on every record',
+			codeSnippet: `// Simplified example
+type Service = {
+  name_ar: 'قص شعر وتصفيف سشوار',
+  name_en: 'Signature Blowout & Cut',
+  price: 180.00,
+  currency: 'SAR'
+};`,
+			description:
+				'Every business, service and provider name is stored in Arabic and English from the first record — not translated after the fact by a client-side overlay that breaks layout or number formatting.'
+		},
+		whatsapp: {
+			title: 'WhatsApp messaging',
+			tag: 'Direct messaging',
+			highlight: 'Confirmations sent where customers already are',
+			codeSnippet: `// Simplified example
+POST /v1/messages/template
+{
+  "template": "booking_confirmed",
+  "to": customerPhone,
+  "vars": [customerName, startsAt]
+}`,
+			description:
+				'Booking confirmations, reminders and receipts are sent on WhatsApp — built into the booking flow itself, not a separate app a customer has to download.'
+		},
+		banking: {
+			title: 'Deposits & payments',
+			tag: 'Financial infrastructure',
+			highlight: 'Card details handled by Moyasar, not NOVA',
+			codeSnippet: `// Simplified example
+POST /v1/payments
+{
+  "amount": 5000,
+  "currency": "SAR",
+  "source": { "type": "applepay" }
+}`,
+			description:
+				'A deposit can be required to confirm a booking. Card and Mada details are captured directly by Moyasar — they never pass through or get stored on NOVA servers.'
+		}
+	};
+
+	let current = $derived(architectureLayers[activeLayer]);
+
+	/** @type {{ icon: import('$lib/components/ui/Icon.svelte').IconName, title: string, subtitle: string, body: string }[]} */
+	const pillars = [
+		{
+			icon: 'globe',
+			title: 'Arabic-native data core',
+			subtitle: 'Bilingual by design',
+			body: 'Every business, service, provider profile, and confirmation message stores Arabic and English data natively from the first record — not a client-side translation layer bolted on afterward.'
+		},
+		{
+			icon: 'calendar',
+			title: 'Deterministic slot holds',
+			subtitle: 'No double-booking',
+			body: 'When a walk-in at reception and an online customer reach for the same slot, NOVA holds it for the first checkout to complete — so the same appointment is never sold twice.'
+		},
+		{
+			icon: 'chat-bubble',
+			title: 'WhatsApp as core infrastructure',
+			subtitle: 'No forced app downloads',
+			body: "Rather than asking clients to install a separate app, NOVA sends confirmations and reminders on WhatsApp — the channel they're already using."
+		},
+		{
+			icon: 'credit-card',
+			title: 'GCC financial integration',
+			subtitle: 'Moyasar, Mada & Apple Pay',
+			body: 'Deposits and payments run through Moyasar, supporting Mada, Apple Pay and card payments. NOVA never holds customer funds or touches card details directly.'
+		}
+	];
+
+	const comparisons = [
+		{
+			label: 'Client booking experience',
+			legacy:
+				'Forces clients to create another account, install a separate mobile app, and set a password.',
+			nova: 'A web storefront with card/Apple Pay checkout and automatic confirmations sent via WhatsApp.'
+		},
+		{
+			label: 'Walk-in & appointment queue',
+			legacy:
+				'A paper notebook on the reception counter that gets out of sync with phone bookings and online slots.',
+			nova: 'One unified line for walk-ins and bookings, with a ticket and live queue position.'
+		},
+		{
+			label: 'Language & locale',
+			legacy: 'English-only software, with translation overlays that break layout in RTL.',
+			nova: 'Arabic and English stored natively on every record, not translated after the fact.'
+		},
+		{
+			label: 'Deposit & no-show protection',
+			legacy: 'No deposits, or manual bank transfers coordinated over WhatsApp screenshots.',
+			nova: 'A deposit collected at booking time through Moyasar, credited automatically to the bill.'
+>>>>>>> 52cf860 (the clean about page design)
 		}
 	];
 </script>
@@ -153,15 +277,27 @@ POST /v1/payments
 </svelte:head>
 
 <!-- Master Hero Header -->
+<<<<<<< HEAD
 <Section tone="canvas" padding="tight" class="relative overflow-hidden pt-8 pb-14 sm:pt-14 sm:pb-20">
 	<GradientBlob variant="hero" />
 	<Container size="xl">
 		<!-- Telemetry Status Ribbon -->
+=======
+<Section
+	tone="canvas"
+	padding="tight"
+	class="relative overflow-hidden pt-8 pb-14 sm:pt-14 sm:pb-20"
+>
+	<GradientBlob variant="hero" />
+	<Container size="xl">
+		<!-- Status ribbon -->
+>>>>>>> 52cf860 (the clean about page design)
 		<div class="flex items-center justify-center">
 			<div
 				class="inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/90 dark:text-slate-300"
 			>
 				<span class="flex items-center gap-1.5">
+<<<<<<< HEAD
 					<span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
 					<span class="font-mono text-slate-900 font-bold dark:text-slate-100">Live Mission</span>
 				</span>
@@ -171,6 +307,13 @@ POST /v1/payments
 				<span class="text-brand-600 font-bold dark:text-brand-400">Riyadh, Jeddah & Dubai</span>
 				<span class="text-slate-300 dark:text-slate-700">·</span>
 				<span class="text-emerald-700 font-bold dark:text-emerald-400">0% Direct Commission</span>
+=======
+					<span class="size-2 rounded-full bg-emerald-500"></span>
+					<span>Built for the GCC</span>
+				</span>
+				<span class="text-slate-300 dark:text-slate-700">·</span>
+				<span class="font-bold text-brand-600 dark:text-brand-400">Riyadh · Jeddah · Dubai</span>
+>>>>>>> 52cf860 (the clean about page design)
 			</div>
 		</div>
 
@@ -179,6 +322,7 @@ POST /v1/payments
 			<h1
 				class="text-display-xl font-extrabold tracking-tight text-slate-900 sm:text-display-2xl dark:text-slate-100"
 			>
+<<<<<<< HEAD
 				Engineered for the reality of modern GCC salons &amp; spas
 			</h1>
 			<p class="mx-auto mt-5 max-w-2xl text-body-lg text-slate-600 sm:text-xl dark:text-slate-400">
@@ -188,6 +332,17 @@ POST /v1/payments
 				<Button size="lg" href={resolve('/register')}>
 					Start 14-day free trial
 				</Button>
+=======
+				Built for the reality of GCC salons &amp; spas
+			</h1>
+			<p class="mx-auto mt-5 max-w-2xl text-body-lg text-slate-600 sm:text-xl dark:text-slate-400">
+				Booking, walk-ins, WhatsApp and payments are usually four disconnected tools stitched
+				together by hand. NOVA brings them into one platform, built around how a salon actually runs
+				its day.
+			</p>
+			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+				<Button size="lg" href={resolve('/register')}>Start 14-day free trial</Button>
+>>>>>>> 52cf860 (the clean about page design)
 				<Button size="lg" variant="outline" href={resolve('/features')}>
 					Explore OS architecture
 				</Button>
@@ -195,6 +350,7 @@ POST /v1/payments
 		</div>
 
 		<!-- Interactive Architecture Stack Viewer -->
+<<<<<<< HEAD
 		<div class="mt-14 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
 			<!-- Stack Header Bar -->
 			<div class="flex flex-wrap items-center justify-between border-b border-slate-200 bg-slate-50/90 px-6 py-3.5 backdrop-blur dark:border-slate-800 dark:bg-slate-850">
@@ -213,13 +369,38 @@ POST /v1/payments
 						{ id: 'whatsapp', label: '3. WhatsApp API' },
 						{ id: 'banking', label: '4. Moyasar Banking' }
 					] as tab (tab.id)}
+=======
+		<div
+			class="mt-14 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
+		>
+			<!-- Stack Header Bar -->
+			<div
+				class="dark:bg-slate-850 flex flex-wrap items-center justify-between border-b border-slate-200 bg-slate-50/90 px-6 py-3.5 backdrop-blur dark:border-slate-800"
+			>
+				<div>
+					<span class="text-xs font-bold tracking-wider text-slate-500 uppercase">
+						System Architecture Blueprint
+					</span>
+					<p class="text-xs font-semibold text-slate-700 dark:text-slate-300">
+						Inspect how NOVA solves core regional salon problems
+					</p>
+				</div>
+				<div
+					class="mt-2 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold sm:mt-0 dark:border-slate-700 dark:bg-slate-800"
+				>
+					{#each layerTabs as tab (tab.id)}
+>>>>>>> 52cf860 (the clean about page design)
 						<button
 							type="button"
 							onclick={() => (activeLayer = tab.id)}
 							class={[
 								'rounded-lg px-2.5 py-1 text-xs transition-all',
 								activeLayer === tab.id
+<<<<<<< HEAD
 									? 'bg-slate-900 text-white font-bold dark:bg-slate-100 dark:text-slate-900'
+=======
+									? 'bg-slate-900 font-bold text-white dark:bg-slate-100 dark:text-slate-900'
+>>>>>>> 52cf860 (the clean about page design)
 									: 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
 							].join(' ')}
 						>
@@ -229,15 +410,22 @@ POST /v1/payments
 				</div>
 			</div>
 
+<<<<<<< HEAD
 			<!-- Active Architecture Details Grid -->
 			{@const current = architectureLayers[activeLayer]}
+=======
+			<!-- Active architecture details -->
+>>>>>>> 52cf860 (the clean about page design)
 			<div class="grid gap-8 p-6 lg:grid-cols-12">
 				<div class="space-y-4 lg:col-span-7">
 					<div class="flex items-center gap-2">
 						<Badge tone="accent" size="sm">{current.tag}</Badge>
+<<<<<<< HEAD
 						<span class="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
 							{current.metric}
 						</span>
+=======
+>>>>>>> 52cf860 (the clean about page design)
 					</div>
 					<h3 class="text-xl font-bold text-slate-900 dark:text-slate-100">
 						{current.title}
@@ -245,19 +433,41 @@ POST /v1/payments
 					<p class="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
 						{current.description}
 					</p>
+<<<<<<< HEAD
 					<div class="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs dark:border-slate-800 dark:bg-slate-800/60">
 						<span class="font-semibold text-slate-700 dark:text-slate-300">Operational Verification:</span>
 						<p class="mt-0.5 text-slate-500 dark:text-slate-400">{current.metricSub}</p>
+=======
+					<div
+						class="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs dark:border-slate-800 dark:bg-slate-800/60"
+					>
+						<span class="font-semibold text-slate-700 dark:text-slate-300">In short:</span>
+						<p class="mt-0.5 text-slate-500 dark:text-slate-400">{current.highlight}</p>
+>>>>>>> 52cf860 (the clean about page design)
 					</div>
 				</div>
 
 				<div class="lg:col-span-5">
+<<<<<<< HEAD
 					<div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs font-mono text-slate-200 shadow-inner">
 						<div class="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400">
 							<span>Engine Implementation</span>
 							<span class="text-emerald-400">Production Verified</span>
 						</div>
 						<pre class="mt-3 overflow-x-auto text-[11px] leading-relaxed text-emerald-400"><code>{current.codeSnippet}</code></pre>
+=======
+					<div
+						class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-4 font-mono text-xs text-slate-200 shadow-inner"
+					>
+						<div
+							class="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400"
+						>
+							<span>Illustrative example</span>
+						</div>
+						<pre class="mt-3 overflow-x-auto text-[11px] leading-relaxed text-emerald-400"><code
+								>{current.codeSnippet}</code
+							></pre>
+>>>>>>> 52cf860 (the clean about page design)
 					</div>
 				</div>
 			</div>
@@ -312,7 +522,11 @@ POST /v1/payments
 					<h3 class="text-lg font-bold">The NOVA Unified Operating System</h3>
 				</div>
 				<p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+<<<<<<< HEAD
 					How high-performing salons operate with NOVA:
+=======
+					How a salon operates with NOVA:
+>>>>>>> 52cf860 (the clean about page design)
 				</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
@@ -370,6 +584,7 @@ POST /v1/payments
 	</Container>
 </Section>
 
+<<<<<<< HEAD
 <!-- By the Numbers Key Metrics -->
 <Section tone="sunken" class="border-y border-slate-200 py-14 sm:py-20 dark:border-slate-800">
 	<Container size="xl">
@@ -389,11 +604,14 @@ POST /v1/payments
 	</Container>
 </Section>
 
+=======
+>>>>>>> 52cf860 (the clean about page design)
 <!-- Privacy, Isolation, and PDPL Compliance -->
 <Section tone="canvas" class="py-16 sm:py-24">
 	<Container size="xl">
 		<div class="grid items-center gap-10 lg:grid-cols-12">
 			<div class="space-y-4 lg:col-span-6">
+<<<<<<< HEAD
 				<Badge tone="accent">Security & Compliance</Badge>
 				<h2 class="text-display-md font-bold tracking-tight text-slate-900 dark:text-slate-100">
 					Enterprise tenant isolation &amp; Saudi PDPL ready
@@ -401,6 +619,15 @@ POST /v1/payments
 				<p class="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
 					Your client list, pricing structures, and financial reports are strictly confidential. In
 					NOVA, every query and API endpoint enforces cryptographically verified tenant boundaries.
+=======
+				<Badge tone="accent">Security &amp; privacy</Badge>
+				<h2 class="text-display-md font-bold tracking-tight text-slate-900 dark:text-slate-100">
+					Tenant isolation, built into the database
+				</h2>
+				<p class="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+					Your client list, pricing and financial reports are confidential. Every query is scoped to
+					the authenticated tenant at the database level, not just in application code.
+>>>>>>> 52cf860 (the clean about page design)
 				</p>
 				<ul class="space-y-3 pt-2">
 					<li class="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
@@ -409,8 +636,13 @@ POST /v1/payments
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
 						/>
 						<span
+<<<<<<< HEAD
 							><strong>Zero cross-tenant data leakage:</strong> All database models are scoped by authenticated
 							tenant ID.</span
+=======
+							><strong>Row-level tenant isolation:</strong> Postgres enforces tenant boundaries with row-level
+							security, not application code alone.</span
+>>>>>>> 52cf860 (the clean about page design)
 						>
 					</li>
 					<li class="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
@@ -419,8 +651,13 @@ POST /v1/payments
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
 						/>
 						<span
+<<<<<<< HEAD
 							><strong>PCI-DSS Level 1 compliant payments:</strong> Credit cards and Mada details never
 							touch NOVA servers.</span
+=======
+							><strong>Cards handled by Moyasar:</strong> Card and Mada details are captured directly
+							by Moyasar and never touch NOVA's servers.</span
+>>>>>>> 52cf860 (the clean about page design)
 						>
 					</li>
 					<li class="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
@@ -429,8 +666,13 @@ POST /v1/payments
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
 						/>
 						<span
+<<<<<<< HEAD
 							><strong>Role-based staff privacy:</strong> Providers only view their own schedule; front-desk
 							cannot access owner profits.</span
+=======
+							><strong>Role-based staff access:</strong> A provider sees their own schedule; front-desk
+							staff don't see owner-level financials.</span
+>>>>>>> 52cf860 (the clean about page design)
 						>
 					</li>
 				</ul>
@@ -440,24 +682,39 @@ POST /v1/payments
 					class="rounded-3xl border border-slate-200 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50"
 				>
 					<h3 class="text-base font-bold text-slate-900 dark:text-slate-100">
+<<<<<<< HEAD
 						Regional Data Sovereignty
 					</h3>
 					<p class="mt-2 text-xs text-slate-600 dark:text-slate-400">
 						Designed in full alignment with the Saudi Personal Data Protection Law (PDPL) and
 						National Cybersecurity Authority (NCA) security controls.
+=======
+						Built with PDPL in mind
+					</h3>
+					<p class="mt-2 text-xs text-slate-600 dark:text-slate-400">
+						Customer records carry explicit consent flags for marketing and communication,
+						reflecting the Saudi Personal Data Protection Law's consent requirements.
+>>>>>>> 52cf860 (the clean about page design)
 					</p>
 					<div class="mt-6 space-y-3">
 						<div
 							class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900"
 						>
 							<span class="text-slate-700 dark:text-slate-300"
+<<<<<<< HEAD
 								>Tenant Data Encrypted at Rest (AES-256)</span
 							>
 							<span class="font-bold text-emerald-600 font-mono">Enforced</span>
+=======
+								>Tenant-scoped by row-level security</span
+							>
+							<span class="font-mono font-bold text-emerald-600">Enforced</span>
+>>>>>>> 52cf860 (the clean about page design)
 						</div>
 						<div
 							class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900"
 						>
+<<<<<<< HEAD
 							<span class="text-slate-700 dark:text-slate-300">ZATCA e-Invoicing Phase 2 Ready</span
 							>
 							<span class="font-bold text-emerald-600 font-mono">Compliant</span>
@@ -467,6 +724,10 @@ POST /v1/payments
 						>
 							<span class="text-slate-700 dark:text-slate-300">Automatic Daily Cloud Backups</span>
 							<span class="font-bold text-emerald-600 font-mono">Active</span>
+=======
+							<span class="text-slate-700 dark:text-slate-300">Per-customer consent tracking</span>
+							<span class="font-mono font-bold text-emerald-600">Built in</span>
+>>>>>>> 52cf860 (the clean about page design)
 						</div>
 					</div>
 				</div>
@@ -478,12 +739,18 @@ POST /v1/payments
 <!-- Call to Action -->
 <Section tone="dark" class="py-16 sm:py-24">
 	<Container size="md" class="text-center">
+<<<<<<< HEAD
 		<h2 class="text-display-lg font-bold tracking-tight text-white">
 			Bring your salon onto the modern standard
 		</h2>
 		<p class="mt-4 text-body-lg text-white/80">
 			Join top beauty, skincare, and wellness teams across the GCC who rely on NOVA for daily front
 			desk peace of mind.
+=======
+		<h2 class="text-display-lg font-bold tracking-tight text-white">Bring your salon onto NOVA</h2>
+		<p class="mt-4 text-body-lg text-white/80">
+			Set up your storefront, services and providers in minutes.
+>>>>>>> 52cf860 (the clean about page design)
 		</p>
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
 			<Button size="lg" variant="inverse" href={resolve('/register')}>

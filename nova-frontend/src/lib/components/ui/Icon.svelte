@@ -1,6 +1,10 @@
 <script module>
 	/**
+<<<<<<< HEAD
 	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'search'|'clock'|'map-pin'|'star'|'filter'|'phone'|'zap'|'x'|'building'|'trending-up'} IconName
+=======
+	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'} IconName
+>>>>>>> 52cf860 (the clean about page design)
 	 */
 
 	/**
@@ -28,6 +32,7 @@
 		'chevron-left': '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
 		'chevron-right': '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
 		'arrow-right': '<path d="M4.5 12h15M13.5 5.5 20 12l-6.5 6.5"/>',
+<<<<<<< HEAD
 		search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
 		clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 		'map-pin':
@@ -42,6 +47,13 @@
 			'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M8 10h.01M16 10h.01M12 10h.01M8 14h.01M16 14h.01M12 14h.01"/>',
 		'trending-up':
 			'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
+=======
+		x: '<path d="M6 6l12 12M18 6L6 18"/>',
+		'user-check':
+			'<circle cx="9" cy="8" r="3.5"/><path d="M3.5 19.5c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 13.5l1.8 1.8 3.2-3.4"/>',
+		phone:
+			'<path d="M6 3.5h3l1.2 4-2 1.5a11 11 0 0 0 5.3 5.3l1.5-2 4 1.2v3a1.5 1.5 0 0 1-1.6 1.5A15.5 15.5 0 0 1 4.5 5.1 1.5 1.5 0 0 1 6 3.5z"/>'
+>>>>>>> 52cf860 (the clean about page design)
 	};
 
 	/** @type {(keyof typeof ICONS)[]} */
