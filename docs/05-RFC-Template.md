@@ -12,28 +12,37 @@ tags: [rfc, process, architecture]
 > Copy this template to `/08-RFCs/YYYY-MM-DD-title.md` when proposing a major change to NOVA's architecture, domain, or infrastructure.
 
 ## 1. Problem Statement
-*What exact problem are we trying to solve? (e.g., "Nextcloud WebDAV sync is causing timeout errors during bulk media uploads from salons.")*
+
+_What exact problem are we trying to solve? (e.g., "Nextcloud WebDAV sync is causing timeout errors during bulk media uploads from salons.")_
 
 ## 2. Background / Context
-*Why does this problem exist? What is the current state?*
+
+_Why does this problem exist? What is the current state?_
 
 ## 3. Proposed Solution
-*Describe the technical design. Include Mermaid diagrams if helpful.*
+
+_Describe the technical design. Include Mermaid diagrams if helpful._
 
 ## 4. Alternative Solutions
-*What else did we consider? (e.g., "Using AWS S3 instead of local Nextcloud", "Writing a custom Go upload service").*
+
+_What else did we consider? (e.g., "Using AWS S3 instead of local Nextcloud", "Writing a custom Go upload service")._
 
 ## 5. Decision & Rationale
-*Why is the proposed solution the best choice for NOVA right now?*
+
+_Why is the proposed solution the best choice for NOVA right now?_
 
 ## 6. Impact
-*How does this affect the DDD Domain, FastAPI endpoints, Local AI context limits, or Infrastructure?*
+
+_How does this affect the DDD Domain, FastAPI endpoints, Local AI context limits, or Infrastructure?_
 
 ## 7. Migration / Rollout Plan
-*How do we implement this safely without downtime?*
+
+_How do we implement this safely without downtime?_
 
 ## 8. Risks & Trade-offs
-*What are the drawbacks? (e.g., "Increases load on the Threadripper CPU during thumbnail generation").*
+
+_What are the drawbacks? (e.g., "Increases load on the Threadripper CPU during thumbnail generation")._
 
 ## 9. Open Questions
-*What do we still need to figure out?*
+
+_What do we still need to figure out?_

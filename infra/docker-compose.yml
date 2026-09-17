@@ -89,7 +89,11 @@ services:
     healthcheck:
       # The backend waits on this rather than sleeping — a race here shows up as
       # a confusing "connection refused" on the first request instead.
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nova} -d ${POSTGRES_DB:-nova}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-nova} -d ${POSTGRES_DB:-nova}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -232,7 +236,14 @@ services:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     profiles: ["tunnel"]
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    command:
+      [
+        "tunnel",
+        "--no-autoupdate",
+        "run",
+        "--token",
+        "${CLOUDFLARE_TUNNEL_TOKEN}",
+      ]
     depends_on:
       # Waits for the backend to actually answer, not merely to have started —
       # otherwise the tunnel comes up first and the public URL 502s.

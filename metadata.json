@@ -1,0 +1,6 @@
+{
+  "name": "NOVA",
+  "description": "GCC-focused AI booking and customer operations platform for wellness and beauty centers",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

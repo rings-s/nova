@@ -56,30 +56,25 @@ Domain files must not contain:
 - Nextcloud concerns
 - PydanticAI agent logic
 
-
 ## 2. Core Aggregates
 
-|Aggregate|Responsibility|
-|---|---|
-|**Business**|Tenant-level business profile and settings|
-|**Location**|Physical branch and operating rules|
-|**Service**|Bookable beauty/wellness service|
-|**Provider**|Staff member or resource performing services|
-|**Availability**|Bookable time for a provider/service/location|
-|**Customer**|End-customer profile and consent|
-|**Booking**|Scheduled appointment|
-|**Queue**|Live queue for a location|
-|**QueueEntry**|A customer's position in a queue|
-|**Ticket**|Secure virtual QR ticket|
-|**Payment**|Payment intent, capture, refund, webhook state|
-|**MediaAsset**|Nextcloud-backed media metadata|
-|**Notification**|Customer communication state|
-
-
-
+| Aggregate        | Responsibility                                 |
+| ---------------- | ---------------------------------------------- |
+| **Business**     | Tenant-level business profile and settings     |
+| **Location**     | Physical branch and operating rules            |
+| **Service**      | Bookable beauty/wellness service               |
+| **Provider**     | Staff member or resource performing services   |
+| **Availability** | Bookable time for a provider/service/location  |
+| **Customer**     | End-customer profile and consent               |
+| **Booking**      | Scheduled appointment                          |
+| **Queue**        | Live queue for a location                      |
+| **QueueEntry**   | A customer's position in a queue               |
+| **Ticket**       | Secure virtual QR ticket                       |
+| **Payment**      | Payment intent, capture, refund, webhook state |
+| **MediaAsset**   | Nextcloud-backed media metadata                |
+| **Notification** | Customer communication state                   |
 
 ## 3. Shared Value Objects
-
 
 ```python
 from decimal import Decimal
@@ -102,10 +97,8 @@ class TimeRange(BaseModel):
         if self.ends_at <= self.starts_at:
             raise ValueError("ends_at must be after starts_at")
         return self
-        
+
 ```
-
-
 
 ## 4. Booking Aggregate
 
@@ -130,15 +123,12 @@ stateDiagram-v2
     Completed --> [*]
     Cancelled --> [*]
     NoShow --> [*]
-    
+
 ```
-
-
-
 
 ### Booking Domain Model
 
-``` python
+```python
 from enum import StrEnum
 from uuid import UUID
 from datetime import datetime
@@ -226,14 +216,11 @@ class Booking:
         self.status = BookingStatus.COMPLETED
 ```
 
-
-
-
 ## 5. Queue Aggregate
 
 ### Queue Entry Lifecycle
 
-``` mermaid
+```mermaid
 	stateDiagram-v2
 
     [*] --> Waiting
@@ -248,13 +235,9 @@ class Booking:
     Completed --> [*]
 ```
 
-
-
-
-
 ### Queue Domain Model
 
-``` python
+```python
 class QueueEntryStatus(StrEnum):
     WAITING = "waiting"
     CALLED = "called"
@@ -307,14 +290,11 @@ class QueueEntry:
         self.status = QueueEntryStatus.CANCELLED
 ```
 
-
-
-
 ## 6. Ticket Aggregate
 
 Tickets are secure virtual tokens. They must never expose PII directly.
 
-``` python
+```python
 class TicketStatus(StrEnum):
     ACTIVE = "active"
     REDEEMED = "redeemed"
@@ -350,13 +330,11 @@ class Ticket:
         self.status = TicketStatus.REVOKED
 ```
 
-
 ## 7. Payment Aggregate
 
 - Payment state is separate from booking state.
 
-
-``` python
+```python
 class PaymentStatus(StrEnum):
     PENDING = "pending"
     AUTHORIZED = "authorized"
@@ -396,9 +374,6 @@ class Payment:
         self.status = PaymentStatus.FAILED
 ```
 
-
-
-
 ## 8. Domain Rules
 
 ### Global Rules
@@ -422,16 +397,11 @@ class Payment:
 - Ticket QR payloads must contain only secure identifiers and signatures.
 - Media files must be stored in Nextcloud, not in PostgreSQL.
 
-
-
-
-
 ## 9. Domain Exceptions
 
 - Use explicit domain exceptions.
 
-
-``` python
+```python
 
 
 class DomainError(Exception):
@@ -458,9 +428,4 @@ class QueueClosedError(DomainError):
     pass
 ```
 
-
-
 - API routers should translate these exceptions into HTTP responses in a central exception handler.
-
-
-

@@ -8,7 +8,9 @@
  */
 import { PUBLIC_API_BASE_URL } from '$env/static/public';
 
-const API_ORIGIN = (PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+const API_ORIGIN = (
+	PUBLIC_API_BASE_URL && PUBLIC_API_BASE_URL.trim() !== '' ? PUBLIC_API_BASE_URL : ''
+).replace(/\/+$/, '');
 export const API_ROOT = `${API_ORIGIN}/api/v1`;
 
 export const CORRELATION_ID_HEADER = 'X-Correlation-ID';

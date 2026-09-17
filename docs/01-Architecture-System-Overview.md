@@ -45,19 +45,17 @@ graph TD
     C --> CF
     B --> CF
     W --> CF
-    
+
     CF -->|Secure Ingress| API
-    
+
     API -->|Domain Commands| PG
     API -->|Cache/Queues| RD
     API -->|Media Upload/Retrieve| NC
     API -->|Agent Execution| AI
-    
+
     AI -->|Read Domain State| API
-    
+
 ```
-
-
 
 ## Key Architectural Decisions
 

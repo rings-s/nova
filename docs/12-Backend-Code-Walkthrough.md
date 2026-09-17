@@ -74,9 +74,9 @@ async def create_tenant(
 ):
 ```
 
-Read it as: *"before running this function, call `get_tenant_service()` and pass me the result
-as `service`."* You never construct a `TenantService` by hand in a route. FastAPI builds it,
-including anything *it* depends on, recursively.
+Read it as: _"before running this function, call `get_tenant_service()` and pass me the result
+as `service`."_ You never construct a `TenantService` by hand in a route. FastAPI builds it,
+including anything _it_ depends on, recursively.
 
 Why bother? Because in tests we swap one line and the whole chain uses a test database:
 
@@ -133,7 +133,7 @@ rules can be tested with no database and no web server — our 40 domain tests r
 seconds** for exactly this reason.
 
 > [!tip] The layers are roles, not folders
-> There is no top-level `domain/` directory. Each layer appears as a *file* inside every module.
+> There is no top-level `domain/` directory. Each layer appears as a _file_ inside every module.
 > One feature = one folder, not four.
 
 ---
@@ -191,18 +191,18 @@ nova_backend/
 Open `app/modules/identity/` — every module has the same files in the same roles. Once you learn
 one module, you can navigate all of them.
 
-| File | Layer | What you write here |
-| :--- | :--- | :--- |
-| `__init__.py` | — | A summary of the module. **Read this first.** |
-| `router.py` | delivery | URL endpoints |
-| `schemas.py` | contract | What JSON goes in and out |
-| `service.py` | application | The steps of a use case |
-| `domain.py` | **domain** | The business rules |
-| `models.py` | persistence | Database table definitions |
-| `repository.py` | persistence | Database queries |
-| `events.py` | domain | Announcements ("a booking was confirmed") |
-| `exceptions.py` | domain | This module's errors |
-| `dependencies.py` | delivery | Wiring for `Depends()` |
+| File              | Layer       | What you write here                           |
+| :---------------- | :---------- | :-------------------------------------------- |
+| `__init__.py`     | —           | A summary of the module. **Read this first.** |
+| `router.py`       | delivery    | URL endpoints                                 |
+| `schemas.py`      | contract    | What JSON goes in and out                     |
+| `service.py`      | application | The steps of a use case                       |
+| `domain.py`       | **domain**  | The business rules                            |
+| `models.py`       | persistence | Database table definitions                    |
+| `repository.py`   | persistence | Database queries                              |
+| `events.py`       | domain      | Announcements ("a booking was confirmed")     |
+| `exceptions.py`   | domain      | This module's errors                          |
+| `dependencies.py` | delivery    | Wiring for `Depends()`                        |
 
 ### Start with `__init__.py`
 
@@ -302,7 +302,7 @@ Line by line:
 - `payload.model_dump()` turns the Pydantic object into a dict; `**` spreads it into arguments.
 - `await session.commit()` — **the router commits.** Remember this; §7 explains why.
 
-Notice what is *absent*: no validation, no SQL, no business rules. If you find yourself writing
+Notice what is _absent_: no validation, no SQL, no business rules. If you find yourself writing
 an `if` about business meaning in a router, it belongs in `service.py` or `domain.py`.
 
 ### Step 3 — `dependencies.py` builds the service
@@ -396,7 +396,7 @@ So the client sees `422 {"code": "validation_error", ...}` and the rule stayed f
 
 > [!note] Implemented differences
 > The response is now nested: `422 {"error": {"code": "validation_error", "message": "...",
-> "field": null, "retryable": false, "correlation_id": "..."}}`. The same handlers render
+"field": null, "retryable": false, "correlation_id": "..."}}`. The same handlers render
 > constraint violations, request validation failures and uncaught exceptions (ADR-0006).
 
 ### Step 6 — `models.py` is the table
@@ -453,11 +453,11 @@ POST /api/v1/tenants
 This confuses everyone at first. `schemas.py`, `models.py`, and `domain.py` can all describe "a
 booking" — but they answer different questions.
 
-| | Question it answers | Changes when… |
-| :--- | :--- | :--- |
+|              | Question it answers                  | Changes when…                    |
+| :----------- | :----------------------------------- | :------------------------------- |
 | `schemas.py` | What does the API accept and return? | the mobile app needs a new field |
-| `models.py` | How is it stored in PostgreSQL? | we add an index or column |
-| `domain.py` | What is *true* about it, always? | the business changes its rules |
+| `models.py`  | How is it stored in PostgreSQL?      | we add an index or column        |
+| `domain.py`  | What is _true_ about it, always?     | the business changes its rules   |
 
 Concretely, in `booking`:
 
@@ -526,7 +526,7 @@ def validate_service_duration(duration_minutes: int) -> int:
     return duration_minutes
 ```
 
-Here the ORM model *is* the business object. No extra class.
+Here the ORM model _is_ the business object. No extra class.
 
 ### Shape B — a rich entity (`booking`, `queue`, `payment`)
 
@@ -628,18 +628,18 @@ application-layer control, not a database one).
 
 ## 10. Where do I put this?
 
-| I want to… | File |
-| :--- | :--- |
-| Add a new URL | `router.py` |
-| Add a field to a request/response | `schemas.py` |
-| Add a rule like "price can't be negative" | `domain.py` |
-| Add a database column | `models.py` + a migration |
-| Add a query | `repository.py` |
-| Change the order of steps in a use case | `service.py` |
-| Add a new error type | `exceptions.py` |
-| Tell other modules something happened | `events.py` |
+| I want to…                                | File                      |
+| :---------------------------------------- | :------------------------ |
+| Add a new URL                             | `router.py`               |
+| Add a field to a request/response         | `schemas.py`              |
+| Add a rule like "price can't be negative" | `domain.py`               |
+| Add a database column                     | `models.py` + a migration |
+| Add a query                               | `repository.py`           |
+| Change the order of steps in a use case   | `service.py`              |
+| Add a new error type                      | `exceptions.py`           |
+| Tell other modules something happened     | `events.py`               |
 
-**Cross-module rule:** call the other module's *service*, never its repository or models.
+**Cross-module rule:** call the other module's _service_, never its repository or models.
 
 ```python
 service = await self.catalog.get_service(service_id)      # ✅
@@ -713,15 +713,15 @@ your code. It is the fastest way to explore what exists.
 
 ## 13. Mistakes to expect in week one
 
-| Mistake | What happens | Fix |
-| :--- | :--- | :--- |
-| Forgetting `await` | You get a coroutine, not data | `await` every async call |
-| SQL in `router.py` | Business rules get bypassed | Move it to `repository.py` |
-| Importing `sqlalchemy` in `domain.py` | `test_architecture.py` fails | Keep the domain pure |
-| Committing inside a service | Partial writes on failure | Only routers commit |
-| One schema for request + response | Fields become wrongly optional | Split `CreateXRequest` and `XOut` |
-| Reading another module's models | Boundaries collapse | Call its service |
-| Raising `HTTPException` in domain | Domain becomes web-coupled | Raise a `DomainError` |
+| Mistake                               | What happens                   | Fix                               |
+| :------------------------------------ | :----------------------------- | :-------------------------------- |
+| Forgetting `await`                    | You get a coroutine, not data  | `await` every async call          |
+| SQL in `router.py`                    | Business rules get bypassed    | Move it to `repository.py`        |
+| Importing `sqlalchemy` in `domain.py` | `test_architecture.py` fails   | Keep the domain pure              |
+| Committing inside a service           | Partial writes on failure      | Only routers commit               |
+| One schema for request + response     | Fields become wrongly optional | Split `CreateXRequest` and `XOut` |
+| Reading another module's models       | Boundaries collapse            | Call its service                  |
+| Raising `HTTPException` in domain     | Domain becomes web-coupled     | Raise a `DomainError`             |
 
 ---
 

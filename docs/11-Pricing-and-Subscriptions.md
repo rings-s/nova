@@ -42,34 +42,35 @@ Everything else is free.
 
 ## 2. Plans
 
-| | **Solo** | **Studio** | **Chain** |
-|---|---|---|---|
-| For | One provider, no staff | Salon or spa, unlimited staff | Multi-location groups |
-| Subscription | **0 SAR / month** | **199 SAR / month** | **449 SAR / month per location** |
-| Annual | — | 1,990 SAR / year (2 months free) | Negotiated |
-| New marketplace client | 35% | 30% | 25% |
-| Repeat booking | **0%** | **0%** | **0%** |
-| Direct booking | **0%** | **0%** | **0%** |
-| Online prepayment | 2.5% | 2.5% | 2.5% |
-| Staff seats | 1 | Unlimited | Unlimited |
-| Locations | 1 | 1 | Unlimited |
-| Marketplace profile | ✅ | ✅ | ✅ |
-| Calendar and availability | ✅ | ✅ | ✅ |
-| Walk-in queue and QR tickets | ✅ | ✅ | ✅ |
-| WhatsApp reminders | 100 / month | Unlimited | Unlimited |
-| AI booking and support agents | ✅ | ✅ | ✅ |
-| AI insights agent | — | ✅ | ✅ |
-| AI retention campaigns | — | ✅ | ✅ |
-| POS and product sales | — | ✅ | ✅ |
-| Cross-location reporting | — | — | ✅ |
-| API access | — | — | ✅ |
-| Payouts | Daily | Daily | Daily |
-| Contract | None, cancel any time | None, cancel any time | 12 months |
+|                               | **Solo**               | **Studio**                       | **Chain**                        |
+| ----------------------------- | ---------------------- | -------------------------------- | -------------------------------- |
+| For                           | One provider, no staff | Salon or spa, unlimited staff    | Multi-location groups            |
+| Subscription                  | **0 SAR / month**      | **199 SAR / month**              | **449 SAR / month per location** |
+| Annual                        | —                      | 1,990 SAR / year (2 months free) | Negotiated                       |
+| New marketplace client        | 35%                    | 30%                              | 25%                              |
+| Repeat booking                | **0%**                 | **0%**                           | **0%**                           |
+| Direct booking                | **0%**                 | **0%**                           | **0%**                           |
+| Online prepayment             | 2.5%                   | 2.5%                             | 2.5%                             |
+| Staff seats                   | 1                      | Unlimited                        | Unlimited                        |
+| Locations                     | 1                      | 1                                | Unlimited                        |
+| Marketplace profile           | ✅                     | ✅                               | ✅                               |
+| Calendar and availability     | ✅                     | ✅                               | ✅                               |
+| Walk-in queue and QR tickets  | ✅                     | ✅                               | ✅                               |
+| WhatsApp reminders            | 100 / month            | Unlimited                        | Unlimited                        |
+| AI booking and support agents | ✅                     | ✅                               | ✅                               |
+| AI insights agent             | —                      | ✅                               | ✅                               |
+| AI retention campaigns        | —                      | ✅                               | ✅                               |
+| POS and product sales         | —                      | ✅                               | ✅                               |
+| Cross-location reporting      | —                      | —                                | ✅                               |
+| API access                    | —                      | —                                | ✅                               |
+| Payouts                       | Daily                  | Daily                            | Daily                            |
+| Contract                      | None, cancel any time  | None, cancel any time            | 12 months                        |
 
 All figures exclude VAT. KSA VAT is 15% and is applied to subscription, commission, and
 processing fees on the tenant invoice.
 
 > [!note] Which agents each feature unlocks
+>
 > - **Every plan:** `ai_booking_agent` is the receptionist and `ai_support_agent` the
 >   customer-service agent. The accountant is included too.
 > - **Studio and Chain:** `ai_insights_agent` unlocks the analyst and the business manager.
@@ -100,7 +101,7 @@ The rules that decide whether a booking is billable:
 
 ## 4. Booking Source Classification
 
-``` python
+```python
 from enum import StrEnum
 
 
@@ -135,7 +136,7 @@ booking completion, and stored on the commission line — never recomputed from 
 > and returns a token, which `BookingService.create` verifies against the business being booked
 > and the window before it writes `MARKETPLACE`.
 >
-> `resolve_booking_source` still refuses to let a client *declare* the value — the marketplace
+> `resolve_booking_source` still refuses to let a client _declare_ the value — the marketplace
 > presents a credential NOVA issued rather than asserting a source, so the claim stays
 > server-side and falsifiable, which is what ADR-0008 required. Every unverifiable case still
 > falls back to a free channel, per the P1 rule above.
@@ -148,11 +149,11 @@ Placement follows [[02-Backend-FastAPI-DDD-Structure]]: `app/modules/billing/`.
 
 **Aggregates**
 
-| Aggregate | Protects |
-|---|---|
-| `Subscription` | Plan, seats, locations, billing cycle, trial and cancellation state |
-| `Invoice` | A closed month of charges for one tenant; immutable once issued |
-| `CommissionLine` | One booking's commission decision and amount |
+| Aggregate        | Protects                                                            |
+| ---------------- | ------------------------------------------------------------------- |
+| `Subscription`   | Plan, seats, locations, billing cycle, trial and cancellation state |
+| `Invoice`        | A closed month of charges for one tenant; immutable once issued     |
+| `CommissionLine` | One booking's commission decision and amount                        |
 
 **Value objects:** `Plan`, `CommissionRate`, `Money`, `BillingPeriod`.
 
@@ -167,7 +168,7 @@ Placement follows [[02-Backend-FastAPI-DDD-Structure]]: `app/modules/billing/`.
 - Downgrading below current usage (seats, locations) is refused by the domain.
 - A cancelled subscription keeps read access until the end of the paid period.
 
-``` python
+```python
 class PlanTier(StrEnum):
     SOLO = "solo"
     STUDIO = "studio"
@@ -195,7 +196,7 @@ class InvoiceStatus(StrEnum):
 
 Naming follows [[07-Pydantic-Schemas-and-API-Contracts]].
 
-``` python
+```python
 class PlanOut(ApiSchema):
     tier: PlanTier
     monthly_price: Decimal

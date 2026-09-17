@@ -19,8 +19,6 @@ related_code:
 
 ---
 
-
-
 ---
 
 ## 1. Persistence Rules
@@ -104,12 +102,12 @@ erDiagram
     BUSINESS ||--o{ MEDIA_ASSET : owns
 ```
 
-
 4.x Updated ERD + Ai Agents
 
-``` mermaid
+```mermaid
 
 ```
+
 ---
 
 > [!warning] Bilingual columns — this section is out of date

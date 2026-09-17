@@ -1,6 +1,6 @@
 <script module>
 	/**
-	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'} IconName
+	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'search'|'clock'|'map-pin'|'star'|'filter'|'phone'|'zap'|'x'|'building'|'trending-up'} IconName
 	 */
 
 	/**
@@ -27,7 +27,21 @@
 		check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
 		'chevron-left': '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
 		'chevron-right': '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
-		'arrow-right': '<path d="M4.5 12h15M13.5 5.5 20 12l-6.5 6.5"/>'
+		'arrow-right': '<path d="M4.5 12h15M13.5 5.5 20 12l-6.5 6.5"/>',
+		search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+		clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+		'map-pin':
+			'<path d="M12 21s-7-5.5-7-11.5a7 7 0 0 1 14 0c0 6-7 11.5-7 11.5z"/><circle cx="12" cy="9.5" r="2.5"/>',
+		star: '<path d="m12 2.5 2.8 6 6.6.6-5 4.5 1.5 6.4-5.9-3.4-5.9 3.4 1.5-6.4-5-4.5 6.6-.6z"/>',
+		filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+		phone:
+			'<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
+		zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+		x: '<path d="M18 6 6 18M6 6l12 12"/>',
+		building:
+			'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M8 10h.01M16 10h.01M12 10h.01M8 14h.01M16 14h.01M12 14h.01"/>',
+		'trending-up':
+			'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
 	};
 
 	/** @type {(keyof typeof ICONS)[]} */

@@ -7,7 +7,7 @@ Accepted — 2026-08-16
 > The `MARKETPLACE` writer this ADR deferred — "a marketplace attribution record… which needs
 > the public discovery surface, which does not exist" — shipped in
 > [[0010-public-discovery-and-marketplace-attribution]] on 2026-08-21. The rule below that a
-> client may not *declare* `MARKETPLACE` is unchanged, and still enforced by
+> client may not _declare_ `MARKETPLACE` is unchanged, and still enforced by
 > `resolve_booking_source`.
 
 ## Context
@@ -20,7 +20,7 @@ Two documents defined `BookingSource` differently, and the code implemented the 
 pwa · staff · whatsapp · ai_agent
 ```
 
-`docs/11` §4 (2026-08-14) defined it as the channel that *introduced the customer*:
+`docs/11` §4 (2026-08-14) defined it as the channel that _introduced the customer_:
 
 ```text
 marketplace · direct_link · whatsapp · walk_in · reception · ai_agent
@@ -35,14 +35,14 @@ Monthly bill = subscription + (35% × new-marketplace-client bookings) + (2.5% �
 ```
 
 Everything turns on whether NOVA introduced the customer or the salon already had them. `pwa`
-cannot answer it: the same PWA serves the marketplace listing *and* the salon's own booking
+cannot answer it: the same PWA serves the marketplace listing _and_ the salon's own booking
 page, which are the two sides of the question. A `pwa` row is not an imprecise answer, it is no
 answer, and no amount of later analysis recovers it — nothing anywhere in the row records which
 surface the customer came through.
 
 This is why the fix could not wait for the billing module. The billing module is a large build
 (`Subscription`, `Invoice`, `CommissionLine`, monthly close, payouts, reversals) and can arrive
-whenever. The *signal* it reads is different: every booking taken before this change is
+whenever. The _signal_ it reads is different: every booking taken before this change is
 permanently unbillable and unauditable, and the cost of the delay compounds with volume.
 
 ## Decision
@@ -116,7 +116,7 @@ rather than being split by guesswork.
   does not exist; `docs/08` §18 warns against indexing ahead of a real query plan.
 - Still outstanding for billing, and unblocked by this: the `customer_business_first_booking`
   table (`docs/11` §10) that makes "new exactly once" enforceable at the database level, and
-  `CommissionClass`, which `docs/11` §4 derives at booking *completion* and stores on the
+  `CommissionClass`, which `docs/11` §4 derives at booking _completion_ and stores on the
   commission line — so it belongs to the billing module, not here.
 
 ## Alternatives considered

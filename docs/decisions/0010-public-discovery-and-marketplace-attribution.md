@@ -143,7 +143,7 @@ results, which is the scrape ADR-0007 found on the old unauthenticated `GET /ten
   inverse of a provider's calendar. The rate limit bounds this rather than closing it, which is
   the same trade `GET /tenants/{id}/bookings/availability` already makes, taken with no principal
   to attribute the polling to.
-- That route also answers for *every* provider qualified for the service, where the authenticated
+- That route also answers for _every_ provider qualified for the service, where the authenticated
   one answers for a named provider — so the same date range costs a multiple of it, chosen by an
   anonymous caller. Two bounds cap the work: `discovery_max_availability_days` (14, against
   `availability_max_horizon_days`'s 90) caps the date dimension, and `discovery_max_public_slots`

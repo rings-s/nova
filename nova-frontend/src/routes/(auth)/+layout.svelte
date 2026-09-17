@@ -5,16 +5,30 @@
 	 * rather than each inventing its own page chrome.
 	 */
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
-
+	import Icon from '$lib/components/ui/Icon.svelte';
 	let { children } = $props();
 </script>
 
 <div
-	class="relative flex min-h-[calc(100dvh-57px)] items-center justify-center overflow-hidden px-4 py-12 sm:px-6"
+	class="relative flex min-h-[calc(100dvh-57px)] flex-col items-center justify-center overflow-hidden px-4 py-12 sm:px-6"
 	style="background-image: var(--gradient-soft)"
 >
-	<GradientBlob variant="soft" />
-	<div class="w-full max-w-md">
+	<GradientBlob variant="hero" />
+
+	<!-- Auth Shell Container -->
+	<div class="relative z-10 w-full max-w-md">
 		{@render children()}
+
+		<!-- Regulatory & Trust Footer -->
+		<div class="mt-6 flex flex-wrap items-center justify-center gap-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+			<span class="flex items-center gap-1">
+				<Icon name="shield-check" class="size-3.5 text-emerald-600 dark:text-emerald-400" />
+				<span>Moyasar PCI-DSS Level 1</span>
+			</span>
+			<span>·</span>
+			<span>ZATCA Phase 2 E-Invoice</span>
+			<span>·</span>
+			<span>Saudi PDPL Compliant</span>
+		</div>
 	</div>
 </div>

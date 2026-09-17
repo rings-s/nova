@@ -64,13 +64,13 @@ app/modules/ai_agents/
 
 Naming conventions:
 
-| Type | Suffix | Example |
-|---|---|---|
-| Agent instance | `_agent` | `booking_agent` |
-| Tool function | verb-first | `get_available_slots` |
-| Tool result | `Result` | `HoldSlotResult` |
-| Agent output | `Output` | `TriageOutput` |
-| Guardrail failure | `Refusal` | `PaymentRefusal` |
+| Type              | Suffix     | Example               |
+| ----------------- | ---------- | --------------------- |
+| Agent instance    | `_agent`   | `booking_agent`       |
+| Tool function     | verb-first | `get_available_slots` |
+| Tool result       | `Result`   | `HoldSlotResult`      |
+| Agent output      | `Output`   | `TriageOutput`        |
+| Guardrail failure | `Refusal`  | `PaymentRefusal`      |
 
 ---
 
@@ -78,7 +78,7 @@ Naming conventions:
 
 Every agent is constructed with the same dependency container and the same output envelope.
 
-``` python
+```python
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -118,18 +118,19 @@ Rules:
 
 ## 3. Agent Roster
 
-| Agent | Goal | Module Surface | Model |
-|---|---|---|---|
-| `concierge_agent` | Route an incoming message to the right agent. | all | `llama3.1-8b` |
-| `booking_agent` | Turn intent into a confirmed booking. | `booking`, `catalog` | `llama3.1-70b` |
-| `queue_agent` | Answer and manage walk-in queue state. | `queue` | `llama3.1-8b` |
-| `retention_agent` | Bring lapsed customers back. | `notification`, `booking` | `llama3.1-70b` |
-| `insights_agent` | Answer owner questions about their numbers. | `analytics` | `llama3.1-70b` |
-| `support_agent` | Resolve customer issues or hand off cleanly. | `booking`, `payment` | `llama3.1-70b` |
-| `billing_agent` | Explain plan, commission, and invoice charges. | `billing` | `llama3.1-8b` |
+| Agent             | Goal                                           | Module Surface            | Model          |
+| ----------------- | ---------------------------------------------- | ------------------------- | -------------- |
+| `concierge_agent` | Route an incoming message to the right agent.  | all                       | `llama3.1-8b`  |
+| `booking_agent`   | Turn intent into a confirmed booking.          | `booking`, `catalog`      | `llama3.1-70b` |
+| `queue_agent`     | Answer and manage walk-in queue state.         | `queue`                   | `llama3.1-8b`  |
+| `retention_agent` | Bring lapsed customers back.                   | `notification`, `booking` | `llama3.1-70b` |
+| `insights_agent`  | Answer owner questions about their numbers.    | `analytics`               | `llama3.1-70b` |
+| `support_agent`   | Resolve customer issues or hand off cleanly.   | `booking`, `payment`      | `llama3.1-70b` |
+| `billing_agent`   | Explain plan, commission, and invoice charges. | `billing`                 | `llama3.1-8b`  |
 
 > [!note] Superseded roster
 > [[13-Business-Agents-and-Analytics]] (ADR-0011) replaces this roster with five agents:
+>
 > - `receptionist_agent` absorbs `booking_agent` and `queue_agent`.
 > - `customer_service_agent` replaces `support_agent`.
 > - `accountant_agent` replaces `billing_agent`.
@@ -150,7 +151,7 @@ Rules:
 - **Tools:** none. Classification only.
 - **Output:**
 
-``` python
+```python
 from enum import StrEnum
 
 
@@ -190,14 +191,14 @@ class TriageOutput(BaseModel):
 - **Trigger:** routed from concierge with `route=BOOKING`.
 - **Tools:**
 
-| Tool | Service call | Write? |
-|---|---|---|
-| `search_services(query, location_id)` | `CatalogService.search` | no |
-| `get_available_slots(service_id, date_range)` | `BookingService.availability` | no |
-| `get_provider_info(provider_id)` | `CatalogService.get_provider` | no |
-| `hold_slot(service_id, start_time, minutes=5)` | `BookingService.hold_slot` | yes |
-| `create_booking_draft(hold_token, customer_id)` | `BookingService.create_draft` | yes |
-| `cancel_booking(booking_id, reason)` | `CancelBookingService.execute` | yes |
+| Tool                                            | Service call                   | Write? |
+| ----------------------------------------------- | ------------------------------ | ------ |
+| `search_services(query, location_id)`           | `CatalogService.search`        | no     |
+| `get_available_slots(service_id, date_range)`   | `BookingService.availability`  | no     |
+| `get_provider_info(provider_id)`                | `CatalogService.get_provider`  | no     |
+| `hold_slot(service_id, start_time, minutes=5)`  | `BookingService.hold_slot`     | yes    |
+| `create_booking_draft(hold_token, customer_id)` | `BookingService.create_draft`  | yes    |
+| `cancel_booking(booking_id, reason)`            | `CancelBookingService.execute` | yes    |
 
 - **Guardrails:**
   - Cannot confirm a booking. It may only reach `PENDING_PAYMENT`; confirmation comes from the payment webhook.
@@ -206,9 +207,10 @@ class TriageOutput(BaseModel):
   - Cannot cancel outside the tenant's `CancellationPolicy`; the domain raises, the agent reports the reason verbatim.
 
 > **Superseded:** no agent cancels a booking any more (2026-09-15 security audit, SEC-09). `customer_service_agent` has `request_cancellation`, which checks the booking and the policy and returns it in `pending_cancellations`; the customer confirms through the booking's cancel route. See docs/13 section 4.2.
-  - Cannot book across tenants.
 
-``` python
+- Cannot book across tenants.
+
+```python
 class BookingAgentOutput(AgentOutput):
     hold_token: str | None = None
     booking_id: UUID | None = None
@@ -256,7 +258,7 @@ class BookingAgentOutput(AgentOutput):
   - Every claim cites the metric and window it came from.
   - Refuses to answer where the sample is below the reporting threshold.
 
-``` python
+```python
 class InsightsOutput(AgentOutput):
     metrics_used: list[str]
     period_start: date
@@ -299,15 +301,15 @@ Pricing definitions live in [[11-Pricing-and-Subscriptions]].
 
 Guardrails are code in `guardrails.py`, not prompt text.
 
-| Guardrail | Enforced where | Failure behaviour |
-|---|---|---|
-| Tenant scoping | `AgentDeps` construction | request rejected before the model runs |
-| Tool allowlist | agent definition | tool is not registered, so it cannot be called |
-| Write authorisation | Application Service | domain exception surfaced as a refusal |
-| PII redaction | pre-prompt | phone, email, and payment refs masked before inference |
-| Output validation | Pydantic `result_type` | one retry, then handoff |
-| Rate limit | router dependency | 429 with `ErrorResponse` |
-| Prompt injection | pre-prompt | tool calls from message content are ignored |
+| Guardrail           | Enforced where           | Failure behaviour                                      |
+| ------------------- | ------------------------ | ------------------------------------------------------ |
+| Tenant scoping      | `AgentDeps` construction | request rejected before the model runs                 |
+| Tool allowlist      | agent definition         | tool is not registered, so it cannot be called         |
+| Write authorisation | Application Service      | domain exception surfaced as a refusal                 |
+| PII redaction       | pre-prompt               | phone, email, and payment refs masked before inference |
+| Output validation   | Pydantic `result_type`   | one retry, then handoff                                |
+| Rate limit          | router dependency        | 429 with `ErrorResponse`                               |
+| Prompt injection    | pre-prompt               | tool calls from message content are ignored            |
 
 Rules:
 
@@ -319,12 +321,12 @@ Rules:
 
 ## 12. Fallback Behaviour
 
-| Condition | Behaviour |
-|---|---|
-| Ollama unreachable | endpoint returns `requires_human_handoff=True` with a static reply |
-| 70b model out of VRAM | fall back to `llama3.1-8b` and flag reduced confidence |
-| Tool timeout (>5s) | abort the turn, hand off, log the tool name |
-| Repeated validation failure | disable that agent for the session |
+| Condition                   | Behaviour                                                          |
+| --------------------------- | ------------------------------------------------------------------ |
+| Ollama unreachable          | endpoint returns `requires_human_handoff=True` with a static reply |
+| 70b model out of VRAM       | fall back to `llama3.1-8b` and flag reduced confidence             |
+| Tool timeout (>5s)          | abort the turn, hand off, log the tool name                        |
+| Repeated validation failure | disable that agent for the session                                 |
 
 The booking, queue, and payment flows must remain fully usable with every agent offline.
 

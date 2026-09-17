@@ -20,14 +20,14 @@ The SvelteKit frontend is not in the tree. CI's frontend jobs skip unless `front
 
 The Makefile is at the repo root.
 
-| Command | What it does |
-| --- | --- |
-| `make dev` | Starts the full stack via compose. Migrations run first in the `migrate` container. API docs at http://localhost:8000/docs. Creates `infra/.env` from the example if it is missing, generating every blank secret. |
-| `make test` | Runs `pytest` in a one-off `tools` container, against the `nova_test` database. |
-| `make check` | ruff, mypy, and a `create_app()` assembly smoke check. No database needed. |
-| `make lint` / `make fmt` / `make typecheck` | `ruff check` / `ruff format` / `mypy app`, on the host via `uv run`. |
-| `make revision m="add_x"` | `alembic revision --autogenerate` in a one-off `tools` container. |
-| `make migrate` | `alembic upgrade head` in a one-off `tools` container. |
+| Command                                     | What it does                                                                                                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `make dev`                                  | Starts the full stack via compose. Migrations run first in the `migrate` container. API docs at http://localhost:8000/docs. Creates `infra/.env` from the example if it is missing, generating every blank secret. |
+| `make test`                                 | Runs `pytest` in a one-off `tools` container, against the `nova_test` database.                                                                                                                                    |
+| `make check`                                | ruff, mypy, and a `create_app()` assembly smoke check. No database needed.                                                                                                                                         |
+| `make lint` / `make fmt` / `make typecheck` | `ruff check` / `ruff format` / `mypy app`, on the host via `uv run`.                                                                                                                                               |
+| `make revision m="add_x"`                   | `alembic revision --autogenerate` in a one-off `tools` container.                                                                                                                                                  |
+| `make migrate`                              | `alembic upgrade head` in a one-off `tools` container.                                                                                                                                                             |
 
 To run a single test:
 
@@ -41,12 +41,14 @@ cd nova_backend && uv run pytest tests/test_architecture.py tests/modules/bookin
 ```
 
 DB-backed tests on the host:
+
 - They read `TEST_DATABASE_URL`, which defaults to `postgresql+asyncpg://nova:nova@localhost:5432/nova_test`. Point it at the `POSTGRES_PORT` and `POSTGRES_PASSWORD` set in `infra/.env`. It names the schema owner: conftest migrates as the owner, then runs every test as `nova_app` with `SET LOCAL ROLE`.
 - `infra/postgres/initdb/` creates `nova_test` and the `nova_app` login only when the volume is first initialised. On an existing volume, do both by hand:
   `docker compose -f infra/docker-compose.yml --env-file infra/.env exec postgres createdb -U nova nova_test`
   `make db-app-role`
 
 CI (`.github/workflows/ci.yml`) runs:
+
 - ruff, mypy and pytest
 - the assembly smoke check
 - `alembic upgrade head` followed by `alembic check` on an empty database. This fails when models changed without a migration.
@@ -59,7 +61,7 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
 
 `analytics` (docs/13, ADR-0011) is the exception. It owns no tables, so it has no `models`, `repository` or `events`. It reads fact projections (`BookingFact`, `PaymentFact`, …) through the other modules' services, and adds `metrics.py` (pandas and numpy) and `charts.py` (Plotly JSON).
 
-- **Start with the module's `__init__.py` docstring.** It names the aggregates and the *public surface* that other modules may import. A test requires the docstring.
+- **Start with the module's `__init__.py` docstring.** It names the aggregates and the _public surface_ that other modules may import. A test requires the docstring.
 - **Dependencies point inward:** `router → service → domain ← repository`. `tests/test_architecture.py` enforces this by AST inspection:
   - `domain.py` may not import fastapi, starlette, sqlalchemy or httpx.
   - `service.py` and `models.py` may not import fastapi or starlette.
@@ -69,8 +71,8 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
   - Outside request DI (worker, webhooks, other services), use the `build_*_service(session, tenant_id)` factory in that module's `dependencies.py` rather than wiring repositories by hand.
   - For a reaction rather than a question, publish a domain event instead. Booking never imports notification or billing.
 - **`domain.py` comes in two styles.** Use a rich entity only when the thing can be in an invalid state.
-  - *Pure validator functions*, where the ORM model is the entity: identity, catalog, discovery, media, notification. `analytics` is pure too, with no ORM model at all.
-  - *Rich entities with state machines*, kept separate from the ORM record, with the repository mapping between them (e.g. `domain.Booking` vs `models.BookingRecord`): booking, queue, payment, billing.
+  - _Pure validator functions_, where the ORM model is the entity: identity, catalog, discovery, media, notification. `analytics` is pure too, with no ORM model at all.
+  - _Rich entities with state machines_, kept separate from the ORM record, with the repository mapping between them (e.g. `domain.Booking` vs `models.BookingRecord`): booking, queue, payment, billing.
 - **`app/modules/registry.py` is the single wiring point.**
   - It imports every module's models, which Alembic autogenerate needs.
   - It lists the routers that `main.py` mounts under `/api/v1`.
@@ -90,10 +92,12 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
    - **Autogenerate does not emit RLS.** A migration that creates a tenant-owned table must enable and force RLS and create the `tenant_isolation` policy itself. Copy the `_TENANT_TABLES` loop in `alembic/versions/e5f6a7b8c9d0_*.py`.
 
 There are two sanctioned exceptions:
+
 - **`bypass_tenant_scope`**: for the worker, the outbox and maintenance jobs — and, narrowly, for the two request paths whose entire job is to answer "which tenant" before any tenant is known or authorized: `AuthService._issue_pair` reading `memberships` at login, and `MembershipService.accept_invite` validating an invite token before trusting the tenant it names (`SELF_AUTHORIZING_TENANT_ROUTES` in `tests/test_route_guards.py`). Both close the bypass (via `set_tenant_scope`) before any other read or write. Do not add a third without the same justification.
 - **`set_discovery_scope`**: for the public marketplace (`discovery`, ADR-0010). It is SELECT-only and sees only published listings, through catalog's `PublicCatalogService`.
 
 **Never connect the app as a role RLS exempts.** Postgres skips every policy for a superuser or a `BYPASSRLS` role, `FORCE` or not.
+
 - The API and worker connect as `nova_app` (NOSUPERUSER NOBYPASSRLS, created and granted DML by migration `e1f2a3b4c5d6`). Only migrations and the test suite use the schema owner, through `MIGRATION_DATABASE_URL` and `TEST_DATABASE_URL`, and compose gives those to the `migrate` and `tools` containers alone.
 - `enforce_rls_role` (`app/db/session.py`) refuses to start a staging or production process that is connected as an exempt role.
 - `set_tenant_scope` also switches off any earlier `bypass_tenant_scope` in the same transaction.
@@ -102,7 +106,7 @@ There are two sanctioned exceptions:
 
 Caller identity is never read from the request. `customer_id` is derived from the principal. Only staff and service principals may pass `on_behalf_of_customer_id` (see `resolve_booking_customer`).
 
-A self-service booking or queue join resolves the caller's own customer record through `CustomerService.ensure_for_user`, which may *claim* an existing, unclaimed record by phone match — but only once `User.phone_verified_at` is set (`AuthService.request_phone_verification` / `confirm_phone_verification`, a short-lived JWT sent over WhatsApp, signed with a purpose-derived key via `security.purpose_key`/`issue_purpose_token`/`decode_purpose_token` rather than a stored, hashed one-time code — nothing backs the token but its own signature). An unverified phone that matches any existing record, claimed or not, is refused (`PhoneVerificationRequiredError`) rather than told which case it is.
+A self-service booking or queue join resolves the caller's own customer record through `CustomerService.ensure_for_user`, which may _claim_ an existing, unclaimed record by phone match — but only once `User.phone_verified_at` is set (`AuthService.request_phone_verification` / `confirm_phone_verification`, a short-lived JWT sent over WhatsApp, signed with a purpose-derived key via `security.purpose_key`/`issue_purpose_token`/`decode_purpose_token` rather than a stored, hashed one-time code — nothing backs the token but its own signature). An unverified phone that matches any existing record, claimed or not, is refused (`PhoneVerificationRequiredError`) rather than told which case it is.
 
 Staff access is granted through a redeemable invite (`MembershipService.invite` / `accept_invite`), never by matching an email string against whoever already holds a NOVA account with it. The token returned at invite time is the entire credential — NOVA does not deliver it; the inviter relays it out of band.
 

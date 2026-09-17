@@ -33,8 +33,8 @@ Three defects blocked correctness rather than features:
 ### Customers live in `identity`
 
 `docs/06` lists `Customer` as a core aggregate but never places it in a context. It goes in
-`identity`, which already owns the User/customer distinction. A customer is *who someone is*;
-catalog answers *what is sold* and booking *when*.
+`identity`, which already owns the User/customer distinction. A customer is _who someone is_;
+catalog answers _what is sold_ and booking _when_.
 
 Customers are tenant-scoped, with `phone` unique per tenant. The same person at two salons is
 two customer records with two consent states — consent given to one business must never leak to
@@ -42,7 +42,7 @@ another. `user_id` links a record to a sign-in account when someone books themse
 null for a walk-in reception typed in.
 
 `resolve_booking_customer` still returns an id whose meaning depends on the branch taken (the
-caller's own *user* id, or a *customer* id staff named); `CustomerService.resolve_for_booking`
+caller's own _user_ id, or a _customer_ id staff named); `CustomerService.resolve_for_booking`
 is the single place that ambiguity is resolved into a record. Conflating them is how a user id
 ends up in a `customer_id` column.
 
@@ -106,7 +106,7 @@ browser PUTs to Nextcloud directly. There is deliberately no endpoint accepting 
 ### Notification is a consumer, and consent is a gate
 
 Three gates before any message leaves: consent (per channel, and separately for marketing),
-quiet hours (marketing only, evaluated in the *customer's* timezone), and a dedupe key. Refused
+quiet hours (marketing only, evaluated in the _customer's_ timezone), and a dedupe key. Refused
 messages are recorded as `SUPPRESSED`, deliberately not `FAILED` — nothing went wrong, and the
 record is the evidence the opt-out was honoured.
 
@@ -126,7 +126,7 @@ model is unreachable, or a turn times out.
 
 `app/worker/outbox.py` claims batches with `FOR UPDATE SKIP LOCKED` plus a lease, and processes
 each event in its own transaction so one poisonous event cannot roll back its batch. Events are
-marked published *after* their handlers run, which is at-least-once and requires handlers to be
+marked published _after_ their handlers run, which is at-least-once and requires handlers to be
 idempotent — the alternative drops notifications whenever a worker dies mid-handler.
 
 ## Consequences
@@ -137,7 +137,7 @@ idempotent — the alternative drops notifications whenever a worker dies mid-ha
   refers to it rather than to a user id.
 - A domain-raised 409 is now marked `retryable`, matching the constraint-raised one. The same
   condition had different retry semantics depending on which layer caught the race.
-- Model-side check constraints are named *bare* (`end_after_start`, not
+- Model-side check constraints are named _bare_ (`end_after_start`, not
   `ck_bookings_end_after_start`); the naming convention adds the prefix. Adding one the old way
   will fail `alembic check`.
 - The worker is now load-bearing. Without a running `arq` process, domain events accumulate

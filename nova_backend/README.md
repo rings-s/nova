@@ -12,13 +12,13 @@ router.py  ──▶  service.py  ──▶  domain.py  ◀──  repository.py
    HTTP          use cases        the rules        persistence
 ```
 
-| Layer | May import | Must never import |
-| :--- | :--- | :--- |
-| `router.py` | schemas, service, dependencies | models, repository |
-| `service.py` | domain, repository, models, events | fastapi |
-| `domain.py` | stdlib, pydantic, `app.core.values` | fastapi, sqlalchemy |
-| `repository.py` | models, `app.db` | fastapi, service |
-| `models.py` | sqlalchemy, `app.db` | fastapi, service, domain |
+| Layer           | May import                          | Must never import        |
+| :-------------- | :---------------------------------- | :----------------------- |
+| `router.py`     | schemas, service, dependencies      | models, repository       |
+| `service.py`    | domain, repository, models, events  | fastapi                  |
+| `domain.py`     | stdlib, pydantic, `app.core.values` | fastapi, sqlalchemy      |
+| `repository.py` | models, `app.db`                    | fastapi, service         |
+| `models.py`     | sqlalchemy, `app.db`                | fastapi, service, domain |
 
 If you are unsure which layer a file is, open it — every file starts with a
 header naming its layer and its import rule.
@@ -86,18 +86,18 @@ The exception is `analytics`, which owns no tables. It has no `models.py`, `repo
 `events.py`. It reads other modules' fact projections through their services, and adds
 `metrics.py` (pandas and numpy, the only place they are imported) and `charts.py` (Plotly).
 
-| File | Layer | Holds |
-| :--- | :--- | :--- |
-| `__init__.py` | — | context summary: aggregates, deps, public surface |
-| `router.py` | delivery | FastAPI endpoints. No business rules. |
-| `schemas.py` | contract | Pydantic request/response DTOs |
-| `service.py` | application | use-case orchestration; flushes, never commits |
-| `domain.py` | **domain** | the rules. No framework imports. |
-| `models.py` | persistence | SQLAlchemy ORM tables |
-| `repository.py` | persistence | queries, tenant-scoped |
-| `events.py` | domain | domain event dataclasses |
-| `exceptions.py` | domain | module errors, subclassing `DomainError` |
-| `dependencies.py` | delivery | FastAPI DI providers |
+| File              | Layer       | Holds                                             |
+| :---------------- | :---------- | :------------------------------------------------ |
+| `__init__.py`     | —           | context summary: aggregates, deps, public surface |
+| `router.py`       | delivery    | FastAPI endpoints. No business rules.             |
+| `schemas.py`      | contract    | Pydantic request/response DTOs                    |
+| `service.py`      | application | use-case orchestration; flushes, never commits    |
+| `domain.py`       | **domain**  | the rules. No framework imports.                  |
+| `models.py`       | persistence | SQLAlchemy ORM tables                             |
+| `repository.py`   | persistence | queries, tenant-scoped                            |
+| `events.py`       | domain      | domain event dataclasses                          |
+| `exceptions.py`   | domain      | module errors, subclassing `DomainError`          |
+| `dependencies.py` | delivery    | FastAPI DI providers                              |
 
 Three of these are not the same thing, and mixing them is the most common mistake:
 
@@ -111,7 +111,7 @@ Not every module earns a rich domain entity. We pay for the mapping layer only
 where there is a real lifecycle to protect.
 
 **Pure functions** — `identity`, `catalog`, `discovery`, `media`, `notification`.
-Rules are field-level validation; the ORM model *is* the domain object.
+Rules are field-level validation; the ORM model _is_ the domain object.
 
 ```python
 def validate_service_duration(duration_minutes: int) -> int: ...
@@ -129,7 +129,7 @@ class Booking:
         self.status = BookingStatus.CONFIRMED
 ```
 
-The test: *can this thing be in a wrong state?* A service with a bad price is
+The test: _can this thing be in a wrong state?_ A service with a bad price is
 rejected at the edge. A booking that is `COMPLETED` without ever being
 `CHECKED_IN` is a corrupted aggregate — that needs an entity.
 
@@ -165,7 +165,7 @@ against it, so a connection that never sets it sees nothing. It fails closed.
 See `docs/decisions/0003-tenant-isolation-strategy.md`.
 
 **The one exception is `discovery`** (ADR-0010). A customer searching for a
-salon has no tenant yet, so the marketplace reads *across* tenants through
+salon has no tenant yet, so the marketplace reads _across_ tenants through
 `catalog`'s `PublicCatalogService` and a second RLS window,
 `app.discovery_mode`. That window is narrower than it sounds: `FOR SELECT` only,
 and matching only rows a business has published — active, listed, not deleted.

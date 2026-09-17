@@ -35,7 +35,7 @@ legitimately cross tenants set `app.bypass_rls` explicitly.
   connection pooling.
 - ~~**Known gap**: does not protect raw SQL or a future module that bypasses
   `TenantScopedRepository`. This is an application-layer control, not a database-layer one.~~
-  **Closed** by the RLS policies above. Note that a Postgres *superuser* bypasses RLS entirely
+  **Closed** by the RLS policies above. Note that a Postgres _superuser_ bypasses RLS entirely
   regardless of `FORCE`, so the application must not connect as one. **Update 2026-09-14:** it
   did, in the compose stack and in the test suite, until migration `e1f2a3b4c5d6`, so the
   policies were in force nowhere. The API, the worker and the tests now connect as `nova_app`

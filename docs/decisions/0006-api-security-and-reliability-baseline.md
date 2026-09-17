@@ -23,7 +23,7 @@ defects. Two were severe enough to block any deployment:
 And five more:
 
 3. `IntegrityError` was unhandled, so every database constraint surfaced as a 500 — including
-   the `EXCLUDE` constraint that is the *actual* guarantee against double-booking. The one
+   the `EXCLUDE` constraint that is the _actual_ guarantee against double-booking. The one
    defence that works under concurrency reported itself as a server fault.
 4. No catch-all exception handler. Unexpected errors reached Starlette's default, returning an
    unstructured 500 and exposing tracebacks whenever `DEBUG` was on.

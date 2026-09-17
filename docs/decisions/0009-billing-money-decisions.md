@@ -40,8 +40,8 @@ caller passes it today.
 
 ### 3. "New exactly once" is enforced by the database, not by a read
 
-§3: *"A customer is charged as 'new' exactly once, per business, forever. Any bug that re-charges
-an existing customer is a P1."* §11 requires that two concurrent first bookings produce exactly
+§3: _"A customer is charged as 'new' exactly once, per business, forever. Any bug that re-charges
+an existing customer is a P1."_ §11 requires that two concurrent first bookings produce exactly
 one billable line.
 
 A `SELECT` followed by an `INSERT` loses that race, so the accrual path does not ask. It attempts
@@ -63,8 +63,8 @@ Two consequences worth stating:
 `rate_pct`, `commission_class`, `base_amount` and `source` are all copied onto the line at
 accrual. Nothing reads back through to a `Plan` or a `Booking` to recompute them.
 
-This is what makes §11's *"a plan change mid-period does not retroactively re-rate accrued
-lines"* true structurally rather than by care. It also keeps the line readable when the booking
+This is what makes §11's _"a plan change mid-period does not retroactively re-rate accrued
+lines"_ true structurally rather than by care. It also keeps the line readable when the booking
 is archived, which is what a disputed charge needs.
 
 Lines are append-only, as §10 requires: a reversal is a new row carrying the original's rate,

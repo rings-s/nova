@@ -1,0 +1,16 @@
+{
+  "name": "nova",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "nova-frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=nova-frontend",
+    "build": "npm run build --workspace=nova-frontend",
+    "start": "npm run start --workspace=nova-frontend",
+    "lint": "npm run lint --workspace=nova-frontend",
+    "check": "npm run check --workspace=nova-frontend"
+  }
+}
