@@ -6,7 +6,6 @@
 	import RegisterForm from '$lib/components/auth/RegisterForm.svelte';
 	import Logo from '$lib/components/layout/Logo.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 
 	$effect(() => {
 		if (authStore.isAuthenticated) goto(resolve('/'));
@@ -31,7 +30,9 @@
 	<title>Create Account — NOVA GCC Salon Operating System</title>
 </svelte:head>
 
-<div class="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+<div
+	class="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+>
 	<div class="flex items-center justify-between">
 		<Logo />
 		<Badge tone="success" size="sm">14-Day Free Trial</Badge>
@@ -42,7 +43,7 @@
 			Create your account
 		</h1>
 		<p class="mt-1.5 text-xs text-slate-600 dark:text-slate-400">
-			Run your salon with 0% direct commission, or book with top salons.
+			Book with any salon on NOVA, or list your own.
 		</p>
 	</div>
 
@@ -50,9 +51,9 @@
 		<RegisterForm onsuccess={handleSuccess} />
 	</div>
 
-	<div class="mt-6 border-t border-slate-100 pt-5 dark:border-slate-800 text-center">
+	<div class="mt-6 border-t border-slate-100 pt-5 text-center dark:border-slate-800">
 		<p class="text-xs text-slate-500 dark:text-slate-400">
-			Already have an account?{' '}
+			Already have an account?
 			<a
 				href={resolve('/login')}
 				class="font-bold text-brand-600 hover:text-brand-700 dark:text-brand-400"

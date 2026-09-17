@@ -86,7 +86,8 @@ const mockData = {
 			location_id: 'loc-1',
 			name_en: 'HydraFacial Glow Treatment',
 			name_ar: 'جلسة هيدرافيشل لنضارة البشرة',
-			description_en: 'Deep cleansing, gentle exfoliation, and intense hydration with nourishing peptides.',
+			description_en:
+				'Deep cleansing, gentle exfoliation, and intense hydration with nourishing peptides.',
 			description_ar: 'تنظيف عميق وتقشير لطيف وترطيب مكثف مع سيروم الببتيدات المغذية.',
 			category: 'Skincare',
 			duration_minutes: 60,
@@ -102,7 +103,8 @@ const mockData = {
 			location_id: 'loc-1',
 			name_en: 'Royal Moroccan Bath & Ritual',
 			name_ar: 'حمام مغربي ملكي وطقوس استرخاء',
-			description_en: 'Authentic Moroccan hammam ritual with herbal steam and black soap treatment.',
+			description_en:
+				'Authentic Moroccan hammam ritual with herbal steam and black soap treatment.',
 			description_ar: 'جلسة حمام مغربي أصيل بالبخار بالأعشاب والصابون البلدي.',
 			category: 'Spa & Body',
 			duration_minutes: 75,
@@ -331,7 +333,12 @@ function createMockJwt(email = 'admin@nova.sa', role = 'owner', tenantId = 'tena
 	return `${header}.${payload}.signature_mock`;
 }
 
-// Router handler
+/**
+ * @param {Request} request
+ * @param {{ path?: string }} params
+ * @param {URL} url
+ * @param {'GET'|'POST'|'PUT'|'PATCH'|'DELETE'} method
+ */
 async function handleRequest(request, params, url, method) {
 	const path = (params.path || '').replace(/^\/+/, '').replace(/\/+$/, '');
 	const query = Object.fromEntries(url.searchParams.entries());
@@ -756,9 +763,27 @@ async function handleRequest(request, params, url, method) {
 					currency: 'SAR',
 					excluded_rows: 0,
 					kpis: [
-						{ metric: 'revenue', value: '48500.00', unit: 'SAR', sample_size: 142, suppressed: false },
-						{ metric: 'bookings', value: '142', unit: 'count', sample_size: 142, suppressed: false },
-						{ metric: 'average_ticket', value: '341.55', unit: 'SAR', sample_size: 142, suppressed: false },
+						{
+							metric: 'revenue',
+							value: '48500.00',
+							unit: 'SAR',
+							sample_size: 142,
+							suppressed: false
+						},
+						{
+							metric: 'bookings',
+							value: '142',
+							unit: 'count',
+							sample_size: 142,
+							suppressed: false
+						},
+						{
+							metric: 'average_ticket',
+							value: '341.55',
+							unit: 'SAR',
+							sample_size: 142,
+							suppressed: false
+						},
 						{ metric: 'utilization', value: '82.4', unit: '%', sample_size: 142, suppressed: false }
 					]
 				});
@@ -803,7 +828,20 @@ async function handleRequest(request, params, url, method) {
 						generated_at: nowIso,
 						figure: {
 							data: [
-								{ x: ['2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13', '2026-09-14', '2026-09-15', '2026-09-16'], y: [1200, 1850, 2400, 3100, 2800, 3400, 4200], type: 'bar', name: 'Revenue (SAR)' }
+								{
+									x: [
+										'2026-09-10',
+										'2026-09-11',
+										'2026-09-12',
+										'2026-09-13',
+										'2026-09-14',
+										'2026-09-15',
+										'2026-09-16'
+									],
+									y: [1200, 1850, 2400, 3100, 2800, 3400, 4200],
+									type: 'bar',
+									name: 'Revenue (SAR)'
+								}
 							],
 							layout: { title: 'Daily Revenue' }
 						}
@@ -862,8 +900,20 @@ async function handleRequest(request, params, url, method) {
 					history_weeks: 8,
 					slope_per_week: '1250.00',
 					points: [
-						{ week_start: '2026-09-20', value: '13500.00', lower: '12000.00', upper: '15000.00', is_forecast: true },
-						{ week_start: '2026-09-27', value: '14750.00', lower: '13000.00', upper: '16500.00', is_forecast: true }
+						{
+							week_start: '2026-09-20',
+							value: '13500.00',
+							lower: '12000.00',
+							upper: '15000.00',
+							is_forecast: true
+						},
+						{
+							week_start: '2026-09-27',
+							value: '14750.00',
+							lower: '13000.00',
+							upper: '16500.00',
+							is_forecast: true
+						}
 					]
 				});
 			}
@@ -871,7 +921,12 @@ async function handleRequest(request, params, url, method) {
 			if (subId === 'financial-summary') {
 				return json({
 					business_id: 'biz-1',
-					window: { date_from: '2026-08-18', date_to: '2026-09-17', timezone: 'Asia/Riyadh', days: 30 },
+					window: {
+						date_from: '2026-08-18',
+						date_to: '2026-09-17',
+						timezone: 'Asia/Riyadh',
+						days: 30
+					},
 					currency: 'SAR',
 					revenue: '48500.00',
 					collected: '47200.00',
@@ -999,7 +1054,10 @@ async function handleRequest(request, params, url, method) {
 		}
 	}
 
-	return json({ error: { code: 'not_found', message: `Route /${path} not found.` } }, { status: 404 });
+	return json(
+		{ error: { code: 'not_found', message: `Route /${path} not found.` } },
+		{ status: 404 }
+	);
 }
 
 export const GET = ({ request, params, url }) => handleRequest(request, params, url, 'GET');

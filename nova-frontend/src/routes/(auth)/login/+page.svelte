@@ -6,7 +6,6 @@
 	import LoginForm from '$lib/components/auth/LoginForm.svelte';
 	import Logo from '$lib/components/layout/Logo.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 
 	$effect(() => {
 		if (authStore.isAuthenticated) goto(resolve('/'));
@@ -22,10 +21,12 @@
 	<title>Sign In — NOVA GCC Salon Operating System</title>
 </svelte:head>
 
-<div class="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+<div
+	class="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+>
 	<div class="flex items-center justify-between">
 		<Logo />
-		<Badge tone="brand" size="sm">GCC Salon OS</Badge>
+		<Badge tone="accent" size="sm">GCC Salon OS</Badge>
 	</div>
 
 	<div class="mt-6">
@@ -41,9 +42,9 @@
 		<LoginForm onsuccess={handleSuccess} />
 	</div>
 
-	<div class="mt-6 border-t border-slate-100 pt-5 dark:border-slate-800 text-center">
+	<div class="mt-6 border-t border-slate-100 pt-5 text-center dark:border-slate-800">
 		<p class="text-xs text-slate-500 dark:text-slate-400">
-			New to NOVA?{' '}
+			New to NOVA?
 			<a
 				href={resolve('/register')}
 				class="font-bold text-brand-600 hover:text-brand-700 dark:text-brand-400"

@@ -23,16 +23,13 @@
 	import { formatMoney } from '$lib/utils/money.js';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
-	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ServiceCard from '$lib/components/catalog/ServiceCard.svelte';
 	import SlotPicker from '$lib/components/booking/SlotPicker.svelte';
 	import BookingStatusBadge from '$lib/components/booking/BookingStatusBadge.svelte';
 	import Container from '$lib/components/marketing/Container.svelte';
-	import Section from '$lib/components/marketing/Section.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
 
 	let slug = $derived(/** @type {string} */ (page.params.slug));
@@ -141,14 +138,18 @@
 </script>
 
 <svelte:head>
-	<title>{storefront ? pickBilingual(storefront, 'name', 'en') : 'Storefront'} — Verified GCC Salon | NOVA</title>
+	<title
+		>{storefront ? pickBilingual(storefront, 'name', 'en') : 'Storefront'} — Verified GCC Salon | NOVA</title
+	>
 </svelte:head>
 
 {#if loading}
 	<Container size="lg" class="py-24">
 		<div class="flex flex-col items-center justify-center">
 			<Spinner size="lg" />
-			<p class="mt-4 text-xs font-mono text-slate-500">Loading salon storefront &amp; verified schedule...</p>
+			<p class="mt-4 font-mono text-xs text-slate-500">
+				Loading salon storefront &amp; verified schedule...
+			</p>
 		</div>
 	</Container>
 {:else if loadError}
@@ -157,36 +158,39 @@
 	</Container>
 {:else if storefront}
 	<!-- Salon Hero Header -->
-	<section class="relative overflow-hidden border-b border-slate-200 bg-white py-10 sm:py-14 dark:border-slate-800 dark:bg-slate-900">
+	<section
+		class="relative overflow-hidden border-b border-slate-200 bg-white py-10 sm:py-14 dark:border-slate-800 dark:bg-slate-900"
+	>
 		<GradientBlob variant="hero" />
 		<Container size="lg" class="relative z-10">
 			<!-- Telemetry Status Line -->
 			<div class="flex flex-wrap items-center justify-between gap-3">
-				<div class="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-3.5 py-1 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300">
-					<span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
-					<span class="font-bold text-slate-900 dark:text-slate-100">Live Concurrency Protection</span>
+				<div
+					class="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-3.5 py-1 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300"
+				>
+					<span class="size-2 animate-pulse rounded-full bg-emerald-500"></span>
+					<span class="font-bold text-slate-900 dark:text-slate-100"
+						>Live Concurrency Protection</span
+					>
 					<span class="text-slate-300 dark:text-slate-600">·</span>
 					<span>Deterministic 10-min Holds</span>
-				</div>
-
-				<div class="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-					<Icon name="shield-check" class="size-4" />
-					<span>Moyasar Verified Partner</span>
 				</div>
 			</div>
 
 			<div class="mt-6 flex flex-wrap items-start justify-between gap-6">
 				<div>
 					<div class="flex items-center gap-2.5">
-						<Badge tone="brand" size="md">Verified Destination</Badge>
 						{#if storefront.locations.length > 0}
 							<span class="text-xs font-medium text-slate-500">
-								{storefront.locations.length} {storefront.locations.length === 1 ? 'Location' : 'Locations'}
+								{storefront.locations.length}
+								{storefront.locations.length === 1 ? 'Location' : 'Locations'}
 							</span>
 						{/if}
 					</div>
 
-					<h1 class="mt-3 text-display-md font-extrabold tracking-tight text-slate-900 sm:text-display-lg dark:text-slate-100">
+					<h1
+						class="mt-3 text-display-md font-extrabold tracking-tight text-slate-900 sm:text-display-lg dark:text-slate-100"
+					>
 						{pickBilingual(storefront, 'name', 'en')}
 					</h1>
 
@@ -205,13 +209,19 @@
 					{#if storefront.locations.length > 0}
 						<div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
 							<Icon name="map-pin" class="size-3.5 text-brand-600" />
-							<span>{storefront.locations.map((l) => pickBilingual(l, 'name', 'en')).join(' · ')}</span>
+							<span
+								>{storefront.locations.map((l) => pickBilingual(l, 'name', 'en')).join(' · ')}</span
+							>
 						</div>
 					{/if}
 				</div>
 
-				<div class="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 backdrop-blur dark:border-slate-800 dark:bg-slate-800/60">
-					<span class="text-xs font-bold uppercase tracking-wider text-slate-500">Salon Guarantees</span>
+				<div
+					class="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 backdrop-blur dark:border-slate-800 dark:bg-slate-800/60"
+				>
+					<span class="text-xs font-bold tracking-wider text-slate-500 uppercase"
+						>Salon Guarantees</span
+					>
 					<ul class="mt-3 space-y-2 text-xs text-slate-700 dark:text-slate-300">
 						<li class="flex items-center gap-2">
 							<Icon name="check" class="size-3.5 text-emerald-600" />
@@ -236,11 +246,11 @@
 		<div class="grid grid-cols-1 gap-8 lg:grid-cols-12">
 			<!-- Service Menu List -->
 			<div class="lg:col-span-6">
-				<div class="flex items-center justify-between mb-4">
+				<div class="mb-4 flex items-center justify-between">
 					<h2 class="text-base font-bold text-slate-900 dark:text-slate-100">
 						Signature Treatments &amp; Services
 					</h2>
-					<span class="text-xs text-slate-500 font-medium">
+					<span class="text-xs font-medium text-slate-500">
 						{storefront.services.length} available
 					</span>
 				</div>
@@ -264,7 +274,7 @@
 
 			<!-- Slot Picker & Checkout Desk -->
 			<div class="lg:col-span-6">
-				<div class="flex items-center justify-between mb-4">
+				<div class="mb-4 flex items-center justify-between">
 					<h2 class="text-base font-bold text-slate-900 dark:text-slate-100">
 						Select Date &amp; Time
 					</h2>
@@ -276,25 +286,36 @@
 				</div>
 
 				{#if !selectedService}
-					<div class="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900">
-						<div class="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-950/60 dark:text-brand-400">
+					<div
+						class="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900"
+					>
+						<div
+							class="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-950/60 dark:text-brand-400"
+						>
 							<Icon name="sparkles" class="size-6" />
 						</div>
 						<h3 class="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">
 							Choose a service to view live slots
 						</h3>
 						<p class="mx-auto mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">
-							Click any treatment on the left to inspect real-time chair availability across our therapists.
+							Click any treatment on the left to inspect real-time chair availability across our
+							therapists.
 						</p>
 					</div>
 				{:else if booking}
-					<div class="rounded-3xl border border-emerald-300 bg-white p-6 shadow-md ring-2 ring-emerald-500/20 dark:border-emerald-800 dark:bg-slate-900">
-						<div class="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+					<div
+						class="rounded-3xl border border-emerald-300 bg-white p-6 shadow-md ring-2 ring-emerald-500/20 dark:border-emerald-800 dark:bg-slate-900"
+					>
+						<div
+							class="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800"
+						>
 							<div>
-								<span class="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+								<span
+									class="text-[11px] font-bold tracking-wider text-emerald-600 uppercase dark:text-emerald-400"
+								>
 									Appointment Confirmed
 								</span>
-								<p class="mt-1 font-bold text-slate-900 text-base dark:text-slate-100">
+								<p class="mt-1 text-base font-bold text-slate-900 dark:text-slate-100">
 									{formatDateTime(booking.starts_at, 'en')}
 								</p>
 								<p class="mt-0.5 text-xs text-slate-500">
@@ -304,8 +325,13 @@
 							<BookingStatusBadge status={booking.status} />
 						</div>
 
-						<div class="mt-4 rounded-2xl bg-slate-50 p-3.5 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-							<p>A confirmation with your appointment time and salon location was prepared. If you selected deposit, pay below to lock your chair.</p>
+						<div
+							class="mt-4 rounded-2xl bg-slate-50 p-3.5 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300"
+						>
+							<p>
+								A confirmation with your appointment time and salon location was prepared. If you
+								selected deposit, pay below to lock your chair.
+							</p>
 						</div>
 
 						{#if booking.status === 'pending_payment'}
@@ -323,7 +349,9 @@
 						</div>
 					</div>
 				{:else}
-					<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+					<div
+						class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900"
+					>
 						<SlotPicker
 							source="public"
 							{slug}
@@ -335,29 +363,38 @@
 						/>
 
 						{#if selectedSlot}
-							<div class="mt-6 rounded-2xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-900/60 dark:bg-brand-950/40">
+							<div
+								class="mt-6 rounded-2xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-900/60 dark:bg-brand-950/40"
+							>
 								{#if bookingError}
 									<Alert tone="error" class="mb-3">{bookingError}</Alert>
 								{/if}
 
 								<div class="flex items-center justify-between">
 									<div>
-										<span class="text-[11px] font-bold text-brand-700 uppercase tracking-wider dark:text-brand-300">
+										<span
+											class="text-[11px] font-bold tracking-wider text-brand-700 uppercase dark:text-brand-300"
+										>
 											Selected Slot
 										</span>
 										<p class="text-xs font-bold text-slate-900 dark:text-slate-100">
 											{formatDateTime(selectedSlot.starts_at, 'en')}
 										</p>
 									</div>
-									<span class="font-mono text-base font-extrabold text-slate-900 dark:text-slate-100">
+									<span
+										class="font-mono text-base font-extrabold text-slate-900 dark:text-slate-100"
+									>
 										{formatMoney(selectedService.price, selectedService.currency, 'en')}
 									</span>
 								</div>
 
 								{#if !authStore.isAuthenticated}
-									<div class="mt-4 rounded-xl bg-white p-3 text-xs border border-brand-200 dark:border-slate-800 dark:bg-slate-900">
+									<div
+										class="mt-4 rounded-xl border border-brand-200 bg-white p-3 text-xs dark:border-slate-800 dark:bg-slate-900"
+									>
 										<p class="text-slate-700 dark:text-slate-300">
-											Please sign in or create an account to secure this appointment with instant WhatsApp alerts.
+											Please sign in or create an account to secure this appointment with instant
+											WhatsApp alerts.
 										</p>
 										<div class="mt-3 flex gap-2">
 											<Button size="sm" href={resolve('/login')}>Sign in</Button>

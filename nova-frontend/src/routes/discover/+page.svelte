@@ -32,6 +32,7 @@
 		{ id: 'Al Khobar', name: 'Al Khobar (الخبر)' }
 	];
 
+	/** @type {{ id: string, name: string, icon: import('$lib/components/ui/Icon.svelte').IconName }[]} */
 	const categories = [
 		{ id: '', name: 'All Services', icon: 'sparkles' },
 		{ id: 'Hair', name: 'Hair & Styling', icon: 'zap' },
@@ -40,45 +41,6 @@
 		{ id: 'Nail', name: 'Nails & Brows', icon: 'check' },
 		{ id: 'Massage', name: 'Massage & Recovery', icon: 'users' }
 	];
-
-	// Simulated rating & reviews for discoverability
-	const salonMetadata = {
-		'lumiere-salon': {
-			rating: '4.9',
-			reviews: 184,
-			categoryTag: 'Skincare & Spa',
-			nextSlot: 'Today at 3:30 PM',
-			tags: ['HydraFacial', 'Botanical Facial', 'Moroccan Bath']
-		},
-		'dar-al-reem': {
-			rating: '4.8',
-			reviews: 142,
-			categoryTag: 'Hair & Styling',
-			nextSlot: 'Today at 4:15 PM',
-			tags: ['French Balayage', 'Caviar Hair Botox', 'Blowout']
-		},
-		'royal-hammam': {
-			rating: '5.0',
-			reviews: 210,
-			categoryTag: 'Authentic Hammam',
-			nextSlot: 'Tomorrow at 11:00 AM',
-			tags: ['Imperial Hammam', 'Black Soap Steam', 'Argan Ritual']
-		},
-		'aura-nails': {
-			rating: '4.9',
-			reviews: 96,
-			categoryTag: 'Nails & Brows',
-			nextSlot: 'Today at 5:00 PM',
-			tags: ['Russian BIAB Gel', 'Lash Lamination', 'Nail Art']
-		},
-		'silk-stone': {
-			rating: '4.8',
-			reviews: 118,
-			categoryTag: 'Massage & Spa',
-			nextSlot: 'Tomorrow at 2:00 PM',
-			tags: ['Deep Tissue Massage', 'Hot Stone', 'Hydrotherapy']
-		}
-	};
 
 	async function search() {
 		loading = true;
@@ -94,11 +56,11 @@
 
 			if (sortBy === 'price-low') {
 				items = [...items].sort(
-					(a, b) => parseFloat(a.starting_price || 0) - parseFloat(b.starting_price || 0)
+					(a, b) => parseFloat(a.starting_price || '0') - parseFloat(b.starting_price || '0')
 				);
 			} else if (sortBy === 'price-high') {
 				items = [...items].sort(
-					(a, b) => parseFloat(b.starting_price || 0) - parseFloat(a.starting_price || 0)
+					(a, b) => parseFloat(b.starting_price || '0') - parseFloat(a.starting_price || '0')
 				);
 			}
 			listings = items;
@@ -135,16 +97,18 @@
 </script>
 
 <svelte:head>
-	<title>Discover Verified Salons &amp; Spas in Saudi Arabia &amp; GCC — NOVA</title>
+	<title>Discover Salons &amp; Spas in Saudi Arabia &amp; GCC — NOVA</title>
 	<meta
 		name="description"
-		content="Explore top rated beauty salons, wellness sanctuaries, and hammams in Riyadh, Jeddah, and Al Khobar. Book verified appointments with live slot holds."
+		content="Search beauty salons, spas, and hammams in Riyadh, Jeddah, and Al Khobar, and book directly with live availability."
 	/>
 </svelte:head>
 
 <div class="min-h-screen bg-slate-50/50 pb-20 dark:bg-slate-950">
 	<!-- Advanced Hero & Telemetry Header -->
-	<section class="relative overflow-hidden border-b border-slate-200 bg-white py-10 sm:py-16 dark:border-slate-800 dark:bg-slate-900">
+	<section
+		class="relative overflow-hidden border-b border-slate-200 bg-white py-10 sm:py-16 dark:border-slate-800 dark:bg-slate-900"
+	>
 		<GradientBlob variant="hero" />
 
 		<Container size="lg" class="relative z-10">
@@ -154,20 +118,22 @@
 					class="inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/90 dark:text-slate-300"
 				>
 					<span class="flex items-center gap-1.5">
-						<span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
-						<span class="font-mono text-slate-900 font-bold dark:text-slate-100">Live Slots</span>
+						<span class="size-2 animate-pulse rounded-full bg-emerald-500"></span>
+						<span class="font-mono font-bold text-slate-900 dark:text-slate-100">Live Slots</span>
 					</span>
 					<span class="text-slate-300 dark:text-slate-700">·</span>
 					<span>Riyadh, Jeddah &amp; Khobar</span>
 					<span class="text-slate-300 dark:text-slate-700">·</span>
-					<span class="text-brand-600 font-bold dark:text-brand-400">Zero App Download</span>
+					<span class="font-bold text-brand-600 dark:text-brand-400">Zero App Download</span>
 					<span class="text-slate-300 dark:text-slate-700">·</span>
-					<span class="text-emerald-700 font-bold dark:text-emerald-400">Moyasar Direct</span>
+					<span class="font-bold text-emerald-700 dark:text-emerald-400">Moyasar Direct</span>
 				</div>
 			</div>
 
 			<div class="mx-auto mt-6 max-w-3xl text-center">
-				<h1 class="text-display-lg font-extrabold tracking-tight text-slate-900 sm:text-display-xl dark:text-slate-100">
+				<h1
+					class="text-display-lg font-extrabold tracking-tight text-slate-900 sm:text-display-xl dark:text-slate-100"
+				>
 					Discover premier salons &amp; spas
 				</h1>
 				<p class="mt-3 text-body-lg text-slate-600 dark:text-slate-400">
@@ -248,8 +214,9 @@
 					{#if loading}
 						Searching available salons...
 					{:else}
-						Found <span class="font-bold text-slate-900 dark:text-slate-100">{listings.length}</span>
-						verified destinations
+						Found <span class="font-bold text-slate-900 dark:text-slate-100">{listings.length}</span
+						>
+						salons
 						{#if selectedCity}
 							in <span class="font-semibold">{selectedCity}</span>
 						{/if}
@@ -282,8 +249,8 @@
 
 		{#if loading}
 			<div class="flex flex-col items-center justify-center py-20">
-				<Spinner class="size-8 text-brand-600" />
-				<p class="mt-4 text-xs text-slate-500 font-mono">Checking live salon schedules in GCC...</p>
+				<Spinner size="lg" />
+				<p class="mt-4 font-mono text-xs text-slate-500">Searching salons in the GCC...</p>
 			</div>
 		{:else if listings.length === 0}
 			<div
@@ -298,7 +265,7 @@
 					No salons matched your criteria
 				</h3>
 				<p class="mx-auto mt-1 max-w-md text-xs text-slate-500 dark:text-slate-400">
-					Try clearing your search term or choosing a different city to see all verified partners.
+					Try clearing your search term or choosing a different city.
 				</p>
 				<div class="mt-6">
 					<Button variant="outline" onclick={resetFilters}>Reset all filters</Button>
@@ -307,44 +274,10 @@
 		{:else}
 			<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
 				{#each listings as listing (listing.business_id + listing.location_id)}
-					{@const meta = salonMetadata[listing.slug] || {
-						rating: '4.9',
-						reviews: 88,
-						categoryTag: 'Beauty & Spa',
-						nextSlot: 'Today',
-						tags: ['Signature Treatment', 'Styling']
-					}}
 					<div
 						class="group flex flex-col justify-between overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xs transition-all hover:-translate-y-1 hover:border-slate-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"
 					>
 						<div>
-							<!-- Salon Card Header Image / Banner -->
-							<div
-								class="relative h-36 w-full bg-gradient-to-br from-slate-800 via-slate-900 to-brand-950 p-4 text-white"
-							>
-								<div class="flex items-center justify-between">
-									<span
-										class="rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-semibold backdrop-blur"
-									>
-										{meta.categoryTag}
-									</span>
-									<span
-										class="flex items-center gap-1 rounded-full bg-black/40 px-2.5 py-1 text-[11px] font-bold text-amber-300 backdrop-blur"
-									>
-										<Icon name="star" class="size-3 fill-amber-400 text-amber-400" />
-										<span>{meta.rating}</span>
-										<span class="font-normal text-white/60">({meta.reviews})</span>
-									</span>
-								</div>
-
-								<div
-									class="absolute start-4 bottom-3 flex items-center gap-2 text-xs font-medium text-emerald-300"
-								>
-									<span class="size-2 animate-pulse rounded-full bg-emerald-400"></span>
-									<span>{meta.nextSlot}</span>
-								</div>
-							</div>
-
 							<!-- Salon Content Body -->
 							<div class="p-5">
 								<div class="flex items-start justify-between gap-2">
@@ -370,27 +303,19 @@
 								>
 									<Icon name="map-pin" class="size-3.5 shrink-0 text-slate-400" />
 									<span>{listing.location_name_en || listing.city}</span>
-									<span>·</span>
-									<span>{listing.distance_km ?? 2.4} km away</span>
+									{#if listing.distance_km != null}
+										<span>·</span>
+										<span>{listing.distance_km} km away</span>
+									{/if}
 								</div>
 
-								<p
-									class="mt-3 line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400"
-								>
-									{listing.description_en ||
-										'Luxury salon offering certified treatments, expert styling, and personalized care.'}
-								</p>
-
-								<!-- Tags -->
-								<div class="mt-4 flex flex-wrap gap-1.5">
-									{#each meta.tags as tag (tag)}
-										<span
-											class="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-										>
-											{tag}
-										</span>
-									{/each}
-								</div>
+								{#if listing.description_en}
+									<p
+										class="mt-3 line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400"
+									>
+										{listing.description_en}
+									</p>
+								{/if}
 							</div>
 						</div>
 
@@ -406,7 +331,7 @@
 							<div class="grid grid-cols-2 gap-2">
 								<button
 									type="button"
-									onclick={() => (quickViewSalon = { ...listing, meta })}
+									onclick={() => (quickViewSalon = listing)}
 									class="rounded-xl border border-slate-200 bg-white py-2 text-center text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
 								>
 									Quick View
@@ -452,17 +377,6 @@
 					<Icon name="x" class="size-4" />
 				</button>
 
-				<div
-					class="flex items-center gap-2 text-xs font-semibold text-brand-600 dark:text-brand-400"
-				>
-					<span>{quickViewSalon.meta.categoryTag}</span>
-					<span>·</span>
-					<span class="flex items-center gap-1 text-amber-500">
-						<Icon name="star" class="size-3 fill-amber-400" />
-						{quickViewSalon.meta.rating} ({quickViewSalon.meta.reviews} reviews)
-					</span>
-				</div>
-
 				<h3 class="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100">
 					{quickViewSalon.name_en}
 				</h3>
@@ -470,18 +384,18 @@
 					<p class="text-xs text-slate-500" dir="rtl">{quickViewSalon.name_ar}</p>
 				{/if}
 
-				<p class="mt-3 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-					{quickViewSalon.description_en}
-				</p>
+				{#if quickViewSalon.description_en}
+					<p class="mt-3 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+						{quickViewSalon.description_en}
+					</p>
+				{/if}
 
 				<div class="mt-5 space-y-2 rounded-2xl bg-slate-50 p-4 text-xs dark:bg-slate-800/50">
 					<div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
 						<Icon name="map-pin" class="size-4 shrink-0 text-brand-600" />
-						<span>{quickViewSalon.location_name_en || quickViewSalon.city}, {quickViewSalon.city}</span>
-					</div>
-					<div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-						<Icon name="clock" class="size-4 shrink-0 text-brand-600" />
-						<span>Open daily: 10:00 AM – 10:00 PM (Riyadh Time)</span>
+						<span
+							>{quickViewSalon.location_name_en || quickViewSalon.city}, {quickViewSalon.city}</span
+						>
 					</div>
 					<div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
 						<Icon name="credit-card" class="size-4 shrink-0 text-brand-600" />
@@ -500,7 +414,9 @@
 					</div>
 
 					<div class="flex gap-2">
-						<Button variant="outline" size="sm" onclick={() => (quickViewSalon = null)}>Close</Button>
+						<Button variant="outline" size="sm" onclick={() => (quickViewSalon = null)}
+							>Close</Button
+						>
 						<Button
 							href={resolve('/discover/[slug]', { slug: quickViewSalon.slug })}
 							variant="primary"
