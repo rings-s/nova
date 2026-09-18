@@ -1,6 +1,6 @@
 <script module>
 	/**
-	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'} IconName
+	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'} IconName
 	 */
 
 	/**
@@ -43,7 +43,10 @@
 		building:
 			'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M8 10h.01M16 10h.01M12 10h.01M8 14h.01M16 14h.01M12 14h.01"/>',
 		'trending-up':
-			'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
+			'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
+		sun: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12h2.5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/>',
+		moon: '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>',
+		menu: '<path d="M4 6h16M4 12h16M4 18h16"/>'
 	};
 
 	/** @type {(keyof typeof ICONS)[]} */

@@ -3,6 +3,20 @@
 @plugin '@tailwindcss/typography';
 
 /*
+ * Manual light/dark toggle instead of Tailwind's default OS-media-query
+ * `dark:` variant — every `dark:` utility everywhere in the app (including
+ * /app, unchanged otherwise) now responds to a `.dark` class on `<html>`
+ * instead of `prefers-color-scheme`. `src/app.html` sets that class
+ * synchronously before first paint (from the stored preference, or the OS
+ * preference if none is stored yet), and `$lib/stores/theme.svelte.js` keeps
+ * it in sync when the user toggles. The two `@media (prefers-color-scheme:
+ * dark)` blocks below (gradients, chart tokens) are `:root.dark` selectors
+ * for the same reason — they're plain custom properties, not Tailwind
+ * utilities, so this variant change doesn't touch them on its own.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
  * Design theme. One brand color (rose — beauty/wellness), registered through
  * Tailwind v4's CSS-first theme so `bg-brand-600`, `text-brand-700`,
  * `ring-brand-500`, etc. exist as real utilities everywhere in the app rather
@@ -111,27 +125,28 @@
 	);
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		--gradient-hero: linear-gradient(
-			135deg,
-			var(--color-brand-600) 0%,
-			var(--color-plum-700) 55%,
-			var(--color-plum-950) 100%
-		);
-		--gradient-soft: linear-gradient(
-			120deg,
-			color-mix(in oklch, var(--color-brand-900) 35%, transparent) 0%,
-			color-mix(in oklch, var(--color-plum-900) 35%, transparent) 55%,
-			transparent 100%
-		);
-		--gradient-cta: linear-gradient(135deg, var(--color-brand-700) 0%, var(--color-brand-900) 100%);
-	}
+:root.dark {
+	--gradient-hero: linear-gradient(
+		135deg,
+		var(--color-brand-600) 0%,
+		var(--color-plum-700) 55%,
+		var(--color-plum-950) 100%
+	);
+	--gradient-soft: linear-gradient(
+		120deg,
+		color-mix(in oklch, var(--color-brand-900) 35%, transparent) 0%,
+		color-mix(in oklch, var(--color-plum-900) 35%, transparent) 55%,
+		transparent 100%
+	);
+	--gradient-cta: linear-gradient(135deg, var(--color-brand-700) 0%, var(--color-brand-900) 100%);
 }
 
 @layer base {
 	html {
-		color-scheme: light dark;
+		color-scheme: light;
+	}
+	html.dark {
+		color-scheme: dark;
 	}
 	body {
 		@apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
@@ -173,26 +188,24 @@
 	--chart-axis: #c3c2b7;
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		--chart-series-1: #3987e5;
-		--chart-series-2: #d95926;
-		--chart-series-3: #199e70;
-		--chart-series-4: #c98500;
-		--chart-series-5: #d55181;
-		--chart-series-6: #008300;
-		--chart-series-7: #9085e9;
-		--chart-series-8: #e66767;
+:root.dark {
+	--chart-series-1: #3987e5;
+	--chart-series-2: #d95926;
+	--chart-series-3: #199e70;
+	--chart-series-4: #c98500;
+	--chart-series-5: #d55181;
+	--chart-series-6: #008300;
+	--chart-series-7: #9085e9;
+	--chart-series-8: #e66767;
 
-		--chart-status-good: #0ca30c;
-		--chart-status-warning: #fab219;
-		--chart-status-serious: #ec835a;
-		--chart-status-critical: #d03b3b;
+	--chart-status-good: #0ca30c;
+	--chart-status-warning: #fab219;
+	--chart-status-serious: #ec835a;
+	--chart-status-critical: #d03b3b;
 
-		--chart-muted: #898781;
-		--chart-grid: #2c2c2a;
-		--chart-axis: #383835;
+	--chart-muted: #898781;
+	--chart-grid: #2c2c2a;
+	--chart-axis: #383835;
 
-		--shadow-glow: 0 8px 24px -4px rgb(251 113 133 / 0.4);
-	}
+	--shadow-glow: 0 8px 24px -4px rgb(251 113 133 / 0.4);
 }

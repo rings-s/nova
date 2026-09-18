@@ -14,4 +14,5 @@ export { default as Select } from './Select.svelte';
 export { default as Spinner } from './Spinner.svelte';
 export { default as Tabs } from './Tabs.svelte';
 export { default as Textarea } from './Textarea.svelte';
+export { default as ThemeToggle } from './ThemeToggle.svelte';
 export { default as ToastContainer } from './ToastContainer.svelte';

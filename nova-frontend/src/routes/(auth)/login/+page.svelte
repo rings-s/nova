@@ -8,7 +8,9 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 
 	$effect(() => {
-		if (authStore.isAuthenticated) goto(resolve('/'));
+		if (authStore.isAuthenticated) {
+			goto(resolve('/'));
+		}
 	});
 
 	function handleSuccess() {
@@ -22,32 +24,44 @@
 </svelte:head>
 
 <div
-	class="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+	class="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl sm:p-8 dark:border-slate-800 dark:bg-slate-900"
 >
-	<div class="flex items-center justify-between">
+	<!-- Header -->
+	<div class="flex items-center justify-between gap-4">
 		<Logo />
-		<Badge tone="accent" size="sm">GCC Salon OS</Badge>
+
+		<Badge tone="accent" size="sm">
+			GCC Salon OS
+		</Badge>
 	</div>
 
-	<div class="mt-6">
-		<h1 class="text-display-md font-bold tracking-tight text-slate-900 dark:text-slate-100">
+	<!-- Intro -->
+	<div class="mt-8">
+		<p class="text-xs font-bold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-400">
 			Welcome back
+		</p>
+
+		<h1 class="mt-2 text-display-md font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+			Sign in to NOVA
 		</h1>
-		<p class="mt-1.5 text-xs text-slate-600 dark:text-slate-400">
-			Sign in to access your salon front-desk or personal appointments.
+
+		<p class="mt-2 max-w-sm text-sm leading-6 text-slate-600 dark:text-slate-400">
+			Access your salon workspace, front desk, and personal appointments.
 		</p>
 	</div>
 
-	<div class="mt-6">
+	<!-- Form -->
+	<div class="mt-7">
 		<LoginForm onsuccess={handleSuccess} />
 	</div>
 
-	<div class="mt-6 border-t border-slate-100 pt-5 text-center dark:border-slate-800">
+	<!-- Register -->
+	<div class="mt-7 border-t border-slate-100 pt-5 text-center dark:border-slate-800">
 		<p class="text-xs text-slate-500 dark:text-slate-400">
 			New to NOVA?
 			<a
 				href={resolve('/register')}
-				class="font-bold text-brand-600 hover:text-brand-700 dark:text-brand-400"
+				class="ml-1 font-bold text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
 			>
 				Create an account
 			</a>
