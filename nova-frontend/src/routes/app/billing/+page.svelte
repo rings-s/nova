@@ -1,4 +1,6 @@
 <script>
+	import { accessStore } from '$lib/stores/access.svelte.js';
+	import NoAccess from '$lib/components/ui/NoAccess.svelte';
 	/**
 	 * Subscription, invoices and payouts for the active business. Subscribing,
 	 * changing plan and cancelling need `manage_subscription`; everything else
@@ -25,6 +27,7 @@
 		listPayouts
 	} from '$lib/api/billing.js';
 
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -39,6 +42,9 @@
 
 	let tenantId = $derived(/** @type {string} */ (tenantStore.activeTenantId));
 	let businessId = $derived(businessStore.activeBusinessId);
+	let allowed = $derived(accessStore.can('view_financials'));
+	// Managers read billing; only the owner decides what the business pays NOVA.
+	let canManagePlan = $derived(accessStore.can('manage_subscription'));
 
 	let loading = $state(true);
 	let loadErrorMessage = $state(/** @type {string|null} */ (null));
@@ -83,7 +89,7 @@
 	}
 
 	$effect(() => {
-		if (businessId) loadAll();
+		if (businessId && allowed) loadAll();
 	});
 
 	/** @param {import('$lib/api/billing.js').Plan} plan */
@@ -169,34 +175,43 @@
 
 <svelte:head><title>Billing — NOVA</title></svelte:head>
 
-<PageHeader title="Billing" subtitle="Subscription, invoices and payouts for this business." />
+<PageHeader
+	eyebrow="Business"
+	title="Billing"
+	subtitle="Subscription, invoices and payouts for this business."
+/>
 
-{#if !businessId}
+{#snippet planActions()}
+	{#if !subscription?.cancel_at_period_end}
+		<Button size="sm" variant="ghost" loading={cancelling} onclick={handleCancel}>
+			Cancel subscription
+		</Button>
+	{/if}
+	<Button size="sm" variant="outline" onclick={() => (showChangePlan = true)}>Change plan</Button>
+{/snippet}
+
+{#if !allowed}
+	<NoAccess what="billing" />
+{:else if !businessId}
 	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
 {:else if loading}
 	<div class="flex justify-center py-12"><Spinner /></div>
 {:else if loadErrorMessage}
 	<Alert tone="error">{loadErrorMessage}</Alert>
 {:else}
-	<section class="mb-8">
+	<section class="mb-10">
 		{#if subscription && !showChangePlan}
-			<SubscriptionCard {subscription} />
-			<div class="mt-3 flex gap-2">
-				<Button size="sm" variant="outline" onclick={() => (showChangePlan = true)}
-					>Change plan</Button
-				>
-				{#if !subscription.cancel_at_period_end}
-					<Button size="sm" variant="outline" loading={cancelling} onclick={handleCancel}>
-						Cancel subscription
-					</Button>
-				{/if}
-			</div>
+			<SubscriptionCard {subscription} actions={canManagePlan ? planActions : undefined} />
 		{:else}
 			{#if !subscription}
-				<Alert tone="info" class="mb-4">Choose a plan to get started.</Alert>
+				<Alert tone="info" class="mb-4">
+					{canManagePlan
+						? 'Choose a plan to get started.'
+						: 'This business has no plan yet. Only the owner can choose one.'}
+				</Alert>
 			{:else}
-				<div class="mb-3 flex items-center justify-between">
-					<p class="text-sm font-medium text-slate-700 dark:text-slate-200">Choose a new plan</p>
+				<div class="mb-4 flex items-center justify-between">
+					<h2 class="text-base font-semibold tracking-tight text-fg">Choose a new plan</h2>
 					<Button size="sm" variant="ghost" onclick={() => (showChangePlan = false)}>Cancel</Button>
 				</div>
 			{/if}
@@ -205,7 +220,11 @@
 					<PlanCard
 						{plan}
 						current={subscription?.tier === plan.tier}
-						onselect={subscription ? handleChangePlan : handleSubscribe}
+						onselect={canManagePlan
+							? subscription
+								? handleChangePlan
+								: handleSubscribe
+							: undefined}
 					/>
 				{/each}
 			</div>
@@ -215,37 +234,53 @@
 		{/if}
 	</section>
 
-	<section class="mb-8">
-		<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Invoices</h2>
+	<section class="mb-10">
+		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Invoices</h2>
 		{#if invoices.length === 0}
-			<EmptyState title="No invoices yet" />
+			<EmptyState
+				title="No invoices yet"
+				description="Your first invoice is issued at the end of the billing period."
+			>
+				{#snippet icon()}<Icon name="receipt" class="size-6" />{/snippet}
+			</EmptyState>
 		{:else}
-			<div class="flex flex-col gap-2">
-				{#each invoices as invoice (invoice.id)}
-					<InvoiceRow {invoice} onviewlines={openLines} />
-				{/each}
-			</div>
+			<Card padding="none" class="overflow-hidden">
+				<ul class="divide-y divide-line-subtle">
+					{#each invoices as invoice (invoice.id)}
+						<li><InvoiceRow {invoice} onviewlines={openLines} /></li>
+					{/each}
+				</ul>
+			</Card>
 		{/if}
 	</section>
 
 	<section>
-		<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Payouts</h2>
+		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Payouts</h2>
 		{#if payouts.length === 0}
-			<EmptyState title="No payouts yet" />
+			<EmptyState title="No payouts yet" description="Deposits collected online are paid out here.">
+				{#snippet icon()}<Icon name="credit-card" class="size-6" />{/snippet}
+			</EmptyState>
 		{:else}
 			<Card padding="none">
-				<div class="divide-y divide-slate-100 dark:divide-slate-800">
+				<div class="divide-y divide-line-subtle">
 					{#each payouts as payout (payout.id)}
-						<div class="flex items-center justify-between px-4 py-3">
-							<div>
-								<p class="text-sm font-medium text-slate-900 dark:text-slate-100">
-									{formatDate(payout.payout_date, 'en')}
-								</p>
-								<p class="text-xs text-slate-500 dark:text-slate-400">
-									{payout.booking_ids.length} booking{payout.booking_ids.length === 1 ? '' : 's'}
-								</p>
+						<div class="flex items-center justify-between px-5 py-3.5">
+							<div class="flex items-center gap-3">
+								<span
+									class="flex size-9 shrink-0 items-center justify-center rounded-control bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+								>
+									<Icon name="trending-up" class="size-4" />
+								</span>
+								<div>
+									<p class="text-sm font-medium text-fg">
+										{formatDate(payout.payout_date, 'en')}
+									</p>
+									<p class="text-xs text-fg-muted">
+										{payout.booking_ids.length} booking{payout.booking_ids.length === 1 ? '' : 's'}
+									</p>
+								</div>
 							</div>
-							<p class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+							<p class="text-sm font-semibold text-fg tabular-nums">
 								{formatMoney(payout.net_amount, payout.currency, 'en')}
 							</p>
 						</div>
@@ -267,25 +302,23 @@
 	{:else if lines.length === 0}
 		<EmptyState title="No lines" />
 	{:else}
-		<div class="flex flex-col gap-2">
+		<div class="divide-y divide-line-subtle rounded-control border border-line">
 			{#each lines as line (line.id)}
-				<div
-					class="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800"
-				>
+				<div class="flex items-center justify-between gap-3 px-4 py-3">
 					<div>
-						<p class="text-sm text-slate-700 dark:text-slate-200">
+						<p class="text-sm font-medium text-fg first-letter:uppercase">
 							{line.commission_class.replaceAll('_', ' ')}
 							{#if line.reversed}<Badge tone="warning" size="sm">reversed</Badge>{/if}
 						</p>
 						<button
 							type="button"
-							class="text-xs text-brand-600 hover:underline dark:text-brand-400"
+							class="text-xs text-accent hover:underline"
 							onclick={() => explainLine(line)}
 						>
 							Why?
 						</button>
 					</div>
-					<p class="text-sm font-medium text-slate-900 dark:text-slate-100">
+					<p class="text-sm font-semibold text-fg tabular-nums">
 						{formatMoney(line.amount, line.currency, 'en')}
 					</p>
 				</div>

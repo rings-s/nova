@@ -12,5 +12,8 @@
     "start": "npm run start --workspace=nova-frontend",
     "lint": "npm run lint --workspace=nova-frontend",
     "check": "npm run check --workspace=nova-frontend"
+  },
+  "devDependencies": {
+    "leaflet": "^1.9.4"
   }
 }

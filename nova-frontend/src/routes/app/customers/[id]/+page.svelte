@@ -13,7 +13,8 @@
 	import { listBookings } from '$lib/api/booking.js';
 	import { listCustomerNotifications } from '$lib/api/notification.js';
 
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
+	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Checkbox from '$lib/components/ui/Checkbox.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -85,16 +86,38 @@
 {:else if loadErrorMessage}
 	<Alert tone="error">{loadErrorMessage}</Alert>
 {:else if customer}
-	<PageHeader title={customer.full_name} subtitle={customer.phone} />
+	<div class="mb-4">
+		<Button variant="ghost" size="sm" class="-ms-3" href={resolve('/app/customers')}>
+			<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
+			Customers
+		</Button>
+	</div>
+
+	<div class="mb-8 flex flex-wrap items-center gap-4">
+		<Avatar name={customer.full_name} size="lg" />
+		<div class="min-w-0">
+			<h1 class="text-2xl font-semibold tracking-tight text-fg">{customer.full_name}</h1>
+			<p class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted">
+				<span class="inline-flex items-center gap-1.5"
+					><Icon name="phone" class="size-4" />{customer.phone}</span
+				>
+				{#if customer.email}<span>{customer.email}</span>{/if}
+			</p>
+		</div>
+	</div>
 
 	<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-		<div class="flex flex-col gap-6 lg:col-span-2">
+		<div class="flex flex-col gap-8 lg:col-span-2">
 			<section>
-				<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Bookings</h2>
+				<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">
+					Bookings <span class="ms-1 text-sm font-normal text-fg-muted">{bookings.length}</span>
+				</h2>
 				{#if bookings.length === 0}
-					<EmptyState title="No bookings yet" />
+					<EmptyState title="No bookings yet">
+						{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
+					</EmptyState>
 				{:else}
-					<div class="flex flex-col gap-2">
+					<div class="flex flex-col gap-3">
 						{#each bookings as booking (booking.id)}
 							<BookingCard {booking} />
 						{/each}
@@ -103,39 +126,45 @@
 			</section>
 
 			<section>
-				<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Delivery log</h2>
+				<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Delivery log</h2>
 				{#if notifications.length === 0}
-					<EmptyState title="No messages sent yet" />
+					<EmptyState title="No messages sent yet">
+						{#snippet icon()}<Icon name="chat-bubble" class="size-6" />{/snippet}
+					</EmptyState>
 				{:else}
-					<Card padding="sm">
-						{#each notifications as notification (notification.id)}
-							<NotificationRow {notification} />
-						{/each}
+					<Card padding="none">
+						<div class="px-5">
+							{#each notifications as notification (notification.id)}
+								<NotificationRow {notification} />
+							{/each}
+						</div>
 					</Card>
 				{/if}
 			</section>
 		</div>
 
-		<div>
-			<Card padding="md">
-				<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Consent</h2>
-				<div class="flex flex-col gap-3">
+		<aside class="flex flex-col gap-6">
+			<Card padding="none">
+				{#snippet header()}
+					<h2 class="text-sm font-semibold text-fg">Consent</h2>
+					<p class="mt-0.5 text-xs text-fg-muted">What this customer agreed to receive (PDPL).</p>
+				{/snippet}
+				<div class="flex flex-col gap-3 p-5">
 					<Checkbox label="Marketing offers" bind:checked={marketingConsent} />
 					<Checkbox label="WhatsApp messages" bind:checked={whatsappConsent} />
 				</div>
-				<Button class="mt-4" size="sm" loading={savingConsent} onclick={saveConsent}>Save</Button>
-				{#if customer.notes}
-					<p
-						class="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400"
-					>
-						{customer.notes}
-					</p>
-				{/if}
+				{#snippet footer()}
+					<div class="flex justify-end">
+						<Button size="sm" loading={savingConsent} onclick={saveConsent}>Save consent</Button>
+					</div>
+				{/snippet}
 			</Card>
-		</div>
-	</div>
-
-	<div class="mt-6">
-		<Button variant="ghost" size="sm" href={resolve('/app/customers')}>← Back to customers</Button>
+			{#if customer.notes}
+				<Card padding="md">
+					<h2 class="mb-2 text-sm font-semibold text-fg">Notes</h2>
+					<p class="text-sm whitespace-pre-line text-fg-secondary">{customer.notes}</p>
+				</Card>
+			{/if}
+		</aside>
 	</div>
 {/if}

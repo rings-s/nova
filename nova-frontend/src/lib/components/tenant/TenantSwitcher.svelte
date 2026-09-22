@@ -44,7 +44,7 @@
 {#if loading}
 	<Spinner size="sm" />
 {:else if tenants.length === 0}
-	<p class="text-sm text-slate-500 dark:text-slate-400">No businesses yet.</p>
+	<p class="text-sm text-fg-muted">No businesses yet.</p>
 {:else}
 	<Select
 		value={tenantStore.activeTenantId ?? ''}

@@ -1,16 +1,22 @@
 <script>
-	import { searchBusinesses } from '$lib/api/discovery.js';
+	import { mapBusinesses, searchBusinesses } from '$lib/api/discovery.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import { pickBilingual } from '$lib/utils/bilingual.js';
 	import { formatMoney } from '$lib/utils/money.js';
 	import { resolve } from '$app/paths';
 	import Container from '$lib/components/marketing/Container.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
+	import ListingsMap from '$lib/components/map/ListingsMap.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
-	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import Pagination from '$lib/components/ui/Pagination.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import { fieldBase, fieldBorder } from '$lib/components/ui/styles.js';
+	import RatingStars from '$lib/components/review/RatingStars.svelte';
+	import { locate, LocateError } from '$lib/map/geolocate.js';
 
 	let q = $state('');
 	let selectedCity = $state('');
@@ -21,6 +27,22 @@
 
 	let loading = $state(true);
 	let listings = $state(/** @type {any[]} */ ([]));
+
+	// The map runs the same search as the list, but unpaged, so its pins cover
+	// every match and not only the twelve cards on screen.
+	let pins = $state(/** @type {import('$lib/api/discovery.js').ListingCard[]} */ ([]));
+	let pinsLoading = $state(true);
+	let pinsTruncated = $state(false);
+	/**
+	 * A viewport the customer chose with "Search this area", as
+	 * `west,south,east,north`. Null searches everywhere.
+	 */
+	let area = $state(/** @type {string | null} */ (null));
+	// Below `lg` the list and the map take turns on the screen; from `lg` up they
+	// sit side by side and this is ignored.
+	/** @type {('list' | 'map')[]} */
+	const views = ['list', 'map'];
+	let view = $state(views[0]);
 
 	// Quick View Modal
 	let quickViewSalon = $state(/** @type {any | null} */ (null));
@@ -42,13 +64,93 @@
 		{ id: 'Massage', name: 'Massage & Recovery', icon: 'users' }
 	];
 
+	/**
+	 * Where the customer is, once they have shared it. Held in memory only —
+	 * never stored or sent anywhere but the search that measures distance.
+	 * @type {{ latitude: number, longitude: number } | null}
+	 */
+	let origin = $state(null);
+	let locating = $state(false);
+	let locateMessage = $state(/** @type {string | null} */ (null));
+
+	/** How far "near you" reaches, in km. The API allows up to 100. */
+	const NEAR_RADIUS_KM = 50;
+
+	async function useMyLocation() {
+		locating = true;
+		locateMessage = null;
+		try {
+			// A rough, quick fix is plenty to rank salons by distance: skip the
+			// refinement step the branch-pin picker needs.
+			const fix = await locate({ onfix: () => {}, quickTimeoutMs: 10_000, refineMs: 0 });
+			origin = { latitude: fix.latitude, longitude: fix.longitude };
+			return true;
+		} catch (err) {
+			const kind = err instanceof LocateError ? err.kind : 'unavailable';
+			locateMessage =
+				kind === 'denied'
+					? 'Location is blocked for this site. Allow it from the address bar to see salons near you.'
+					: kind === 'insecure'
+						? 'Your browser only shares location on secure (https) pages.'
+						: "We couldn't find your location. Pick a city instead.";
+			return false;
+		} finally {
+			locating = false;
+		}
+	}
+
+	/** @param {string} value */
+	async function changeSort(value) {
+		if (value === 'nearest' && !origin && !(await useMyLocation())) {
+			sortBy = 'recommended';
+			return;
+		}
+		sortBy = value;
+		offset = 0;
+	}
+
+	// Spotlight rows, shown above the results when nothing is being searched.
+	let browsing = $derived(!q && !selectedCity && !selectedCategory && !area && offset === 0);
+	let topRated = $state(/** @type {import('$lib/api/discovery.js').ListingCard[]} */ ([]));
+	let nearby = $state(/** @type {import('$lib/api/discovery.js').ListingCard[] | null} */ (null));
+
+	$effect(() => {
+		searchBusinesses({ sort: 'rating', limit: 8 })
+			.then((page) => {
+				// One card per salon, and only salons someone has actually rated.
+				topRated = page.items
+					.filter((item) => item.rating_count > 0)
+					.filter(
+						(item, index, all) =>
+							all.findIndex((other) => other.business_id === item.business_id) === index
+					)
+					.slice(0, 4);
+			})
+			.catch(() => (topRated = []));
+	});
+
+	$effect(() => {
+		if (!origin) return;
+		const { latitude, longitude } = origin;
+		nearby = null;
+		searchBusinesses({ latitude, longitude, radiusKm: NEAR_RADIUS_KM, sort: 'distance', limit: 4 })
+			.then((page) => (nearby = page.items))
+			.catch(() => (nearby = []));
+	});
+
 	async function search() {
 		loading = true;
 		try {
 			const combinedQ = [q, selectedCategory].filter(Boolean).join(' ');
+			const near = sortBy === 'nearest' ? origin : null;
 			const page = await searchBusinesses({
 				q: combinedQ || null,
 				city: selectedCity || null,
+				bbox: area,
+				latitude: near?.latitude ?? null,
+				longitude: near?.longitude ?? null,
+				radiusKm: near ? NEAR_RADIUS_KM : null,
+				sort: near ? 'distance' : sortBy === 'rating' ? 'rating' : 'default',
 				limit,
 				offset
 			});
@@ -71,12 +173,52 @@
 		}
 	}
 
+	let pinsTicket = 0;
+
+	/**
+	 * @param {string | null} term
+	 * @param {string | null} city
+	 * @param {string | null} bbox
+	 */
+	async function loadPins(term, city, bbox) {
+		// Answers can arrive out of order; only the newest request may land.
+		const ticket = ++pinsTicket;
+		pinsLoading = true;
+		try {
+			const collection = await mapBusinesses({ q: term, city, bbox });
+			if (ticket !== pinsTicket) return;
+			pins = collection.features.map((feature) => feature.properties);
+			pinsTruncated = collection.truncated;
+		} catch (err) {
+			if (ticket !== pinsTicket) return;
+			pins = [];
+			pinsTruncated = false;
+			toastStore.fromError(err);
+		} finally {
+			if (ticket === pinsTicket) pinsLoading = false;
+		}
+	}
+
 	$effect(() => {
 		offset;
 		selectedCity;
 		selectedCategory;
 		sortBy;
+		area;
+		origin;
 		search();
+	});
+
+	// Pins have their own effect: they do not depend on the page or the sort, so
+	// turning a page must not refetch them. Debounced, because the search box
+	// re-runs the search on every keystroke and the discovery routes share one
+	// 60-requests-a-minute allowance per address.
+	$effect(() => {
+		const term = [q, selectedCategory].filter(Boolean).join(' ') || null;
+		const city = selectedCity || null;
+		const bbox = area;
+		const timer = setTimeout(() => loadPins(term, city, bbox), 300);
+		return () => clearTimeout(timer);
 	});
 
 	/** @param {SubmitEvent} event */
@@ -91,342 +233,476 @@
 		selectedCity = '';
 		selectedCategory = '';
 		sortBy = 'recommended';
+		area = null;
 		offset = 0;
 		search();
+	}
+
+	/** @param {string | null} bbox */
+	function searchArea(bbox) {
+		area = bbox;
+		offset = 0;
 	}
 </script>
 
 <svelte:head>
-	<title>Discover Salons &amp; Spas in Saudi Arabia &amp; GCC — NOVA</title>
+	<title>Discover salons &amp; spas — NOVA</title>
 	<meta
 		name="description"
 		content="Search beauty salons, spas, and hammams in Riyadh, Jeddah, and Al Khobar, and book directly with live availability."
 	/>
 </svelte:head>
 
-<div class="min-h-screen bg-slate-50/50 pb-20 dark:bg-slate-950">
-	<!-- Advanced Hero & Telemetry Header -->
-	<section
-		class="relative overflow-hidden border-b border-slate-200 bg-white py-10 sm:py-16 dark:border-slate-800 dark:bg-slate-900"
-	>
-		<GradientBlob variant="hero" />
+<!-- Search header -->
+<section class="relative overflow-hidden border-b border-line bg-surface">
+	<GradientBlob variant="hero" />
 
-		<Container size="lg" class="relative z-10">
-			<!-- Telemetry Ribbon -->
-			<div class="flex items-center justify-center">
-				<div
-					class="inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/90 dark:text-slate-300"
-				>
-					<span class="flex items-center gap-1.5">
-						<span class="size-2 animate-pulse rounded-full bg-emerald-500"></span>
-						<span class="font-mono font-bold text-slate-900 dark:text-slate-100">Live Slots</span>
-					</span>
-					<span class="text-slate-300 dark:text-slate-700">·</span>
-					<span>Riyadh, Jeddah &amp; Khobar</span>
-					<span class="text-slate-300 dark:text-slate-700">·</span>
-					<span class="font-bold text-brand-600 dark:text-brand-400">Zero App Download</span>
-					<span class="text-slate-300 dark:text-slate-700">·</span>
-					<span class="font-bold text-emerald-700 dark:text-emerald-400">Moyasar Direct</span>
-				</div>
-			</div>
-
-			<div class="mx-auto mt-6 max-w-3xl text-center">
-				<h1
-					class="text-display-lg font-extrabold tracking-tight text-slate-900 sm:text-display-xl dark:text-slate-100"
-				>
-					Discover premier salons &amp; spas
-				</h1>
-				<p class="mt-3 text-body-lg text-slate-600 dark:text-slate-400">
-					Real-time slot holds, direct local bookings, and instant WhatsApp confirmations.
-				</p>
-			</div>
-
-			<!-- Main Search Bar Form -->
-			<form
-				onsubmit={handleSubmit}
-				class="mx-auto mt-8 max-w-3xl rounded-3xl border border-slate-200 bg-white/95 p-2.5 shadow-xl backdrop-blur dark:border-slate-800 dark:bg-slate-900/95"
+	<Container size="lg" class="relative z-10 py-12 sm:py-16">
+		<div class="mx-auto max-w-3xl text-center">
+			<p
+				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
-				<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-					<div class="relative flex-1">
-						<Icon
-							name="search"
-							class="absolute start-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400"
-						/>
-						<input
-							type="text"
-							placeholder="Search by salon name, service (e.g. HydraFacial, Balayage, Hammam)..."
-							bind:value={q}
-							class="w-full rounded-2xl bg-transparent py-2.5 ps-10 pe-3 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500/20 focus:outline-none dark:text-slate-100"
-						/>
-					</div>
-					<div class="hidden h-6 w-px bg-slate-200 sm:block dark:bg-slate-800"></div>
-					<div class="sm:w-48">
-						<select
-							bind:value={selectedCity}
-							class="w-full rounded-2xl border-0 bg-transparent px-3 py-2.5 text-sm text-slate-700 focus:outline-none dark:bg-slate-900 dark:text-slate-200"
-						>
-							{#each cities as c (c.id)}
-								<option value={c.id}>{c.name}</option>
-							{/each}
-						</select>
-					</div>
-					<button
-						type="submit"
-						class="rounded-2xl bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-					>
-						Search
-					</button>
-				</div>
-			</form>
+				<span class="size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+				Live availability in Riyadh, Jeddah &amp; Khobar
+			</p>
+			<h1 class="mt-5 text-display-xl font-semibold tracking-tight text-fg">
+				Find your next salon or spa
+			</h1>
+			<p class="mt-3 text-body-lg text-fg-muted">
+				Book a real, held slot in seconds — confirmed instantly on WhatsApp.
+			</p>
+		</div>
 
-			<!-- Category Quick Filters -->
-			<div class="mt-6 flex flex-wrap items-center justify-center gap-2">
-				{#each categories as cat (cat.id)}
+		<form
+			onsubmit={handleSubmit}
+			role="search"
+			class="mx-auto mt-8 flex max-w-3xl flex-col gap-2 rounded-panel border border-line bg-surface p-2 shadow-raised sm:flex-row sm:items-center"
+		>
+			<div class="relative flex-1">
+				<Icon
+					name="search"
+					class="pointer-events-none absolute start-3.5 top-1/2 size-5 -translate-y-1/2 text-fg-subtle"
+				/>
+				<input
+					type="text"
+					aria-label="Search salons or services"
+					placeholder="Salon or service — e.g. HydraFacial, balayage"
+					bind:value={q}
+					class="h-12 w-full rounded-card border-0 bg-transparent ps-11 pe-3 text-[15px] text-fg placeholder:text-fg-subtle focus:ring-0 focus:outline-none"
+				/>
+			</div>
+			<div class="hidden h-7 w-px bg-line sm:block"></div>
+			<div class="relative sm:w-48">
+				<Icon
+					name="map-pin"
+					class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle"
+				/>
+				<select
+					aria-label="City"
+					bind:value={selectedCity}
+					onchange={() => (area = null)}
+					class="h-12 w-full rounded-card border-0 bg-transparent ps-9 text-sm text-fg-secondary focus:ring-0 focus:outline-none"
+				>
+					{#each cities as c (c.id)}
+						<option value={c.id}>{c.name}</option>
+					{/each}
+				</select>
+			</div>
+			<Button type="submit" size="lg" class="sm:px-7">Search</Button>
+		</form>
+		<div class="mt-4 flex justify-center">
+			<Button
+				variant="ghost"
+				size="sm"
+				loading={locating}
+				onclick={() => changeSort('nearest')}
+				aria-pressed={sortBy === 'nearest'}
+			>
+				{#if !locating}<Icon name="map-pin" class="size-4" />{/if}
+				{origin ? 'Showing salons near you' : 'Use my location'}
+			</Button>
+		</div>
+		{#if locateMessage}
+			<p class="mx-auto mt-2 max-w-md text-center text-xs text-fg-muted" role="status">
+				{locateMessage}
+			</p>
+		{/if}
+
+		<div
+			class="mt-6 flex flex-wrap items-center justify-center gap-2"
+			role="group"
+			aria-label="Category"
+		>
+			{#each categories as cat (cat.id)}
+				<button
+					type="button"
+					aria-pressed={selectedCategory === cat.id}
+					onclick={() => {
+						selectedCategory = cat.id;
+						area = null;
+						offset = 0;
+					}}
+					class={[
+						'duration-fast inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium focus-ring transition-colors',
+						selectedCategory === cat.id
+							? 'border-transparent bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+							: 'border-line bg-surface text-fg-secondary hover:border-line-strong hover:text-fg'
+					].join(' ')}
+				>
+					<Icon name={cat.icon} class="size-3.5" />
+					{cat.name}
+				</button>
+			{/each}
+		</div>
+	</Container>
+</section>
+
+{#snippet spotlightCard(/** @type {import('$lib/api/discovery.js').ListingCard} */ listing)}
+	<a
+		href={resolve('/discover/[slug]', { slug: listing.slug })}
+		class="group duration-base flex h-full flex-col rounded-card border border-line bg-surface p-4 shadow-card focus-ring transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
+	>
+		<p class="truncate font-semibold text-fg group-hover:text-accent">
+			{pickBilingual(listing, 'name', 'en')}
+		</p>
+		<p class="mt-0.5 flex items-center gap-1 truncate text-xs text-fg-muted">
+			<Icon name="map-pin" class="size-3" />
+			{listing.location_name_en || listing.city}
+			{#if listing.distance_km != null}
+				<span aria-hidden="true">·</span>
+				<span class="shrink-0 font-medium text-fg-secondary">{listing.distance_km} km</span>
+			{/if}
+		</p>
+		<div class="mt-auto flex items-center justify-between gap-2 pt-4">
+			<RatingStars
+				average={listing.rating_average}
+				count={listing.rating_count}
+				size="sm"
+				compact
+			/>
+			<span class="text-xs text-fg-muted">
+				from
+				<span class="font-semibold text-fg tabular-nums">
+					{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
+				</span>
+			</span>
+		</div>
+	</a>
+{/snippet}
+
+<Container size="lg" class="py-8 sm:py-12">
+	{#if browsing}
+		<div class="mb-12 grid gap-10 lg:grid-cols-2">
+			<section aria-labelledby="near-heading">
+				<div class="mb-4 flex items-center justify-between gap-3">
+					<h2
+						id="near-heading"
+						class="flex items-center gap-2 text-base font-semibold tracking-tight text-fg"
+					>
+						<Icon name="map-pin" class="size-4 text-accent" />
+						Near you
+					</h2>
+					{#if origin}
+						<Button size="sm" variant="ghost" onclick={() => changeSort('nearest')}>
+							See all
+							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+						</Button>
+					{/if}
+				</div>
+				{#if !origin}
+					<div
+						class="flex flex-col items-start gap-4 rounded-card border border-dashed border-line-strong bg-surface-sunken/60 p-5 sm:flex-row sm:items-center"
+					>
+						<span
+							class="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
+						>
+							<Icon name="map-pin" class="size-5" />
+						</span>
+						<p class="flex-1 text-sm text-fg-muted">
+							Share your location to see the closest salons and spas. It's only used for this
+							search.
+						</p>
+						<Button size="sm" loading={locating} onclick={useMyLocation}>Use my location</Button>
+					</div>
+				{:else if nearby === null}
+					<div class="grid grid-cols-2 gap-3">
+						{#each [0, 1, 2, 3] as n (n)}<Skeleton class="h-28 rounded-card" />{/each}
+					</div>
+				{:else if nearby.length === 0}
+					<p class="rounded-card border border-line bg-surface p-5 text-sm text-fg-muted">
+						No salons within {NEAR_RADIUS_KM} km of you yet.
+					</p>
+				{:else}
+					<div class="grid grid-cols-2 gap-3">
+						{#each nearby as listing (listing.location_id)}
+							{@render spotlightCard(listing)}
+						{/each}
+					</div>
+				{/if}
+			</section>
+
+			<section aria-labelledby="top-heading">
+				<div class="mb-4 flex items-center justify-between gap-3">
+					<h2
+						id="top-heading"
+						class="flex items-center gap-2 text-base font-semibold tracking-tight text-fg"
+					>
+						<Icon name="star" class="size-4 text-amber-500" />
+						Top rated
+					</h2>
+					{#if topRated.length > 0}
+						<Button size="sm" variant="ghost" onclick={() => changeSort('rating')}>
+							See all
+							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+						</Button>
+					{/if}
+				</div>
+				{#if topRated.length === 0}
+					<p class="rounded-card border border-line bg-surface p-5 text-sm text-fg-muted">
+						Ratings appear here once customers rate their visits.
+					</p>
+				{:else}
+					<div class="grid grid-cols-2 gap-3">
+						{#each topRated as listing (listing.location_id)}
+							{@render spotlightCard(listing)}
+						{/each}
+					</div>
+				{/if}
+			</section>
+		</div>
+	{/if}
+
+	<!-- Result bar -->
+	<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+		<div class="flex items-center gap-3">
+			<p class="text-sm text-fg-secondary" aria-live="polite">
+				{#if loading}
+					Searching…
+				{:else}
+					<span class="font-semibold text-fg tabular-nums">{listings.length}</span>
+					{listings.length === 1 ? 'salon' : 'salons'}
+					{#if selectedCity}in <span class="font-medium text-fg">{selectedCity}</span>{/if}
+				{/if}
+			</p>
+			{#if q || selectedCity || selectedCategory || area}
+				<Button size="sm" variant="ghost" onclick={resetFilters}>
+					<Icon name="x" class="size-3.5" />
+					Clear filters
+				</Button>
+			{/if}
+		</div>
+
+		<div class="flex items-center gap-2">
+			<!-- Below `lg` the list and the map take turns. -->
+			<div
+				class="inline-flex rounded-control bg-surface-muted p-1 lg:hidden"
+				role="group"
+				aria-label="Show results as"
+			>
+				{#each views as mode (mode)}
 					<button
 						type="button"
-						onclick={() => {
-							selectedCategory = cat.id;
-							offset = 0;
-						}}
+						onclick={() => (view = mode)}
+						aria-pressed={view === mode}
 						class={[
-							'inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all',
-							selectedCategory === cat.id
-								? 'bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900'
-								: 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-						].join(' ')}
+							'h-7 rounded-[calc(var(--radius-control)-2px)] px-3 text-xs font-medium capitalize focus-ring transition-colors',
+							view === mode
+								? 'bg-surface text-fg shadow-card ring-1 ring-line'
+								: 'text-fg-muted hover:text-fg'
+						]}
 					>
-						<Icon name={cat.icon} class="size-3.5" />
-						<span>{cat.name}</span>
+						{mode}
 					</button>
 				{/each}
 			</div>
-		</Container>
-	</section>
-
-	<!-- Results List Section -->
-	<Container size="lg" class="py-8 sm:py-12">
-		<!-- Bar with count and sorting -->
-		<div
-			class="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-800"
-		>
-			<div class="flex items-center gap-2">
-				<p class="text-sm font-medium text-slate-700 dark:text-slate-300">
-					{#if loading}
-						Searching available salons...
-					{:else}
-						Found <span class="font-bold text-slate-900 dark:text-slate-100">{listings.length}</span
-						>
-						salons
-						{#if selectedCity}
-							in <span class="font-semibold">{selectedCity}</span>
-						{/if}
-					{/if}
-				</p>
-				{#if q || selectedCity || selectedCategory}
-					<button
-						type="button"
-						onclick={resetFilters}
-						class="ms-2 text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400"
-					>
-						Clear filters
-					</button>
-				{/if}
-			</div>
-
-			<div class="flex items-center gap-2 text-xs">
-				<label for="sort-select" class="text-slate-500 dark:text-slate-400">Sort by:</label>
-				<select
-					id="sort-select"
-					bind:value={sortBy}
-					class="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-xs dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-				>
-					<option value="recommended">Recommended</option>
-					<option value="price-low">Price: Low to High</option>
-					<option value="price-high">Price: High to Low</option>
-				</select>
-			</div>
-		</div>
-
-		{#if loading}
-			<div class="flex flex-col items-center justify-center py-20">
-				<Spinner size="lg" />
-				<p class="mt-4 font-mono text-xs text-slate-500">Searching salons in the GCC...</p>
-			</div>
-		{:else if listings.length === 0}
-			<div
-				class="rounded-3xl border border-slate-200 bg-white p-12 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900"
+			<label for="sort-select" class="sr-only">Sort by</label>
+			<select
+				id="sort-select"
+				value={sortBy}
+				onchange={(event) => changeSort(event.currentTarget.value)}
+				class={`${fieldBase} ${fieldBorder(false)} h-9 w-auto pe-9 text-[13px]`}
 			>
-				<div
-					class="mx-auto flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800"
+				<option value="recommended">Recommended</option>
+				<option value="rating">Top rated</option>
+				<option value="nearest">Nearest to me</option>
+				<option value="price-low">Price: low to high</option>
+				<option value="price-high">Price: high to low</option>
+			</select>
+		</div>
+	</div>
+
+	<div
+		class="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]"
+	>
+		<div class={[view === 'map' && 'hidden', 'lg:block']}>
+			{#if loading}
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+					{#each [0, 1, 2, 3] as n (n)}
+						<div class="space-y-3 rounded-card border border-line bg-surface p-5 shadow-card">
+							<Skeleton class="h-5 w-2/3" />
+							<Skeleton class="h-3 w-1/3" />
+							<Skeleton class="h-3 w-full" />
+							<Skeleton class="mt-6 h-9 w-full rounded-control" />
+						</div>
+					{/each}
+				</div>
+			{:else if listings.length === 0}
+				<EmptyState
+					title="No salons match"
+					description="Try a different search term, category or city."
 				>
-					<Icon name="search" class="size-6" />
-				</div>
-				<h3 class="mt-4 text-lg font-bold text-slate-900 dark:text-slate-100">
-					No salons matched your criteria
-				</h3>
-				<p class="mx-auto mt-1 max-w-md text-xs text-slate-500 dark:text-slate-400">
-					Try clearing your search term or choosing a different city.
-				</p>
-				<div class="mt-6">
-					<Button variant="outline" onclick={resetFilters}>Reset all filters</Button>
-				</div>
-			</div>
-		{:else}
-			<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-				{#each listings as listing (listing.business_id + listing.location_id)}
-					<div
-						class="group flex flex-col justify-between overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xs transition-all hover:-translate-y-1 hover:border-slate-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"
-					>
-						<div>
-							<!-- Salon Content Body -->
-							<div class="p-5">
-								<div class="flex items-start justify-between gap-2">
-									<div>
-										<h3
-											class="text-base font-bold text-slate-900 transition-colors group-hover:text-brand-600 dark:text-slate-100 dark:group-hover:text-brand-400"
-										>
+					{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
+					{#snippet action()}
+						<Button variant="outline" onclick={resetFilters}>Reset filters</Button>
+					{/snippet}
+				</EmptyState>
+			{:else}
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+					{#each listings as listing (listing.business_id + listing.location_id)}
+						<article
+							class="group duration-base flex flex-col rounded-card border border-line bg-surface shadow-card transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
+						>
+							<div class="flex-1 p-5">
+								<div class="flex items-start justify-between gap-3">
+									<div class="min-w-0">
+										<h3 class="font-semibold text-fg transition-colors group-hover:text-accent">
 											{pickBilingual(listing, 'name', 'en')}
 										</h3>
 										{#if listing.name_ar}
-											<p class="font-sans text-xs text-slate-500 dark:text-slate-400" dir="rtl">
+											<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="rtl" lang="ar">
 												{listing.name_ar}
 											</p>
 										{/if}
 									</div>
-									<Badge tone="neutral" size="sm">
-										{listing.city || 'KSA'}
-									</Badge>
+									<Badge tone="neutral" size="sm">{listing.city || 'KSA'}</Badge>
 								</div>
 
-								<div
-									class="mt-2 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
-								>
-									<Icon name="map-pin" class="size-3.5 shrink-0 text-slate-400" />
-									<span>{listing.location_name_en || listing.city}</span>
-									{#if listing.distance_km != null}
-										<span>·</span>
-										<span>{listing.distance_km} km away</span>
-									{/if}
+								<div class="mt-2">
+									<RatingStars
+										average={listing.rating_average}
+										count={listing.rating_count}
+										size="sm"
+									/>
 								</div>
+
+								<p class="mt-2 flex items-center gap-1.5 text-xs text-fg-muted">
+									<Icon name="map-pin" class="size-3.5" />
+									<span class="truncate">{listing.location_name_en || listing.city}</span>
+									{#if listing.distance_km != null}
+										<span aria-hidden="true">·</span>
+										<span class="shrink-0">{listing.distance_km} km</span>
+									{/if}
+								</p>
 
 								{#if listing.description_en}
-									<p
-										class="mt-3 line-clamp-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400"
-									>
-										{listing.description_en}
-									</p>
+									<p class="mt-3 line-clamp-2 text-sm text-fg-muted">{listing.description_en}</p>
 								{/if}
 							</div>
-						</div>
 
-						<!-- Card Footer with Price & Actions -->
-						<div class="border-t border-slate-100 p-5 pt-4 dark:border-slate-800">
-							<div class="mb-4 flex items-baseline justify-between">
-								<span class="text-xs text-slate-400">Starting from</span>
-								<span class="text-base font-extrabold text-slate-900 dark:text-slate-100">
-									{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
-								</span>
+							<!-- Stacked rather than one row: next to the map a card can be under
+							     280px wide, too narrow for a price and two buttons side by side. -->
+							<div
+								class="flex flex-col gap-3 rounded-b-card border-t border-line-subtle bg-surface-sunken px-5 py-4"
+							>
+								<p class="flex items-baseline justify-between gap-2 text-xs text-fg-muted">
+									From
+									<span class="text-base font-semibold text-fg tabular-nums">
+										{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
+									</span>
+								</p>
+								<div class="grid grid-cols-2 gap-2">
+									<Button
+										size="sm"
+										variant="outline"
+										fullWidth
+										onclick={() => (quickViewSalon = listing)}
+									>
+										Quick View
+									</Button>
+									<Button
+										href={resolve('/discover/[slug]', { slug: listing.slug })}
+										size="sm"
+										fullWidth
+									>
+										Book Now
+									</Button>
+								</div>
 							</div>
-
-							<div class="grid grid-cols-2 gap-2">
-								<button
-									type="button"
-									onclick={() => (quickViewSalon = listing)}
-									class="rounded-xl border border-slate-200 bg-white py-2 text-center text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-								>
-									Quick View
-								</button>
-								<Button
-									href={resolve('/discover/[slug]', { slug: listing.slug })}
-									variant="primary"
-									size="sm"
-								>
-									Book Now
-								</Button>
-							</div>
-						</div>
-					</div>
-				{/each}
-			</div>
-
-			<div class="mt-10">
-				<Pagination
-					{limit}
-					{offset}
-					itemCount={listings.length}
-					onchange={(next) => (offset = next)}
-				/>
-			</div>
-		{/if}
-	</Container>
-
-	<!-- Quick View Modal -->
-	{#if quickViewSalon}
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-		>
-			<div
-				class="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
-			>
-				<button
-					type="button"
-					onclick={() => (quickViewSalon = null)}
-					class="absolute end-5 top-5 inline-flex size-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
-					aria-label="Close"
-				>
-					<Icon name="x" class="size-4" />
-				</button>
-
-				<h3 class="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100">
-					{quickViewSalon.name_en}
-				</h3>
-				{#if quickViewSalon.name_ar}
-					<p class="text-xs text-slate-500" dir="rtl">{quickViewSalon.name_ar}</p>
-				{/if}
-
-				{#if quickViewSalon.description_en}
-					<p class="mt-3 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-						{quickViewSalon.description_en}
-					</p>
-				{/if}
-
-				<div class="mt-5 space-y-2 rounded-2xl bg-slate-50 p-4 text-xs dark:bg-slate-800/50">
-					<div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-						<Icon name="map-pin" class="size-4 shrink-0 text-brand-600" />
-						<span
-							>{quickViewSalon.location_name_en || quickViewSalon.city}, {quickViewSalon.city}</span
-						>
-					</div>
-					<div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-						<Icon name="credit-card" class="size-4 shrink-0 text-brand-600" />
-						<span>Mada, Apple Pay, Visa &amp; Mastercard accepted via Moyasar</span>
-					</div>
+						</article>
+					{/each}
 				</div>
 
-				<div
-					class="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800"
-				>
-					<div>
-						<p class="text-[11px] text-slate-400">Treatments starting from</p>
-						<p class="text-lg font-bold text-slate-900 dark:text-slate-100">
-							{formatMoney(quickViewSalon.starting_price, quickViewSalon.currency ?? 'SAR', 'en')}
-						</p>
-					</div>
-
-					<div class="flex gap-2">
-						<Button variant="outline" size="sm" onclick={() => (quickViewSalon = null)}
-							>Close</Button
-						>
-						<Button
-							href={resolve('/discover/[slug]', { slug: quickViewSalon.slug })}
-							variant="primary"
-							size="sm"
-						>
-							View Full Menu
-						</Button>
-					</div>
+				<div class="mt-10">
+					<Pagination
+						{limit}
+						{offset}
+						itemCount={listings.length}
+						onchange={(next) => (offset = next)}
+					/>
 				</div>
-			</div>
+			{/if}
 		</div>
+
+		<div class={[view === 'list' && 'hidden', 'lg:sticky lg:top-24 lg:block']}>
+			<ListingsMap
+				listings={pins}
+				fit={area === null}
+				loading={pinsLoading}
+				truncated={pinsTruncated}
+				areaActive={area !== null}
+				onselect={(listing) => (quickViewSalon = listing)}
+				onsearcharea={searchArea}
+				onclear={() => searchArea(null)}
+				class="h-[65vh] min-h-96 lg:h-[calc(100vh-8rem)]"
+			/>
+		</div>
+	</div>
+</Container>
+
+<Modal
+	open={quickViewSalon !== null}
+	title={quickViewSalon?.name_en ?? ''}
+	description={quickViewSalon?.name_ar ?? null}
+	onclose={() => (quickViewSalon = null)}
+>
+	{#if quickViewSalon}
+		<div class="mb-4">
+			<RatingStars average={quickViewSalon.rating_average} count={quickViewSalon.rating_count} />
+		</div>
+		{#if quickViewSalon.description_en}
+			<p class="text-sm text-fg-secondary">{quickViewSalon.description_en}</p>
+		{/if}
+		<dl class="mt-5 divide-y divide-line-subtle rounded-card border border-line text-sm">
+			<div class="flex items-center gap-3 px-4 py-3">
+				<Icon name="map-pin" class="size-4 text-accent" />
+				<dt class="sr-only">Location</dt>
+				<dd class="text-fg-secondary">
+					{[quickViewSalon.location_name_en, quickViewSalon.city].filter(Boolean).join(', ')}
+				</dd>
+			</div>
+			<div class="flex items-center gap-3 px-4 py-3">
+				<Icon name="credit-card" class="size-4 text-accent" />
+				<dt class="sr-only">Payment</dt>
+				<dd class="text-fg-secondary">Mada, Apple Pay, Visa &amp; Mastercard</dd>
+			</div>
+			<div class="flex items-center gap-3 px-4 py-3">
+				<Icon name="sparkles" class="size-4 text-accent" />
+				<dt class="sr-only">Price</dt>
+				<dd class="text-fg-secondary">
+					Treatments from
+					<span class="font-semibold text-fg tabular-nums">
+						{formatMoney(quickViewSalon.starting_price, quickViewSalon.currency ?? 'SAR', 'en')}
+					</span>
+				</dd>
+			</div>
+		</dl>
 	{/if}
-</div>
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (quickViewSalon = null)}>Close</Button>
+		{#if quickViewSalon}
+			<Button href={resolve('/discover/[slug]', { slug: quickViewSalon.slug })}>
+				View Full Menu
+			</Button>
+		{/if}
+	{/snippet}
+</Modal>

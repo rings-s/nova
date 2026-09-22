@@ -387,33 +387,53 @@ async function handleRequest(request, params, url, method) {
 	}
 
 	// 2. Discovery routes (public marketplace)
+	// The public projection of one branch: what `ListingCardOut` carries in the real API.
+	/** @param {(typeof mockData.businesses)[number]} biz */
+	const listingCard = (biz) => {
+		const loc = mockData.locations.find((l) => l.business_id === biz.id) || mockData.locations[0];
+		const startingSrv = mockData.services.find((s) => s.tenant_id === biz.tenant_id);
+		return {
+			business_id: biz.id,
+			tenant_id: biz.tenant_id,
+			slug: biz.slug,
+			name_en: biz.name_en,
+			name_ar: biz.name_ar,
+			description_en: biz.description_en,
+			description_ar: biz.description_ar,
+			logo_asset_id: biz.logo_asset_id,
+			cover_asset_id: biz.cover_asset_id,
+			location_id: loc.id,
+			location_name_en: loc.name_en,
+			location_name_ar: loc.name_ar,
+			city: loc.city,
+			latitude: loc.latitude,
+			longitude: loc.longitude,
+			timezone: loc.timezone,
+			starting_price: startingSrv?.price || '220.00',
+			currency: 'SAR',
+			distance_km: 2.4
+		};
+	};
+
 	if (path === 'discovery/businesses') {
-		const items = mockData.businesses.map((biz) => {
-			const loc = mockData.locations.find((l) => l.business_id === biz.id) || mockData.locations[0];
-			const startingSrv = mockData.services.find((s) => s.tenant_id === biz.tenant_id);
-			return {
-				business_id: biz.id,
-				tenant_id: biz.tenant_id,
-				slug: biz.slug,
-				name_en: biz.name_en,
-				name_ar: biz.name_ar,
-				description_en: biz.description_en,
-				description_ar: biz.description_ar,
-				logo_asset_id: biz.logo_asset_id,
-				cover_asset_id: biz.cover_asset_id,
-				location_id: loc.id,
-				location_name_en: loc.name_en,
-				location_name_ar: loc.name_ar,
-				city: loc.city,
-				latitude: loc.latitude,
-				longitude: loc.longitude,
-				timezone: loc.timezone,
-				starting_price: startingSrv?.price || '220.00',
-				currency: 'SAR',
-				distance_km: 2.4
-			};
-		});
+		const items = mockData.businesses.map(listingCard);
 		return json({ items, total: items.length });
+	}
+
+	// The same listings as GeoJSON for the Leaflet map. Like the route above, the
+	// mock ignores filters; it only has to hand back the right shape.
+	if (path === 'discovery/map') {
+		const features = mockData.businesses
+			.map(listingCard)
+			.filter((card) => card.latitude != null && card.longitude != null)
+			.map((card) => ({
+				type: 'Feature',
+				id: card.location_id,
+				// GeoJSON is [longitude, latitude].
+				geometry: { type: 'Point', coordinates: [card.longitude, card.latitude] },
+				properties: card
+			}));
+		return json({ type: 'FeatureCollection', features, truncated: false });
 	}
 
 	if (path.startsWith('discovery/businesses/')) {
@@ -567,8 +587,55 @@ async function handleRequest(request, params, url, method) {
 			}
 
 			if (sub === 'locations') {
+				// PATCH .../locations/:id/position — set, move or clear a branch's map pin.
+				if (itemId && parts[5] === 'position' && method === 'PATCH') {
+					const loc = mockData.locations.find((x) => x.id === itemId);
+					if (!loc) {
+						return json(
+							{ error: { code: 'location_not_found', message: 'Location was not found.' } },
+							{ status: 404 }
+						);
+					}
+					const { latitude = null, longitude = null } = body ?? {};
+					// The real API takes both numbers or neither.
+					if ((latitude === null) !== (longitude === null)) {
+						return json(
+							{
+								error: {
+									code: 'validation_error',
+									message: 'Latitude and longitude must be provided together.'
+								}
+							},
+							{ status: 422 }
+						);
+					}
+					loc.latitude = latitude;
+					loc.longitude = longitude;
+					loc.updated_at = new Date().toISOString();
+					return json(loc);
+				}
 				if (itemId) {
 					return json(mockData.locations.find((x) => x.id === itemId) || mockData.locations[0]);
+				}
+				if (method === 'POST') {
+					const newLoc = {
+						id: 'loc-' + (mockData.locations.length + 1),
+						tenant_id: tenantId,
+						business_id: body?.business_id || mockData.businesses[0]?.id || 'biz-1',
+						name_en: body?.name_en || 'New Branch',
+						name_ar: body?.name_ar || 'فرع جديد',
+						slug: (body?.name_en || 'branch').toLowerCase().replace(/\s+/g, '-'),
+						phone: body?.phone || '',
+						timezone: body?.timezone || 'Asia/Riyadh',
+						city: body?.city ?? null,
+						latitude: body?.latitude ?? null,
+						longitude: body?.longitude ?? null,
+						is_active: true,
+						created_at: nowIso,
+						updated_at: nowIso
+					};
+					mockData.locations.push(newLoc);
+					return json(newLoc);
 				}
 				return json({ items: mockData.locations, total: mockData.locations.length });
 			}

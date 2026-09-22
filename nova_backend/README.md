@@ -55,6 +55,7 @@ nova_backend/
 │   │   ├── discovery/       ✅ MarketplaceReferral  ← the only public, cross-tenant slice
 │   │   ├── booking/         ✅ Booking, Schedule, SlotHold  ← reference implementation
 │   │   ├── queue/           ✅ Queue, QueueEntry, Ticket
+│   │   ├── review/          ✅ Review  ← verified 1-5 ratings of completed visits
 │   │   ├── payment/         ✅ Payment, Refund
 │   │   ├── billing/         ✅ Subscription, CommissionLine, Invoice, Payout
 │   │   ├── analytics/       ✅ owner reports and Plotly charts (pandas, numpy)  ← owns no tables
@@ -110,7 +111,7 @@ Three of these are not the same thing, and mixing them is the most common mistak
 Not every module earns a rich domain entity. We pay for the mapping layer only
 where there is a real lifecycle to protect.
 
-**Pure functions** — `identity`, `catalog`, `discovery`, `media`, `notification`.
+**Pure functions** — `identity`, `catalog`, `discovery`, `review`, `media`, `notification`.
 Rules are field-level validation; the ORM model _is_ the domain object.
 
 ```python

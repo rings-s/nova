@@ -129,6 +129,9 @@ class TestRoleAllows:
         assert role_allows(MembershipRole.MANAGER, StaffPermission.VIEW_ANALYTICS)
         assert not role_allows(MembershipRole.MANAGER, StaffPermission.MANAGE_SUBSCRIPTION)
 
+    def test_a_manager_keeps_the_menu_and_prices_current(self) -> None:
+        assert role_allows(MembershipRole.MANAGER, StaffPermission.MANAGE_CATALOG)
+
     def test_receptionists_and_providers_hold_none(self) -> None:
         for role in (MembershipRole.RECEPTIONIST, MembershipRole.PROVIDER):
             for permission in StaffPermission:

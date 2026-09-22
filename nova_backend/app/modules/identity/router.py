@@ -32,6 +32,7 @@ from app.modules.identity.schemas import (
     MembershipInviteOut,
     MembershipInviteSummary,
     MembershipOut,
+    MyAccessOut,
     TenantOut,
     UpdateCustomerConsentRequest,
     UpdateMembershipRoleRequest,
@@ -200,6 +201,22 @@ async def list_memberships(
     """This salon's staff, active only. Revoked memberships are history."""
     rows = await service.list(principal, limit=params.limit, offset=params.offset)
     return Page(items=[_membership_out(r) for r in rows])
+
+
+@memberships_router.get("/me", response_model=MyAccessOut, dependencies=[Depends(require_staff)])
+async def get_my_access(
+    tenant_id: UUID,
+    service: MembershipService = Depends(get_membership_service),
+    principal: Principal = Depends(get_principal),
+) -> MyAccessOut:
+    """Your role in this business and what it unlocks — so a client can show
+    only the screens you can use. Every other route still checks for itself."""
+    role, permissions, manageable = await service.my_access(principal)
+    return MyAccessOut(
+        role=role,
+        permissions=sorted(permissions),
+        manageable_roles=sorted(manageable),
+    )
 
 
 def _invite_out(invite: MembershipInvite, token: str) -> MembershipInviteOut:

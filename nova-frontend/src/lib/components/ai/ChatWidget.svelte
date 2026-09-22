@@ -1,4 +1,5 @@
 <script>
+	import Icon from '../ui/Icon.svelte';
 	/**
 	 * One conversation with a NOVA agent (docs/13). A tool's write — a held
 	 * slot, a queue place — is already committed by the time a reply comes
@@ -75,10 +76,13 @@
 </script>
 
 <div
-	class="flex h-[32rem] flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+	class="flex h-[32rem] flex-col overflow-hidden rounded-card border border-line bg-surface shadow-card"
 >
-	<div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-		<p class="font-medium text-slate-900 dark:text-slate-100">{title}</p>
+	<div class="flex items-center gap-3 border-b border-line px-4 py-3">
+		<span class="flex size-8 items-center justify-center rounded-full bg-accent-soft text-accent">
+			<Icon name="sparkles" class="size-4" />
+		</span>
+		<p class="font-semibold text-fg">{title}</p>
 	</div>
 
 	<div class="flex-1 space-y-3 overflow-y-auto p-4">
@@ -86,10 +90,10 @@
 			<div class={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
 				<div
 					class={[
-						'max-w-[85%] rounded-lg px-3 py-2 text-sm',
+						'max-w-[85%] rounded-card px-3.5 py-2.5 text-sm leading-relaxed',
 						message.role === 'user'
-							? 'bg-brand-600 text-white'
-							: 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
+							? 'rounded-se-sm bg-brand-600 text-white'
+							: 'rounded-ss-sm border border-line bg-surface-sunken text-fg'
 					].join(' ')}
 				>
 					<p>{message.text}</p>
@@ -142,7 +146,7 @@
 		<div class="px-4"><Alert tone="error">{error}</Alert></div>
 	{/if}
 
-	<form class="flex gap-2 border-t border-slate-200 p-3 dark:border-slate-800" onsubmit={send}>
+	<form class="flex gap-2 border-t border-line bg-surface-sunken p-3" onsubmit={send}>
 		<div class="flex-1">
 			<Input bind:value={draft} placeholder="Type a message…" disabled={sending} />
 		</div>

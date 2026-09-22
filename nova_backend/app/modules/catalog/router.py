@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db_session
 from app.core.schemas import Page
-from app.core.security import require_staff
 from app.core.throttling import write_rate_limit
 from app.modules.catalog.dependencies import get_catalog_service
 from app.modules.catalog.schemas import (
@@ -26,19 +25,29 @@ from app.modules.catalog.schemas import (
     ProviderOut,
     ServiceOut,
     SetListingVisibilityRequest,
+    SetLocationPositionRequest,
 )
 from app.modules.catalog.service import CatalogService
+from app.modules.identity.dependencies import RequirePermission
+from app.modules.identity.domain import StaffPermission
 
 # Every catalog route is nested under a tenant, so `get_tenant_context` can
 # resolve tenant_id from the path and scope every repository (ADR-0003).
 #
 # Reads are open to any caller with tenant access, including a customer:
 # browsing a salon's services is the point of the storefront. Every WRITE is
-# staff-only. That was previously implicit — nothing but staff could reach a
+# staff-only, and more than that, owner or manager (`_MANAGE_CATALOG` below).
+# Staff-only was previously implicit — nothing but staff could reach a
 # tenant at all — and became load-bearing the moment customer principals
 # could. An open `POST /services` lets a customer invent a 0.00 SAR service
 # and book it; an open `POST /businesses` makes the globally-unique `slug`
 # namespace squattable.
+#: Every catalog write changes what the salon sells, at what price, where, or
+#: whether it is advertised at all — owner and manager work, not the front
+#: desk's (`StaffPermission.MANAGE_CATALOG`). Providers' working hours live in
+#: `booking` and stay open to all staff.
+_MANAGE_CATALOG = RequirePermission(StaffPermission.MANAGE_CATALOG)
+
 router = APIRouter(prefix="/tenants/{tenant_id}/catalog", tags=["catalog"])
 
 
@@ -46,7 +55,7 @@ router = APIRouter(prefix="/tenants/{tenant_id}/catalog", tags=["catalog"])
     "/businesses",
     response_model=BusinessOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
 )
 async def create_business(
     tenant_id: UUID,
@@ -71,7 +80,7 @@ async def get_business(
 @router.patch(
     "/businesses/{business_id}/listing",
     response_model=BusinessOut,
-    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
 )
 async def set_listing_visibility(
     tenant_id: UUID,
@@ -96,7 +105,7 @@ async def set_listing_visibility(
     "/locations",
     response_model=LocationOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
 )
 async def create_location(
     tenant_id: UUID,
@@ -105,6 +114,31 @@ async def create_location(
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
     location = await service.create_location(**payload.model_dump())
+    await session.commit()
+    return location
+
+
+@router.patch(
+    "/locations/{location_id}/position",
+    response_model=LocationOut,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def set_location_position(
+    tenant_id: UUID,
+    location_id: UUID,
+    payload: SetLocationPositionRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+) -> object:
+    """Sets, moves or clears where a branch appears on the marketplace map.
+
+    Staff-only. The map at `/discovery/map` reads this position (ADR-0012); a
+    branch with none is absent from it but otherwise unaffected. Send both
+    `latitude` and `longitude`, or both as null to remove the pin.
+    """
+    location = await service.set_location_position(
+        location_id, latitude=payload.latitude, longitude=payload.longitude
+    )
     await session.commit()
     return location
 
@@ -123,7 +157,7 @@ async def list_locations(
     "/services",
     response_model=ServiceOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
 )
 async def create_service(
     tenant_id: UUID,
@@ -150,7 +184,7 @@ async def list_services(
     "/providers",
     response_model=ProviderOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
 )
 async def create_provider(
     tenant_id: UUID,
@@ -176,7 +210,7 @@ async def list_providers(
 @router.post(
     "/providers/{provider_id}/services",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
 )
 async def assign_service_to_provider(
     tenant_id: UUID,

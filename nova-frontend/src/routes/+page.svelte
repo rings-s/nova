@@ -1,586 +1,385 @@
 <script>
+	/**
+	 * The public landing page. It speaks to both audiences NOVA serves — salons
+	 * and spas that run their day on it, and customers who book through the
+	 * marketplace — and sends each to their next step. Signed-in staff get a
+	 * shortcut to /app; the dashboard itself lives only there.
+	 */
 	import { resolve } from '$app/paths';
-	import { businessStore } from '$lib/stores/business.svelte.js';
-	import { tenantStore } from '$lib/stores/tenant.svelte.js';
-	import { listBookings } from '$lib/api/booking.js';
-	import { listServices, listProviders, listLocations } from '$lib/api/catalog.js';
-	import { formatMoney } from '$lib/utils/money.js';
+	import { authStore } from '$lib/stores/auth.svelte.js';
 
-	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import Container from '$lib/components/marketing/Container.svelte';
+	import Section from '$lib/components/marketing/Section.svelte';
+	import SectionHeading from '$lib/components/marketing/SectionHeading.svelte';
+	import BentoGrid from '$lib/components/marketing/BentoGrid.svelte';
+	import BentoCard from '$lib/components/marketing/BentoCard.svelte';
+	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
 
-	let businessId = $derived(businessStore.activeBusinessId);
-	let tenantId = $derived(tenantStore.activeTenantId);
+	/** @typedef {import('$lib/components/ui/Icon.svelte').IconName} IconName */
 
-	let loading = $state(true);
-	let bookingCount = $state(0);
-	let confirmedCount = $state(0);
-	let serviceCount = $state(0);
-	let providerCount = $state(0);
-	let locationCount = $state(0);
-	let recentBookings = $state([]);
-
-	const modules = [
+	/** @type {{ icon: IconName, title: string, body: string, span?: 1|2 }[]} */
+	const features = [
 		{
-			title: 'Queue',
-			label: 'Front desk',
-			description: 'Walk-ins, tickets and live customer flow.',
-			icon: 'users',
-			href: '/app/queue',
-			tone: 'accent'
-		},
-		{
-			title: 'Bookings',
-			label: 'Schedule',
-			description: 'Manage today’s appointments and visits.',
 			icon: 'calendar',
-			href: '/app/bookings',
-			tone: 'success'
+			title: 'Bookings that never collide',
+			body: 'Availability is calculated per provider, service and branch, and a slot is held the moment checkout starts.',
+			span: 2
 		},
 		{
-			title: 'Catalog',
-			label: 'Services',
-			description: 'Services, pricing, branches and providers.',
-			icon: 'sparkles',
-			href: '/app/catalog',
-			tone: 'neutral'
+			icon: 'users',
+			title: 'One line for walk-ins',
+			body: 'Tickets, live positions and one-click call-next, side by side with appointments.'
 		},
 		{
-			title: 'Billing',
-			label: 'Finance',
-			description: 'Payments, deposits and settlements.',
+			icon: 'chat-bubble',
+			title: 'WhatsApp, built in',
+			body: 'Confirmations, reminders and receipts arrive where customers already are.'
+		},
+		{
 			icon: 'credit-card',
-			href: '/app/billing',
-			tone: 'success'
+			title: 'Deposits that stop no-shows',
+			body: 'Take a Mada or Apple Pay deposit through Moyasar before a booking is confirmed.'
 		},
 		{
-			title: 'Team',
-			label: 'Access',
-			description: 'Staff roles and permissions.',
-			icon: 'user-check',
-			href: '/app/team',
-			tone: 'neutral'
+			icon: 'globe',
+			title: 'Arabic and English',
+			body: 'Every service, branch and message is bilingual from the first record.'
 		},
 		{
-			title: 'Analytics',
-			label: 'Insights',
-			description: 'Performance, retention and revenue.',
 			icon: 'chart-bar',
-			href: '/app/analytics',
-			tone: 'info'
+			title: 'Numbers you can act on',
+			body: 'Revenue, utilization, retention and busiest hours — per branch, per provider.',
+			span: 2
 		}
 	];
 
-	$effect(() => {
-		if (!tenantId || !businessId) {
-			loading = false;
-			return;
+	/** @type {{ title: string, body: string }[]} */
+	const steps = [
+		{
+			title: 'Set up your storefront',
+			body: 'Add your branches, bilingual service menu and team. It takes minutes, not a project.'
+		},
+		{
+			title: 'Open your calendar and queue',
+			body: 'Customers book held slots online or join the walk-in line from their phone.'
+		},
+		{
+			title: 'Run the day from one screen',
+			body: 'Check in, start service, complete and get paid — with every customer kept in the loop.'
 		}
+	];
 
-		let cancelled = false;
-
-		async function loadDashboard() {
-			loading = true;
-
-			try {
-				const [bookingsRes, locationsRes] = await Promise.all([
-					listBookings(tenantId, { limit: 10 }).catch(() => ({ items: [] })),
-					listLocations(tenantId, businessId).catch(() => ({ items: [] }))
-				]);
-
-				if (cancelled) return;
-
-				const bookings = bookingsRes?.items ?? [];
-				const locations = locationsRes?.items ?? [];
-
-				recentBookings = bookings.slice(0, 5);
-				bookingCount = bookings.length;
-				confirmedCount = bookings.filter(
-					(booking) =>
-						booking.status === 'confirmed' ||
-						booking.status === 'in_service'
-				).length;
-
-				locationCount = locations.length;
-
-				const [services, providers] = await Promise.all([
-					Promise.all(
-						locations.map((location) =>
-							listServices(tenantId, location.id).catch(() => ({ items: [] }))
-						)
-					),
-					Promise.all(
-						locations.map((location) =>
-							listProviders(tenantId, location.id).catch(() => ({ items: [] }))
-						)
-					)
-				]);
-
-				if (cancelled) return;
-
-				serviceCount = services.reduce(
-					(total, response) => total + (response?.items?.length ?? 0),
-					0
-				);
-
-				providerCount = providers.reduce(
-					(total, response) => total + (response?.items?.length ?? 0),
-					0
-				);
-			} finally {
-				if (!cancelled) loading = false;
-			}
+	/**
+	 * A static sample of the day sheet, for the hero illustration only.
+	 * @type {{ time: string, name: string, service: string, status: string, tone: 'success'|'info'|'accent'|'warning' }[]}
+	 */
+	const sampleDay = [
+		{
+			time: '10:00',
+			name: 'Noura A.',
+			service: 'Signature facial',
+			status: 'Checked in',
+			tone: 'info'
+		},
+		{ time: '10:30', name: 'Sara M.', service: 'Balayage', status: 'In service', tone: 'accent' },
+		{
+			time: '11:15',
+			name: 'Reem K.',
+			service: 'Hot stone massage',
+			status: 'Confirmed',
+			tone: 'success'
+		},
+		{
+			time: '12:00',
+			name: 'Huda S.',
+			service: 'Classic manicure',
+			status: 'Deposit due',
+			tone: 'warning'
 		}
+	];
 
-		loadDashboard();
+	/** @type {{ icon: IconName, label: string }[]} */
+	const trust = [
+		{ icon: 'credit-card', label: 'Payments by Moyasar' },
+		{ icon: 'chat-bubble', label: 'WhatsApp messaging' },
+		{ icon: 'shield-check', label: 'PDPL-aware consent' },
+		{ icon: 'globe', label: 'Arabic & English' }
+	];
 
-		return () => {
-			cancelled = true;
-		};
-	});
+	/** @type {{ eyebrow: string, icon: IconName, title: string, points: string[], cta: string, href: '/register'|'/discover' }[]} */
+	const audiences = [
+		{
+			eyebrow: 'For salons & spas',
+			icon: 'building',
+			title: 'Run the whole day from one screen',
+			points: [
+				'Calendar, walk-in queue and day sheet together',
+				'Deposits and payouts without spreadsheets',
+				'Roles and permissions for every team member'
+			],
+			cta: 'Start free trial',
+			href: '/register'
+		},
+		{
+			eyebrow: 'For customers',
+			icon: 'sparkles',
+			title: 'Book a real slot in seconds',
+			points: [
+				'Live availability — no call-backs',
+				'Confirmation and reminders on WhatsApp',
+				'Pay a deposit with Mada or Apple Pay'
+			],
+			cta: 'Find a salon',
+			href: '/discover'
+		}
+	];
 </script>
 
 <svelte:head>
-	<title>Command Center — NOVA</title>
+	<title>NOVA — Bookings, queues and payments for GCC salons and spas</title>
 </svelte:head>
 
-<div class="min-h-full space-y-10 max-w-7xl mx-auto">
-
-	<!-- ========================================================= -->
-	<!-- HERO -->
-	<!-- ========================================================= -->
-
-	<section
-		class="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-slate-950 text-white shadow-xl dark:border-slate-800 mt-10"
+<!-- Hero -->
+<section class="relative isolate overflow-hidden">
+	<GradientBlob variant="hero" />
+	<Container
+		size="xl"
+		class="grid items-center gap-14 pt-16 pb-20 sm:pt-24 lg:grid-cols-[1.05fr_1fr] lg:pb-28"
 	>
-		<!-- Ambient light -->
-		<div
-			class="pointer-events-none absolute -right-32 -top-32 size-96 rounded-full bg-brand-500/20 blur-3xl"
-		></div>
-
-		<div
-			class="pointer-events-none absolute -bottom-40 left-1/3 size-96 rounded-full bg-blue-500/10 blur-3xl"
-		></div>
-
-		<div class="relative grid lg:grid-cols-[1.4fr_0.6fr]">
-
-			<!-- Main hero copy -->
-			<div class="flex flex-col justify-between p-7 sm:p-10 lg:p-14">
-
-				<div>
-					<div class="mb-6 flex items-center gap-3">
-						<span class="flex size-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-
-						<span class="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300">
-							Live Command Center
-						</span>
-
-						<span class="text-slate-600">/</span>
-
-						<span class="text-[11px] uppercase tracking-wider text-slate-400">
-							NOVA OS
-						</span>
-					</div>
-
-					<h1
-						class="max-w-3xl text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl"
-					>
-						Everything your salon needs.
-						<span class="text-slate-400">
-							One operating system.
-						</span>
-					</h1>
-
-					<p
-						class="mt-6 max-w-2xl text-sm leading-7 text-slate-400 sm:text-base"
-					>
-						Run bookings, walk-ins, staff, services, payments and customer
-						relationships from one synchronized command center.
-					</p>
-				</div>
-
-				<div class="mt-10 flex flex-wrap gap-3">
-					<Button href={resolve('/app/queue')} size="md">
-						<Icon name="users" class="size-4" />
-						Open live queue
-					</Button>
-
-					<Button
-						href={resolve('/app/bookings')}
-						variant="outline"
-						size="md"
-						class="border-slate-700 bg-white/5 text-white hover:bg-white/10"
-					>
-						<Icon name="calendar" class="size-4" />
-						View day sheet
-					</Button>
-				</div>
-			</div>
-
-			<!-- Hero telemetry -->
-			<div class="border-t border-white/10 bg-white/[0.03] lg:border-l lg:border-t-0">
-
-				<div class="grid h-full grid-cols-2">
-
-					<div class="border-b border-r border-white/10 p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Appointments
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold">
-							{loading ? '—' : bookingCount}
-						</p>
-
-						<p class="mt-2 text-xs text-emerald-400">
-							{confirmedCount} active
-						</p>
-					</div>
-
-					<div class="border-b border-white/10 p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Providers
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold">
-							{loading ? '—' : providerCount}
-						</p>
-
-						<p class="mt-2 text-xs text-slate-500">
-							Across {locationCount || 1} locations
-						</p>
-					</div>
-
-					<div class="border-r border-white/10 p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Services
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold">
-							{loading ? '—' : serviceCount}
-						</p>
-
-						<p class="mt-2 text-xs text-slate-500">
-							Arabic + English
-						</p>
-					</div>
-
-					<div class="p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Protection
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold text-emerald-400">
-							86%
-						</p>
-
-						<p class="mt-2 text-xs text-slate-500">
-							No-show shield
-						</p>
-					</div>
-
-				</div>
-			</div>
-		</div>
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- SYSTEM STATUS -->
-	<!-- ========================================================= -->
-
-	<section class="flex flex-wrap items-center justify-between gap-4">
-
-		<div>
-			<p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-				System status
+		<div class="animate-slide-up">
+			<p
+				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
+			>
+				<span class="size-1.5 rounded-full bg-brand-500"></span>
+				Built for salons and spas in the GCC
 			</p>
-
-			<h2 class="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-				Your operation is synchronized
-			</h2>
-		</div>
-
-		<div class="flex flex-wrap gap-2">
-			<Badge tone="success" size="sm">Moyasar connected</Badge>
-			<Badge tone="neutral" size="sm">ZATCA Phase 2</Badge>
-			<Badge tone="accent" size="sm">Live sync</Badge>
-		</div>
-
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- MODULE NAVIGATION -->
-	<!-- ========================================================= -->
-
-	<section>
-
-		<div class="mb-5 flex items-end justify-between gap-4">
-			<div>
-				<p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-					Workspace
-				</p>
-
-				<h2 class="mt-1 text-xl font-bold text-slate-900 dark:text-white">
-					Operating modules
-				</h2>
+			<h1 class="mt-6 text-display-2xl font-semibold tracking-tight text-fg">
+				Everything your salon needs.
+				<span
+					class="text-transparent"
+					style="background-image: var(--gradient-hero); -webkit-background-clip: text; background-clip: text;"
+				>
+					One operating system.
+				</span>
+			</h1>
+			<p class="mt-6 max-w-xl text-body-lg text-fg-muted">
+				Bookings, walk-ins, staff, payments and customer messages — synchronized in one place, in
+				Arabic and English.
+			</p>
+			<div class="mt-9 flex flex-wrap gap-3">
+				{#if authStore.isAuthenticated && authStore.isStaff}
+					<Button size="lg" href={resolve('/app')}>
+						Go to dashboard
+						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+					</Button>
+				{:else}
+					<Button size="lg" href={resolve('/register')}>
+						Start free trial
+						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+					</Button>
+				{/if}
+				<Button size="lg" variant="outline" href={resolve('/discover')}>
+					<Icon name="search" class="size-4" />
+					Find a salon
+				</Button>
 			</div>
+			<p class="mt-5 text-xs text-fg-muted">
+				14-day free trial · No card required · Cancel anytime
+			</p>
+		</div>
 
-			<span class="hidden text-xs text-slate-400 sm:block">
-				Everything connected. Everything in one place.
+		<!-- Illustrative product preview (static sample data) -->
+		<div class="relative animate-slide-up [animation-delay:120ms]" aria-hidden="true">
+			<div
+				class="rounded-panel border border-line bg-surface/90 p-2 shadow-overlay backdrop-blur-xl"
+			>
+				<div
+					class="rounded-[calc(var(--radius-panel)-0.5rem)] border border-line-subtle bg-surface"
+				>
+					<div class="flex items-center justify-between border-b border-line-subtle px-5 py-4">
+						<div>
+							<p class="text-xs text-fg-muted">Today · Olaya branch</p>
+							<p class="font-semibold text-fg">Day sheet</p>
+						</div>
+						<div class="flex gap-4 text-end">
+							<div>
+								<p class="text-[11px] text-fg-muted">Booked</p>
+								<p class="text-lg font-semibold text-fg tabular-nums">24</p>
+							</div>
+							<div>
+								<p class="text-[11px] text-fg-muted">Waiting</p>
+								<p class="text-lg font-semibold text-fg tabular-nums">3</p>
+							</div>
+						</div>
+					</div>
+					<ul class="divide-y divide-line-subtle">
+						{#each sampleDay as row (row.time)}
+							<li class="flex items-center gap-4 px-5 py-3">
+								<span class="w-12 text-sm font-semibold text-accent tabular-nums">{row.time}</span>
+								<div class="min-w-0 flex-1">
+									<p class="truncate text-sm font-medium text-fg">{row.name}</p>
+									<p class="truncate text-xs text-fg-muted">{row.service}</p>
+								</div>
+								<Badge tone={row.tone} size="sm" dot>{row.status}</Badge>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			</div>
+			<div
+				class="absolute -end-4 -top-6 hidden items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-raised sm:flex"
+			>
+				<span
+					class="flex size-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+				>
+					<Icon name="chat-bubble" class="size-4" />
+				</span>
+				<div>
+					<p class="text-xs font-semibold text-fg">Confirmation sent</p>
+					<p class="text-[11px] text-fg-muted">WhatsApp · just now</p>
+				</div>
+			</div>
+		</div>
+	</Container>
+</section>
+
+<!-- Trust strip -->
+<section class="border-y border-line bg-surface-sunken">
+	<Container size="xl" class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 py-6">
+		{#each trust as item (item.label)}
+			<span class="inline-flex items-center gap-2 text-sm font-medium text-fg-muted">
+				<Icon name={item.icon} class="size-4 text-fg-subtle" />
+				{item.label}
 			</span>
-		</div>
+		{/each}
+	</Container>
+</section>
 
-
-		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-
-			{#each modules as module (module.href)}
-
-				<a
-					href={resolve(module.href)}
-					class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-800"
+<!-- Two audiences -->
+<Section>
+	<Container size="xl">
+		<SectionHeading
+			align="center"
+			eyebrow="One platform, two sides"
+			title="Built for the business and the people it serves"
+		/>
+		<div class="mt-14 grid gap-5 lg:grid-cols-2">
+			{#each audiences as side (side.eyebrow)}
+				<div
+					class="relative flex flex-col overflow-hidden rounded-panel border border-line bg-surface p-8 shadow-card sm:p-10"
 				>
-
-					<div class="flex items-start justify-between">
-
-						<div
-							class="flex size-11 items-center justify-center rounded-xl bg-slate-100 text-slate-700 transition-colors group-hover:bg-brand-50 group-hover:text-brand-600 dark:bg-slate-800 dark:text-slate-300 dark:group-hover:bg-brand-950/40 dark:group-hover:text-brand-400"
-						>
-							<Icon name={module.icon} class="size-5" />
-						</div>
-
-						<Icon
-							name="arrow-right"
-							class="size-4 text-slate-300 transition-all group-hover:translate-x-1 group-hover:text-brand-500"
-						/>
-
-					</div>
-
-					<p
-						class="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400"
+					<span
+						class="flex size-11 items-center justify-center rounded-card bg-accent-soft text-accent"
 					>
-						{module.label}
+						<Icon name={side.icon} class="size-5" />
+					</span>
+					<p class="mt-6 text-xs font-semibold tracking-wider text-fg-muted uppercase">
+						{side.eyebrow}
 					</p>
-
-					<h3
-						class="mt-1 text-lg font-bold text-slate-900 dark:text-white"
-					>
-						{module.title}
-					</h3>
-
-					<p class="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-						{module.description}
-					</p>
-
-				</a>
-
-			{/each}
-
-		</div>
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- LIVE OPERATIONS -->
-	<!-- ========================================================= -->
-
-	<section class="grid gap-6 lg:grid-cols-[1fr_320px]">
-
-		<!-- Activity stream -->
-		<Card padding="none">
-
-			<div class="flex items-center justify-between border-b border-slate-100 p-6 dark:border-slate-800">
-
-				<div>
-					<p class="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-						Live operations
-					</p>
-
-					<h2 class="mt-1 text-base font-bold text-slate-900 dark:text-white">
-						Today’s activity
-					</h2>
-				</div>
-
-				<Button
-					href={resolve('/app/bookings')}
-					variant="outline"
-					size="sm"
-				>
-					Day sheet
-				</Button>
-
-			</div>
-
-			{#if recentBookings.length > 0}
-
-				<div class="divide-y divide-slate-100 dark:divide-slate-800">
-
-					{#each recentBookings as booking (booking.id)}
-
-						<div class="flex items-center justify-between gap-4 p-5">
-
-							<div class="flex min-w-0 items-center gap-4">
-
-								<div
-									class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 font-mono text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+					<h3 class="mt-2 text-display-md font-semibold tracking-tight text-fg">{side.title}</h3>
+					<ul class="mt-6 flex flex-col gap-3">
+						{#each side.points as point (point)}
+							<li class="flex items-start gap-3 text-fg-secondary">
+								<span
+									class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
 								>
-									{booking.starts_at
-										? new Date(booking.starts_at).toLocaleTimeString('en-US', {
-												hour: '2-digit',
-												minute: '2-digit'
-											})
-										: '—'}
-								</div>
-
-								<div class="min-w-0">
-									<p class="truncate text-sm font-semibold text-slate-900 dark:text-white">
-										{booking.customer_name || 'Walk-in Guest'}
-									</p>
-
-									<p class="truncate text-xs text-slate-500">
-										{booking.service_name || 'Salon Service'}
-									</p>
-								</div>
-
-							</div>
-
-							<div class="flex shrink-0 items-center gap-3">
-
-								<span class="hidden font-mono text-xs font-semibold text-emerald-600 sm:block">
-									{booking.price
-										? formatMoney(booking.price, booking.currency, 'en')
-										: 'Deposit paid'}
+									<Icon name="check" class="size-3" />
 								</span>
-
-								<Badge
-									tone={booking.status === 'confirmed' ? 'success' : 'neutral'}
-									size="sm"
-								>
-									{booking.status}
-								</Badge>
-
-							</div>
-
-						</div>
-
-					{/each}
-
+								{point}
+							</li>
+						{/each}
+					</ul>
+					<div class="mt-8 pt-2">
+						<Button
+							variant={side.href === '/register' ? 'primary' : 'outline'}
+							href={resolve(side.href)}
+						>
+							{side.cta}
+							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+						</Button>
+					</div>
 				</div>
+			{/each}
+		</div>
+	</Container>
+</Section>
 
-			{:else}
-
-				<div class="p-10 text-center">
-					<Icon name="calendar" class="mx-auto size-8 text-slate-300" />
-
-					<p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-						No recent bookings
-					</p>
-
-					<p class="mt-1 text-xs text-slate-400">
-						New appointments will appear here.
-					</p>
-				</div>
-
-			{/if}
-
-		</Card>
-
-
-		<!-- Quick control panel -->
-		<Card padding="lg">
-
-			<p class="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-				Quick controls
-			</p>
-
-			<h2 class="mt-1 text-base font-bold text-slate-900 dark:text-white">
-				Go directly to work
-			</h2>
-
-			<div class="mt-5 space-y-2">
-
-				<a
-					href={resolve('/app/queue')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="users" class="size-4" />
-					Open queue
-				</a>
-
-				<a
-					href={resolve('/app/bookings')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="calendar" class="size-4" />
-					Today's bookings
-				</a>
-
-				<a
-					href={resolve('/app/catalog')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="sparkles" class="size-4" />
-					Service catalog
-				</a>
-
-				<a
-					href={resolve('/app/billing')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="credit-card" class="size-4" />
-					Billing
-				</a>
-
-			</div>
-
-		</Card>
-
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- ONBOARDING -->
-	<!-- ========================================================= -->
-
-	{#if !businessId}
-
-		<section
-			class="overflow-hidden rounded-2xl border border-brand-200 bg-brand-50/60 dark:border-brand-900/60 dark:bg-brand-950/30"
-		>
-
-			<div class="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
-
-				<div class="flex items-start gap-4">
-
-					<div
-						class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white"
+<!-- Features -->
+<Section tone="sunken">
+	<Container size="xl">
+		<div class="flex flex-wrap items-end justify-between gap-6">
+			<SectionHeading
+				eyebrow="What's inside"
+				title="The tools a front desk actually uses"
+				subtitle="Each piece works on its own, and better together."
+			/>
+			<Button variant="ghost" href={resolve('/features')}>
+				All features
+				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+			</Button>
+		</div>
+		<BentoGrid class="mt-12">
+			{#each features as feature (feature.title)}
+				<BentoCard span={feature.span ?? 1}>
+					<span
+						class="flex size-10 items-center justify-center rounded-control bg-accent-soft text-accent"
 					>
-						<Icon name="sparkles" class="size-5" />
-					</div>
+						<Icon name={feature.icon} class="size-5" />
+					</span>
+					<h3 class="mt-5 font-semibold text-fg">{feature.title}</h3>
+					<p class="mt-2 text-sm text-fg-muted">{feature.body}</p>
+				</BentoCard>
+			{/each}
+		</BentoGrid>
+	</Container>
+</Section>
 
-					<div>
-						<h2 class="font-bold text-slate-900 dark:text-white">
-							Complete your storefront
-						</h2>
+<!-- How it works -->
+<Section>
+	<Container size="xl">
+		<SectionHeading align="center" eyebrow="How it works" title="Live in an afternoon" />
+		<ol class="mt-14 grid gap-8 md:grid-cols-3">
+			{#each steps as item, index (item.title)}
+				<li class="relative">
+					<span
+						class="flex size-10 items-center justify-center rounded-full border border-line bg-surface text-sm font-semibold text-accent tabular-nums shadow-card"
+					>
+						{index + 1}
+					</span>
+					{#if index < steps.length - 1}
+						<span
+							class="absolute start-14 top-5 hidden h-px w-[calc(100%-3.5rem)] bg-line md:block"
+							aria-hidden="true"
+						></span>
+					{/if}
+					<h3 class="mt-5 font-semibold text-fg">{item.title}</h3>
+					<p class="mt-2 text-sm text-fg-muted">{item.body}</p>
+				</li>
+			{/each}
+		</ol>
+	</Container>
+</Section>
 
-						<p class="mt-1 max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-400">
-							Set up your primary location, services and staff before
-							accepting online bookings.
-						</p>
-					</div>
-
-				</div>
-
-				<Button href={resolve('/app/catalog')} size="sm">
-					Complete setup
-				</Button>
-
-			</div>
-
-		</section>
-
-	{/if}
-
-</div>
+<!-- CTA -->
+<Section
+	tone="dark"
+	padding="tight"
+	class="mx-4 mb-16 rounded-panel sm:mx-6 lg:mx-auto lg:max-w-7xl"
+>
+	<GradientBlob variant="corner" />
+	<Container size="lg" class="relative py-8 text-center sm:py-12">
+		<h2 class="text-display-lg font-semibold tracking-tight text-white">
+			Your next customer is already looking.
+		</h2>
+		<p class="mx-auto mt-4 max-w-xl text-body-lg text-white/80">
+			Give them a faster way to find you, book and stay connected.
+		</p>
+		<div class="mt-8 flex flex-wrap justify-center gap-3">
+			<Button size="lg" variant="inverse" href={resolve('/register')}>Start free trial</Button>
+			<Button size="lg" variant="outline-inverse" href={resolve('/pricing')}>See pricing</Button>
+		</div>
+	</Container>
+</Section>

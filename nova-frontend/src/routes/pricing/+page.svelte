@@ -1,4 +1,3 @@
-
 <script>
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -69,6 +68,14 @@
 			a: 'No. Creating your storefront, services and providers is self-serve and included with every plan.'
 		}
 	];
+
+	/** @type {{ icon: import('$lib/components/ui/Icon.svelte').IconName, title: string, body: string }[]} */
+	const included = [
+		{ icon: 'calendar', title: 'Bookings', body: 'Appointments and real-time availability.' },
+		{ icon: 'users', title: 'Queue', body: 'Walk-ins and appointments in one line.' },
+		{ icon: 'chat-bubble', title: 'WhatsApp', body: 'Confirmations and reminders built in.' },
+		{ icon: 'credit-card', title: 'Payments', body: 'Deposits through your payment provider.' }
+	];
 </script>
 
 <svelte:head>
@@ -83,37 +90,31 @@
 <!-- HERO -->
 <!-- ========================================================= -->
 
-<Section
-	tone="canvas"
-	padding="tight"
-	class="relative overflow-hidden pt-8 pb-14 sm:pt-14 sm:pb-20"
->
+<Section tone="canvas" padding="tight" class="pt-16 sm:pt-24">
 	<GradientBlob variant="hero" />
 
 	<Container size="xl">
 		<div class="mx-auto max-w-4xl text-center">
-			<div
-				class="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/90 dark:text-slate-300"
-			>
-				<span class="size-2 rounded-full bg-emerald-500"></span>
-				<span>Simple monthly pricing</span>
-			</div>
-
-			<h1
-				class="mt-6 text-display-xl font-extrabold tracking-tight text-slate-900 sm:text-display-2xl dark:text-slate-100"
-			>
-				Choose the plan that fits
-				<span class="text-brand-600 dark:text-brand-400">your business.</span>
-			</h1>
-
 			<p
-				class="mx-auto mt-5 max-w-2xl text-body-lg text-slate-600 sm:text-xl dark:text-slate-400"
+				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
-				Every plan includes the core NOVA operating system. Start small and expand
-				as your team and locations grow.
+				<span class="size-1.5 rounded-full bg-brand-500"></span>
+				Simple monthly pricing
 			</p>
 
-			<div class="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+			<h1 class="mt-6 text-display-2xl font-semibold tracking-tight text-fg">
+				Choose the plan that fits
+				<span class="text-accent">your business.</span>
+			</h1>
+
+			<p class="mx-auto mt-6 max-w-2xl text-body-lg text-fg-muted">
+				Every plan includes the core NOVA operating system. Start small and expand as your team and
+				locations grow.
+			</p>
+
+			<div
+				class="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm font-medium text-fg-muted"
+			>
 				<span class="flex items-center gap-1.5">
 					<Icon name="check" class="size-3.5 text-emerald-500" />
 					Billed monthly in SAR
@@ -137,16 +138,16 @@
 <!-- PRICING -->
 <!-- ========================================================= -->
 
-<Section tone="canvas" padding="none" class="pb-20 sm:pb-28">
+<Section tone="canvas" padding="none" class="pt-6 pb-20 sm:pb-28">
 	<Container size="xl">
 		<div class="grid items-stretch gap-5 lg:grid-cols-3">
 			{#each tiers as tier, i (tier.name)}
 				<div
 					class={[
-						'relative flex flex-col rounded-3xl border bg-white p-6 shadow-sm transition-all duration-200 sm:p-7 dark:bg-slate-900',
+						'duration-base relative flex flex-col rounded-panel border bg-surface p-6 transition-[border-color,box-shadow] ease-out-premium sm:p-8',
 						tier.featured
-							? 'border-brand-300 shadow-lg shadow-brand-500/10 ring-2 ring-brand-500/20 dark:border-brand-700 dark:bg-slate-900'
-							: 'border-slate-200 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:hover:border-slate-700'
+							? 'border-brand-300 shadow-raised ring-4 ring-brand-500/10 dark:border-brand-500/40'
+							: 'border-line shadow-card hover:border-line-strong hover:shadow-raised'
 					].join(' ')}
 				>
 					<!-- Featured badge -->
@@ -160,21 +161,19 @@
 					<div>
 						<div class="flex items-start justify-between gap-4">
 							<div>
-								<p class="text-xs font-bold tracking-wider text-brand-600 uppercase dark:text-brand-400">
+								<p class="text-xs font-semibold tracking-wider text-accent uppercase">
 									{String(i + 1).padStart(2, '0')}
 								</p>
 
-								<h2 class="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+								<h2 class="mt-2 text-2xl font-semibold tracking-tight text-fg">
 									{tier.name}
 								</h2>
 							</div>
 
 							<div
 								class={[
-									'flex size-10 items-center justify-center rounded-xl',
-									tier.featured
-										? 'bg-brand-50 text-brand-600 dark:bg-brand-950/50 dark:text-brand-400'
-										: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+									'flex size-10 items-center justify-center rounded-control',
+									tier.featured ? 'bg-accent-soft text-accent' : 'bg-surface-muted text-fg-muted'
 								].join(' ')}
 							>
 								<Icon
@@ -188,33 +187,29 @@
 							</div>
 						</div>
 
-						<p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+						<p class="mt-2 text-sm text-fg-muted">
 							{tier.label}
 						</p>
 					</div>
 
 					<!-- Price -->
-					<div class="mt-7 border-y border-slate-100 py-6 dark:border-slate-800">
+					<div class="mt-7 border-y border-line-subtle py-6">
 						<div class="flex items-end gap-1">
-							<span
-								class="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100"
-							>
+							<span class="text-4xl font-semibold tracking-tight text-fg tabular-nums">
 								{tier.priceMonthly}
 							</span>
 
-							<span class="mb-1.5 text-sm font-medium text-slate-500 dark:text-slate-400">
-								SAR / month
-							</span>
+							<span class="mb-1.5 text-sm font-medium text-fg-muted"> SAR / month </span>
 						</div>
 
-						<p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+						<p class="mt-2 text-xs text-fg-muted">
 							{tier.description}
 						</p>
 					</div>
 
 					<!-- Features -->
 					<div class="flex-1">
-						<p class="mt-6 text-[10px] font-bold tracking-[0.16em] text-slate-400 uppercase">
+						<p class="mt-6 text-xs font-semibold tracking-wider text-fg-subtle uppercase">
 							Includes
 						</p>
 
@@ -222,12 +217,12 @@
 							{#each tier.features as feature (feature)}
 								<li class="flex items-start gap-3">
 									<span
-										class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 dark:bg-brand-950/50 dark:text-brand-400"
+										class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
 									>
 										<Icon name="check" class="size-3" />
 									</span>
 
-									<span class="text-sm text-slate-700 dark:text-slate-300">
+									<span class="text-sm text-fg-secondary">
 										{feature}
 									</span>
 								</li>
@@ -252,13 +247,13 @@
 
 		<!-- Pricing note -->
 		<div
-			class="mx-auto mt-8 flex max-w-3xl items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60"
+			class="mx-auto mt-8 flex max-w-3xl items-start gap-3 rounded-card border border-line bg-surface-sunken p-4"
 		>
-			<Icon name="info" class="mt-0.5 size-4 shrink-0 text-slate-400" />
+			<Icon name="info" class="mt-0.5 size-4 text-fg-subtle" />
 
-			<p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-				These are illustrative marketing prices. Subscription and billing data is
-				managed separately inside the authenticated product and may change before launch.
+			<p class="text-xs leading-relaxed text-fg-muted">
+				These are illustrative marketing prices. Subscription and billing data is managed separately
+				inside the authenticated product and may change before launch.
 			</p>
 		</div>
 	</Container>
@@ -268,10 +263,7 @@
 <!-- WHAT'S INCLUDED -->
 <!-- ========================================================= -->
 
-<Section
-	tone="sunken"
-	class="border-y border-slate-200 py-16 sm:py-24 dark:border-slate-800"
->
+<Section tone="sunken" class="border-y border-line">
 	<Container size="xl">
 		<SectionHeading
 			align="center"
@@ -281,42 +273,19 @@
 		/>
 
 		<div class="mx-auto mt-12 grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
-			{#each [
-				{
-					icon: 'calendar',
-					title: 'Bookings',
-					body: 'Appointments and real-time availability.'
-				},
-				{
-					icon: 'users',
-					title: 'Queue',
-					body: 'Walk-ins and appointments in one line.'
-				},
-				{
-					icon: 'chat-bubble',
-					title: 'WhatsApp',
-					body: 'Confirmations and reminders built in.'
-				},
-				{
-					icon: 'credit-card',
-					title: 'Payments',
-					body: 'Deposits through your payment provider.'
-				}
-			] as item (item.title)}
-				<div
-					class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
-				>
+			{#each included as item (item.title)}
+				<div class="rounded-card border border-line bg-surface p-5 shadow-card">
 					<div
-						class="flex size-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-950/50 dark:text-brand-400"
+						class="flex size-10 items-center justify-center rounded-control bg-accent-soft text-accent"
 					>
 						<Icon name={item.icon} class="size-5" />
 					</div>
 
-					<h3 class="mt-4 text-sm font-bold text-slate-900 dark:text-slate-100">
+					<h3 class="mt-4 text-sm font-semibold text-fg">
 						{item.title}
 					</h3>
 
-					<p class="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+					<p class="mt-1.5 text-sm leading-relaxed text-fg-muted">
 						{item.body}
 					</p>
 				</div>
@@ -329,7 +298,7 @@
 <!-- FAQ -->
 <!-- ========================================================= -->
 
-<Section tone="canvas" class="py-16 sm:py-24">
+<Section tone="canvas">
 	<Container size="md">
 		<SectionHeading
 			align="center"
@@ -339,24 +308,24 @@
 		/>
 
 		<div class="mt-10 space-y-3">
-			{#each faqs as item, i (item.q)}
+			{#each faqs as item (item.q)}
 				<details
-					class="group overflow-hidden rounded-2xl border border-slate-200 bg-white transition-shadow open:shadow-sm dark:border-slate-800 dark:bg-slate-900"
+					class="group overflow-hidden rounded-card border border-line bg-surface shadow-card transition-shadow open:shadow-raised"
 				>
 					<summary
-						class="flex cursor-pointer list-none items-center justify-between gap-5 px-5 py-5 text-sm font-semibold text-slate-900 marker:content-none dark:text-slate-100"
+						class="flex cursor-pointer list-none items-center justify-between gap-5 rounded-card px-5 py-4 text-[15px] font-semibold text-fg focus-ring marker:content-none [&::-webkit-details-marker]:hidden"
 					>
 						<span>{item.q}</span>
 
 						<span
-							class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition-transform duration-200 group-open:rotate-45 dark:bg-slate-800 dark:text-slate-400"
+							class="flex size-7 shrink-0 items-center justify-center rounded-control bg-surface-muted text-fg-muted transition-transform duration-200 group-open:rotate-45"
 						>
 							<Icon name="plus" class="size-4" />
 						</span>
 					</summary>
 
-					<div class="border-t border-slate-100 px-5 pb-5 pt-4 dark:border-slate-800">
-						<p class="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+					<div class="border-t border-line-subtle px-5 pt-4 pb-5">
+						<p class="text-sm leading-relaxed text-fg-muted">
 							{item.a}
 						</p>
 					</div>
@@ -370,19 +339,18 @@
 <!-- CTA -->
 <!-- ========================================================= -->
 
-<Section tone="dark" class="py-16 sm:py-24">
-	<Container size="md" class="text-center">
-		<div
-			class="mx-auto flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06]"
-		>
-			<Icon name="sparkles" class="size-5 text-brand-400" />
-		</div>
-
-		<h2 class="mt-6 text-display-lg font-bold tracking-tight text-white">
+<Section
+	tone="dark"
+	padding="tight"
+	class="mx-4 my-16 rounded-panel sm:mx-6 lg:mx-auto lg:max-w-7xl"
+>
+	<GradientBlob variant="corner" />
+	<Container size="md" class="relative py-8 text-center sm:py-12">
+		<h2 class="text-display-lg font-semibold tracking-tight text-white">
 			Ready to run your business on NOVA?
 		</h2>
 
-		<p class="mt-4 text-body-lg text-white/70">
+		<p class="mt-4 text-body-lg text-white/80">
 			Start with the plan that fits today. Move up when your business grows.
 		</p>
 

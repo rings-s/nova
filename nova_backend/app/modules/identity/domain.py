@@ -91,24 +91,31 @@ class StaffPermission(StrEnum):
     #: The analytics dashboards, revenue by provider among them, and the analyst
     #: and business manager agents.
     VIEW_ANALYTICS = "view_analytics"
+    #: What the salon sells and where: services and their prices, branches and
+    #: their map pins, providers and what they are qualified for, and whether
+    #: the business is listed on the marketplace at all. Providers' working
+    #: hours are deliberately not here — keeping the rota is front-desk work.
+    MANAGE_CATALOG = "manage_catalog"
 
 
 #: Which role holds which permission, in one table so a salon's policy can be
 #: read, and changed, in one place.
 _ROLE_PERMISSIONS: dict[MembershipRole, frozenset[StaffPermission]] = {
     MembershipRole.OWNER: frozenset(StaffPermission),
-    # Runs the salon day to day: refunds a customer and reads the numbers, but
-    # does not decide what the business pays NOVA.
+    # Runs the salon day to day: refunds a customer, reads the numbers, and
+    # keeps the menu and prices current, but does not decide what the business
+    # pays NOVA.
     MembershipRole.MANAGER: frozenset(
         {
             StaffPermission.REFUND_PAYMENTS,
             StaffPermission.VIEW_FINANCIALS,
             StaffPermission.VIEW_ANALYTICS,
+            StaffPermission.MANAGE_CATALOG,
         }
     ),
     # The front desk and the chair: the calendar and the queue, and nothing that
-    # moves or reveals money. A stylist has no business reading a colleague's
-    # takings.
+    # moves or reveals money or changes what the salon sells. A stylist has no
+    # business reading a colleague's takings, or repricing the menu.
     MembershipRole.RECEPTIONIST: frozenset(),
     MembershipRole.PROVIDER: frozenset(),
 }
@@ -141,3 +148,23 @@ __all__ = [
     "validate_gcc_phone",
     "validate_timezone",
 ]
+
+
+def permissions_for(
+    role: MembershipRole | None, *, actor_is_service: bool = False
+) -> frozenset[StaffPermission]:
+    """Everything `role` unlocks in one tenant — what a client needs in order to
+    show only the screens and controls the caller can use. The server still
+    checks every request (`role_allows`); this only saves them a 403."""
+    return frozenset(
+        p for p in StaffPermission if role_allows(role, p, actor_is_service=actor_is_service)
+    )
+
+
+def manageable_roles(
+    role: MembershipRole | None, *, actor_is_service: bool = False
+) -> frozenset[MembershipRole]:
+    """The roles `role` may grant, change, or revoke (see `may_manage_role`)."""
+    return frozenset(
+        r for r in MembershipRole if may_manage_role(role, r, actor_is_service=actor_is_service)
+    )

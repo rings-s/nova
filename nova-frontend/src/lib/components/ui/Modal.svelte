@@ -1,14 +1,28 @@
 <script>
+	import { iconButton } from './styles.js';
+
 	/**
 	 * @type {{
 	 *   open?: boolean,
 	 *   title?: string|null,
+	 *   description?: string|null,
+	 *   size?: 'sm'|'md'|'lg',
 	 *   onclose?: () => void,
 	 *   children?: import('svelte').Snippet,
 	 *   footer?: import('svelte').Snippet
 	 * }}
 	 */
-	let { open = $bindable(false), title = null, onclose, children, footer } = $props();
+	let {
+		open = $bindable(false),
+		title = null,
+		description = null,
+		size = 'md',
+		onclose,
+		children,
+		footer
+	} = $props();
+
+	const sizeClasses = { sm: 'sm:max-w-sm', md: 'sm:max-w-lg', lg: 'sm:max-w-2xl' };
 
 	function close() {
 		open = false;
@@ -19,27 +33,42 @@
 	function handleKeydown(event) {
 		if (event.key === 'Escape') close();
 	}
+
+	// Lock page scroll while open so the backdrop doesn't scroll underneath.
+	$effect(() => {
+		if (!open) return;
+		const previous = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.body.style.overflow = previous;
+		};
+	});
 </script>
 
 <svelte:window onkeydown={open ? handleKeydown : undefined} />
 
 {#if open}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-		<div class="absolute inset-0 bg-slate-950/50" onclick={close} role="presentation"></div>
+	<div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
+		<div
+			class="absolute inset-0 animate-fade-in bg-slate-950/40 backdrop-blur-[2px] dark:bg-slate-950/70"
+			onclick={close}
+			role="presentation"
+		></div>
 		<div
 			role="dialog"
 			aria-modal="true"
 			aria-label={title ?? undefined}
-			class="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-slate-900"
+			class={`relative z-10 flex max-h-[92dvh] w-full animate-scale-in flex-col rounded-t-panel border border-line bg-surface shadow-overlay sm:rounded-panel ${sizeClasses[size]}`}
 		>
-			<div
-				class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800"
-			>
-				<h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
+			<div class="flex items-start justify-between gap-4 px-6 pt-5 pb-4">
+				<div class="min-w-0">
+					<h2 class="text-lg font-semibold tracking-tight text-fg">{title}</h2>
+					{#if description}<p class="mt-1 text-sm text-fg-muted">{description}</p>{/if}
+				</div>
 				<button
 					type="button"
 					onclick={close}
-					class="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+					class={`${iconButton} -me-2 size-8`}
 					aria-label="Close"
 				>
 					<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -49,12 +78,12 @@
 					</svg>
 				</button>
 			</div>
-			<div class="max-h-[70vh] overflow-y-auto px-5 py-4">
+			<div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
 				{@render children?.()}
 			</div>
 			{#if footer}
 				<div
-					class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800"
+					class="flex flex-col-reverse gap-2 rounded-b-panel border-t border-line bg-surface-sunken px-6 py-4 sm:flex-row sm:justify-end"
 				>
 					{@render footer()}
 				</div>

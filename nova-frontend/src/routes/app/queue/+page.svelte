@@ -34,6 +34,8 @@
 		checkInWithTicket
 	} from '$lib/api/queue.js';
 
+	import Icon from '$lib/components/ui/Icon.svelte';
+	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Select from '$lib/components/ui/Select.svelte';
@@ -57,6 +59,17 @@
 		completed: 'success',
 		missed: 'warning',
 		cancelled: 'neutral'
+	};
+
+	/** @type {Record<string, string>} */
+	const STATUS_LABEL = {
+		waiting: 'Waiting',
+		called: 'Called',
+		checked_in: 'Checked in',
+		in_service: 'In service',
+		completed: 'Completed',
+		missed: 'Missed',
+		cancelled: 'Cancelled'
 	};
 
 	let locations = $state(/** @type {import('$lib/api/catalog.js').Location[]} */ ([]));
@@ -153,6 +166,11 @@
 	// --- The live line ------------------------------------------------------------
 
 	let entries = $state(/** @type {import('$lib/api/queue.js').QueueEntry[]} */ ([]));
+	let counts = $derived({
+		waiting: entries.filter((e) => e.status === 'waiting').length,
+		called: entries.filter((e) => e.status === 'called' || e.status === 'checked_in').length,
+		serving: entries.filter((e) => e.status === 'in_service').length
+	});
 	let loadingEntries = $state(false);
 	let entriesErrorMessage = $state(/** @type {string|null} */ (null));
 
@@ -342,7 +360,7 @@
 
 <svelte:head><title>Queue — NOVA</title></svelte:head>
 
-<PageHeader title="Queue" subtitle="Today's walk-in line." />
+<PageHeader eyebrow="Operate" title="Walk-in queue" subtitle="Today's walk-in line." />
 
 {#if !businessId}
 	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
@@ -353,33 +371,21 @@
 {:else if locations.length === 0}
 	<EmptyState title="Add a location first" description="A queue belongs to one branch." />
 {:else}
-	<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-		<div class="flex flex-wrap items-end gap-3">
-			<div class="w-full max-w-xs">
-				<Select
-					label="Location"
-					bind:value={selectedLocationId}
-					options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name', 'en') }))}
-				/>
-			</div>
-			{#if queues.length > 0}
-				<div class="w-full max-w-xs">
-					<Select
-						label="Queue"
-						bind:value={selectedQueueId}
-						options={queues.map((q) => ({ value: q.id, label: pickBilingual(q, 'name', 'en') }))}
-					/>
-				</div>
-			{/if}
+	<div class="mb-6 flex flex-wrap items-end gap-3">
+		<div class="w-full sm:w-56">
+			<Select
+				label="Location"
+				bind:value={selectedLocationId}
+				options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name', 'en') }))}
+			/>
 		</div>
-		{#if selectedQueue}
-			<div class="flex items-center gap-2">
-				<Badge tone={selectedQueue.is_open ? 'success' : 'neutral'}>
-					{selectedQueue.is_open ? 'Open' : 'Closed'}
-				</Badge>
-				<Button size="sm" variant="outline" loading={togglingOpen} onclick={toggleOpen}>
-					{selectedQueue.is_open ? 'Close queue' : 'Open queue'}
-				</Button>
+		{#if queues.length > 1}
+			<div class="w-full sm:w-56">
+				<Select
+					label="Queue"
+					bind:value={selectedQueueId}
+					options={queues.map((q) => ({ value: q.id, label: pickBilingual(q, 'name', 'en') }))}
+				/>
 			</div>
 		{/if}
 	</div>
@@ -387,49 +393,129 @@
 	{#if loadingQueues}
 		<div class="flex justify-center py-8"><Spinner /></div>
 	{:else if queues.length === 0}
-		<EmptyState title="No queue at this location yet">
+		<EmptyState
+			title="No queue at this location yet"
+			description="Create one to start taking walk-ins and issuing tickets."
+		>
+			{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
 			{#snippet action()}
-				<Button loading={creatingQueue} onclick={handleCreateQueue}>Create queue</Button>
+				<Button loading={creatingQueue} onclick={handleCreateQueue}>
+					<Icon name="plus" class="size-4" />
+					Create queue
+				</Button>
 			{/snippet}
 		</EmptyState>
 	{:else}
-		<div class="mb-4 flex justify-between gap-2">
-			<Button loading={callingNext} disabled={!selectedQueue?.is_open} onclick={handleCallNext}>
-				Call next
-			</Button>
-			<Button variant="outline" disabled={services.length === 0} onclick={openAddModal}>
-				Add walk-in
-			</Button>
-		</div>
+		<!-- Control panel: queue state, live counts, and the two front-desk actions. -->
+		<Card padding="none" class="mb-6 overflow-hidden">
+			<div class="flex flex-wrap items-center justify-between gap-4 p-5">
+				<div class="flex items-center gap-3">
+					<span class="relative flex size-3">
+						{#if selectedQueue?.is_open}
+							<span
+								class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60"
+							></span>
+						{/if}
+						<span
+							class={`relative inline-flex size-3 rounded-full ${selectedQueue?.is_open ? 'bg-emerald-500' : 'bg-fg-subtle'}`}
+						></span>
+					</span>
+					<div>
+						<p class="font-semibold text-fg">
+							{selectedQueue ? pickBilingual(selectedQueue, 'name', 'en') : 'Queue'}
+						</p>
+						<p class="text-xs text-fg-muted">
+							{selectedQueue?.is_open
+								? 'Open — accepting walk-ins'
+								: 'Closed — not accepting walk-ins'}
+						</p>
+					</div>
+				</div>
+				<div class="flex flex-wrap gap-2">
+					{#if selectedQueue}
+						<Button size="sm" variant="ghost" loading={togglingOpen} onclick={toggleOpen}>
+							{selectedQueue.is_open ? 'Close queue' : 'Open queue'}
+						</Button>
+					{/if}
+					<Button
+						size="sm"
+						variant="outline"
+						disabled={services.length === 0}
+						onclick={openAddModal}
+					>
+						<Icon name="plus" class="size-4" />
+						Add walk-in
+					</Button>
+					<Button
+						size="sm"
+						loading={callingNext}
+						disabled={!selectedQueue?.is_open}
+						onclick={handleCallNext}
+					>
+						Call next
+						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+					</Button>
+				</div>
+			</div>
+			<dl
+				class="grid grid-cols-3 divide-x divide-line border-t border-line bg-surface-sunken rtl:divide-x-reverse"
+			>
+				{#each [{ label: 'Waiting', value: counts.waiting }, { label: 'Called', value: counts.called }, { label: 'In service', value: counts.serving }] as stat (stat.label)}
+					<div class="px-5 py-3">
+						<dt class="text-xs text-fg-muted">{stat.label}</dt>
+						<dd class="text-xl font-semibold text-fg tabular-nums">
+							{loadingEntries ? '—' : stat.value}
+						</dd>
+					</div>
+				{/each}
+			</dl>
+		</Card>
 
 		{#if loadingEntries}
 			<div class="flex justify-center py-8"><Spinner /></div>
 		{:else if entriesErrorMessage}
 			<Alert tone="error">{entriesErrorMessage}</Alert>
 		{:else if entries.length === 0}
-			<EmptyState title="The line is empty" />
+			<EmptyState
+				title="The line is empty"
+				description="Walk-ins you add, or who join online, appear here."
+			>
+				{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
+			</EmptyState>
 		{:else}
 			<Card padding="none">
-				<div class="divide-y divide-slate-100 dark:divide-slate-800">
+				<ul class="divide-y divide-line-subtle">
 					{#each entries as entry (entry.id)}
-						<div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-							<div class="min-w-0">
-								<div class="flex items-center gap-2">
-									<span class="text-sm font-medium text-slate-900 dark:text-slate-100">
-										{entry.place_in_line ? `#${entry.place_in_line}` : `Position ${entry.position}`}
-									</span>
-									<Badge tone={STATUS_TONE[entry.status] ?? 'neutral'}>{entry.status}</Badge>
-									{#if entry.party_size > 1}
-										<span class="text-xs text-slate-500 dark:text-slate-400"
-											>Party of {entry.party_size}</span
-										>
-									{/if}
-								</div>
-								{#if entry.joined_at}
-									<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-										Joined {formatRelative(entry.joined_at, 'en')}
+						{@const active = ['called', 'checked_in', 'in_service'].includes(entry.status)}
+						<li
+							class={`flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5 ${active ? 'bg-accent-soft/50' : ''}`}
+						>
+							<div class="flex min-w-0 items-center gap-4">
+								<span
+									class={`flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums ${active ? 'bg-brand-600 text-white shadow-glow' : 'bg-surface-muted text-fg'}`}
+								>
+									{entry.place_in_line ?? entry.position}
+								</span>
+								<div class="min-w-0">
+									<div class="flex flex-wrap items-center gap-2">
+										<span class="text-sm font-semibold text-fg">
+											{entry.place_in_line
+												? `#${entry.place_in_line} in line`
+												: `Position ${entry.position}`}
+										</span>
+										<Badge tone={STATUS_TONE[entry.status] ?? 'neutral'} size="sm" dot>
+											{STATUS_LABEL[entry.status] ?? entry.status}
+										</Badge>
+									</div>
+									<p class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-muted">
+										{#if entry.joined_at}
+											<span>Joined {formatRelative(entry.joined_at, 'en')}</span>
+										{/if}
+										{#if entry.party_size > 1}
+											<span>Party of {entry.party_size}</span>
+										{/if}
 									</p>
-								{/if}
+								</div>
 							</div>
 							<div class="flex flex-wrap items-center gap-2">
 								{#if entry.status === 'called'}
@@ -442,7 +528,7 @@
 											Check in
 										</Button>
 									{:else}
-										<span class="text-xs text-slate-400">Scan their ticket to check in</span>
+										<span class="text-xs text-fg-subtle">Scan their ticket to check in</span>
 									{/if}
 									<Button
 										size="sm"
@@ -486,7 +572,7 @@
 								{#if entry.status === 'waiting' || entry.status === 'called'}
 									<Button
 										size="sm"
-										variant="danger"
+										variant="danger-ghost"
 										loading={actingId === entry.id}
 										onclick={() =>
 											runEntryAction(entry.id, () => cancelQueueEntry(tenantId, entry.id))}
@@ -495,9 +581,9 @@
 									</Button>
 								{/if}
 							</div>
-						</div>
+						</li>
 					{/each}
-				</div>
+				</ul>
 			</Card>
 		{/if}
 	{/if}
@@ -524,21 +610,21 @@
 					{#each customerResults as customer (customer.id)}
 						<button
 							type="button"
-							class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50"
+							class="flex items-center gap-3 rounded-control border border-line bg-surface px-3 py-2.5 text-start text-sm focus-ring transition-colors hover:border-line-strong hover:bg-surface-sunken"
 							onclick={() => pickCustomer(customer)}
 						>
-							<span class="font-medium text-slate-900 dark:text-slate-100"
-								>{customer.full_name}</span
-							>
-							<span class="text-slate-500 dark:text-slate-400"> · {customer.phone}</span>
+							<Avatar name={customer.full_name} size="sm" />
+							<span class="min-w-0 flex-1">
+								<span class="block font-medium text-fg">{customer.full_name}</span>
+								<span class="block text-xs text-fg-muted">{customer.phone}</span>
+							</span>
+							<Icon name="chevron-right" class="size-4 text-fg-subtle rtl:rotate-180" />
 						</button>
 					{/each}
 				</div>
 			{/if}
-			<div class="border-t border-slate-200 pt-3 dark:border-slate-800">
-				<p class="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-					Or add a new customer
-				</p>
+			<div class="mt-2 border-t border-line pt-4">
+				<p class="mb-3 text-sm font-semibold text-fg">Or add a new customer</p>
 				<form class="flex flex-col gap-3" onsubmit={handleCreateCustomer}>
 					<Input label="Full name" required bind:value={newCustomerForm.fullName} />
 					<Input type="tel" label="Phone" required bind:value={newCustomerForm.phone} />
@@ -550,11 +636,11 @@
 		</div>
 	{:else if selectedCustomer}
 		<form class="flex flex-col gap-4" onsubmit={handleJoin}>
-			<p class="text-sm text-slate-600 dark:text-slate-300">
+			<p class="text-sm text-fg-secondary">
 				Adding <strong>{selectedCustomer.full_name}</strong> to the line.
 				<button
 					type="button"
-					class="text-brand-600 hover:underline dark:text-brand-400"
+					class="text-accent hover:underline"
 					onclick={() => (addStep = 'customer')}
 				>
 					Change

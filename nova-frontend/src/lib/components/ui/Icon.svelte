@@ -1,6 +1,6 @@
 <script module>
 	/**
-	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'} IconName
+	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'|'log-out'|'home'|'inbox'|'plus'|'chevron-down'|'receipt'|'settings'|'layers'|'arrow-up-right'|'user'|'panel-left'|'info'} IconName
 	 */
 
 	/**
@@ -46,7 +46,23 @@
 			'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
 		sun: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12h2.5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/>',
 		moon: '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>',
-		menu: '<path d="M4 6h16M4 12h16M4 18h16"/>'
+		menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+		'log-out':
+			'<path d="M14.5 4.5h3a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-3M10 16.5 5.5 12 10 7.5M5.5 12h10"/>',
+		home: '<path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15v-6H9v6H5.5A1.5 1.5 0 0 1 4 19z"/>',
+		inbox:
+			'<path d="M3.5 13.5h4.3l1.4 2.5h5.6l1.4-2.5h4.3M5.2 6.2 3.5 13.5v4A2.5 2.5 0 0 0 6 20h12a2.5 2.5 0 0 0 2.5-2.5v-4l-1.7-7.3A2.5 2.5 0 0 0 16.4 4H7.6a2.5 2.5 0 0 0-2.4 2.2z"/>',
+		plus: '<path d="M12 5v14M5 12h14"/>',
+		'chevron-down': '<path d="M6 9.5l6 6 6-6"/>',
+		receipt:
+			'<path d="M6 3.5h12v17l-2.5-1.5-2 1.5-1.5-1.5-1.5 1.5-2-1.5L6 20.5z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>',
+		settings:
+			'<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.07-.4.1-.8.1-1.2z"/>',
+		layers: '<path d="M12 3.5 21 8l-9 4.5L3 8z"/><path d="m3 12 9 4.5 9-4.5M3 16l9 4.5 9-4.5"/>',
+		'arrow-up-right': '<path d="M7 17 17 7M8.5 7H17v8.5"/>',
+		user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>',
+		info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8v.2"/>',
+		'panel-left': '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M9.5 4v16"/>'
 	};
 
 	/** @type {(keyof typeof ICONS)[]} */
@@ -55,8 +71,8 @@
 
 <script>
 	/**
-	 * A small stroked icon set for marketing content (feature lists, bento
-	 * cards, pricing bullets). Deliberately distinct from the tiny filled
+	 * The app's one stroked icon set: navigation, content (feature lists, bento
+	 * cards, pricing bullets) and inline action icons. Deliberately distinct from the tiny filled
 	 * chrome icons hand-inlined in Alert/Modal/ToastContainer — those are
 	 * UI-chrome glyphs, not content icons, and stay as they are.
 	 *
@@ -73,7 +89,7 @@
 	stroke-linecap="round"
 	stroke-linejoin="round"
 	aria-hidden="true"
-	class={className}
+	class={`shrink-0 ${className}`}
 >
 	<!-- ICONS is a hardcoded module-level constant above, never user input. -->
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -->

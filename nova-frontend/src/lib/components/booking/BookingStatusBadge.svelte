@@ -19,4 +19,4 @@
 	let entry = $derived(map[status] ?? { tone: 'neutral', label: status });
 </script>
 
-<Badge tone={entry.tone}>{entry.label}</Badge>
+<Badge tone={entry.tone} dot>{entry.label}</Badge>

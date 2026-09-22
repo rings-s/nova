@@ -1,4 +1,6 @@
 <script>
+	import { fieldBase, fieldBorder, fieldLabel, fieldHint, fieldError } from './styles.js';
+
 	/**
 	 * @type {{
 	 *   value?: string|number|null,
@@ -31,11 +33,11 @@
 	let selectId = $derived(id ?? `select-${Math.random().toString(36).slice(2, 9)}`);
 </script>
 
-<div class="flex flex-col gap-1">
+<div class="flex flex-col gap-1.5">
 	{#if label}
-		<label for={selectId} class="text-sm font-medium text-slate-700 dark:text-slate-200">
+		<label for={selectId} class={fieldLabel}>
 			{label}
-			{#if required}<span class="text-brand-600">*</span>{/if}
+			{#if required}<span class="text-brand-600" aria-hidden="true">*</span>{/if}
 		</label>
 	{/if}
 	<select
@@ -43,16 +45,7 @@
 		{required}
 		{disabled}
 		bind:value
-		class={[
-			'rounded-lg border px-3 py-2 text-sm shadow-sm transition-colors',
-			'bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100',
-			'focus:outline-2 focus:outline-offset-1',
-			'disabled:cursor-not-allowed disabled:opacity-50',
-			error
-				? 'border-red-400 focus:outline-red-500'
-				: 'border-slate-300 focus:outline-brand-500 dark:border-slate-700',
-			className
-		].join(' ')}
+		class={[fieldBase, 'h-10 pe-9', fieldBorder(Boolean(error)), className].join(' ')}
 		aria-invalid={Boolean(error)}
 		{...rest}
 	>
@@ -64,8 +57,8 @@
 		{/each}
 	</select>
 	{#if error}
-		<p class="text-sm text-red-600">{error}</p>
+		<p class={fieldError}>{error}</p>
 	{:else if hint}
-		<p class="text-sm text-slate-500 dark:text-slate-400">{hint}</p>
+		<p class={fieldHint}>{hint}</p>
 	{/if}
 </div>

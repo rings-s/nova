@@ -21,7 +21,7 @@
 <div class="flex flex-col gap-4">
 	{#if bar}
 		<div>
-			<p class="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">{bar.label}</p>
+			<p class="mb-1 text-xs font-medium text-fg-muted">{bar.label}</p>
 			<BarChart
 				data={bar.data}
 				x="category"
@@ -33,7 +33,7 @@
 	{/if}
 	{#if line}
 		<div>
-			<p class="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">{line.label}</p>
+			<p class="mb-1 text-xs font-medium text-fg-muted">{line.label}</p>
 			<LineChart
 				data={line.data}
 				x="category"

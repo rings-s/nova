@@ -2,21 +2,6 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<script>
-			// Sets the `.dark` class before first paint, so there's no flash of
-			// the wrong theme. Mirrors `$lib/stores/theme.svelte.js`'s resolution
-			// order (stored choice, else OS preference) — kept in plain JS here
-			// since it must run before any module script loads.
-			(function () {
-				try {
-					var stored = localStorage.getItem('nova.theme');
-					var dark =
-						stored === 'dark' ||
-						(stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-					if (dark) document.documentElement.classList.add('dark');
-				} catch (e) {}
-			})();
-		</script>
 		<title>NOVA</title>
 		<meta
 			name="description"

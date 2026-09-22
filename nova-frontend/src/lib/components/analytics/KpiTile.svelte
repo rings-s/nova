@@ -7,6 +7,8 @@
 	 */
 	let { kpi, currency = 'SAR', locale = 'en' } = $props();
 
+	let label = $derived(kpi.metric.replaceAll('_', ' '));
+
 	let displayValue = $derived.by(() => {
 		if (kpi.suppressed || kpi.value === null) return null;
 		if (kpi.unit === 'currency') return formatMoney(kpi.value, currency, locale);
@@ -15,13 +17,14 @@
 	});
 </script>
 
-<Card padding="sm">
-	<p class="text-sm text-slate-500 dark:text-slate-400">{kpi.metric.replaceAll('_', ' ')}</p>
+<Card padding="sm" class="min-w-0">
+	<p class="truncate text-[13px] font-medium text-fg-muted first-letter:uppercase" title={label}>
+		{label}
+	</p>
 	{#if displayValue === null}
-		<p class="mt-1 text-sm text-slate-400 dark:text-slate-500">
-			Not enough data ({kpi.sample_size})
-		</p>
+		<p class="mt-1.5 text-2xl font-semibold text-fg-subtle">—</p>
+		<p class="mt-0.5 text-xs text-fg-subtle">Not enough data yet</p>
 	{:else}
-		<p class="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{displayValue}</p>
+		<p class="mt-1.5 text-2xl font-semibold tracking-tight text-fg tabular-nums">{displayValue}</p>
 	{/if}
 </Card>

@@ -1,4 +1,6 @@
 <script>
+	import { accessStore } from '$lib/stores/access.svelte.js';
+	import NoAccess from '$lib/components/ui/NoAccess.svelte';
 	/**
 	 * KPIs, the chart catalog (docs/13 section 7, rendered with layerchart via
 	 * `ChartPanel`), a breakdown table, and — for those with `view_financials`
@@ -33,6 +35,7 @@
 
 	let tenantId = $derived(/** @type {string} */ (tenantStore.activeTenantId));
 	let businessId = $derived(businessStore.activeBusinessId);
+	let allowed = $derived(accessStore.can('view_analytics'));
 
 	const RANGE_PRESETS = [
 		{ days: 7, label: 'Last 7 days' },
@@ -84,7 +87,7 @@
 	}
 
 	$effect(() => {
-		if (businessId) loadAll();
+		if (businessId && allowed) loadAll();
 	});
 
 	// --- Breakdown -----------------------------------------------------------------
@@ -117,27 +120,35 @@
 	}
 
 	$effect(() => {
-		if (businessId) loadBreakdown();
+		if (businessId && allowed) loadBreakdown();
 	});
 </script>
 
 <svelte:head><title>Analytics — NOVA</title></svelte:head>
 
-<PageHeader title="Analytics" subtitle="What the numbers say about this business." />
+<PageHeader
+	eyebrow="Business"
+	title="Analytics"
+	subtitle="What the numbers say about this business."
+>
+	{#snippet actions()}
+		{#if businessId && allowed}
+			<div class="w-44">
+				<Select
+					aria-label="Date range"
+					bind:value={rangeDays}
+					options={RANGE_PRESETS.map((p) => ({ value: p.days, label: p.label }))}
+				/>
+			</div>
+		{/if}
+	{/snippet}
+</PageHeader>
 
-{#if !businessId}
+{#if !allowed}
+	<NoAccess what="analytics" />
+{:else if !businessId}
 	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
 {:else}
-	<div class="mb-6 flex justify-end">
-		<div class="w-full max-w-xs">
-			<Select
-				label="Date range"
-				bind:value={rangeDays}
-				options={RANGE_PRESETS.map((p) => ({ value: p.days, label: p.label }))}
-			/>
-		</div>
-	</div>
-
 	{#if loading}
 		<div class="flex justify-center py-12"><Spinner /></div>
 	{:else if loadErrorMessage}
@@ -145,7 +156,7 @@
 	{:else}
 		{#if overview}
 			<section class="mb-8">
-				<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+				<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
 					{#each overview.kpis as kpi (kpi.metric)}
 						<KpiTile {kpi} currency={overview.currency} />
 					{/each}
@@ -154,7 +165,7 @@
 		{/if}
 
 		<section class="mb-8">
-			<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Charts</h2>
+			<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Charts</h2>
 			{#if charts.length === 0}
 				<EmptyState title="No charts available" />
 			{:else}
@@ -162,18 +173,15 @@
 					{#each charts as entry (entry.chart_id)}
 						{@const locked =
 							entry.required_feature && !includedFeatures.has(entry.required_feature)}
-						<Card padding="md">
+						<Card padding="md" class="min-w-0">
 							{#if locked}
-								<p class="text-sm font-medium text-slate-700 dark:text-slate-200">
+								<p class="text-sm font-semibold text-fg">
 									{entry.title_en}
 								</p>
-								<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{entry.question_en}</p>
+								<p class="mt-1 text-sm text-fg-muted">{entry.question_en}</p>
 								<Alert tone="info" class="mt-3">
 									Not included in your current plan.
-									<a
-										href={resolve('/app/billing')}
-										class="font-medium text-brand-600 hover:underline dark:text-brand-400"
-									>
+									<a href={resolve('/app/billing')} class="font-medium text-accent hover:underline">
 										Upgrade to unlock
 									</a>
 								</Alert>
@@ -194,7 +202,7 @@
 
 		<section>
 			<div class="mb-3 flex items-center justify-between">
-				<h2 class="font-medium text-slate-900 dark:text-slate-100">Breakdown</h2>
+				<h2 class="text-base font-semibold tracking-tight text-fg">Breakdown</h2>
 				<div class="w-40">
 					<Select bind:value={dimension} options={DIMENSIONS} />
 				</div>
@@ -206,31 +214,31 @@
 			{:else if breakdown.length === 0}
 				<EmptyState title="Nothing in this window" />
 			{:else}
-				<Card padding="none">
+				<Card padding="none" class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr
-								class="border-b border-slate-100 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400"
-							>
-								<th class="px-4 py-2 font-medium">
+							<tr class="border-b border-line bg-surface-sunken text-start text-xs text-fg-muted">
+								<th class="px-4 py-2.5 text-start font-medium">
 									{DIMENSIONS.find((d) => d.value === dimension)?.label}
 								</th>
-								<th class="px-4 py-2 font-medium">Bookings</th>
-								<th class="px-4 py-2 font-medium">Completed</th>
-								<th class="px-4 py-2 font-medium">Revenue</th>
-								<th class="px-4 py-2 font-medium">Share</th>
+								<th class="px-4 py-2.5 text-start font-medium">Bookings</th>
+								<th class="px-4 py-2.5 text-start font-medium">Completed</th>
+								<th class="px-4 py-2.5 text-start font-medium">Revenue</th>
+								<th class="px-4 py-2.5 text-start font-medium">Share</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+						<tbody
+							class="divide-y divide-line-subtle [&_tr]:transition-colors [&_tr:hover]:bg-surface-sunken"
+						>
 							{#each breakdown as row (row.key)}
 								<tr>
-									<td class="px-4 py-2 text-slate-900 dark:text-slate-100">{row.label}</td>
-									<td class="px-4 py-2 text-slate-700 dark:text-slate-300">{row.bookings}</td>
-									<td class="px-4 py-2 text-slate-700 dark:text-slate-300">{row.completed}</td>
-									<td class="px-4 py-2 text-slate-700 dark:text-slate-300">
+									<td class="px-4 py-3 font-medium text-fg">{row.label}</td>
+									<td class="px-4 py-3 text-fg-secondary tabular-nums">{row.bookings}</td>
+									<td class="px-4 py-3 text-fg-secondary tabular-nums">{row.completed}</td>
+									<td class="px-4 py-3 text-fg-secondary tabular-nums">
 										{formatMoney(row.revenue, overview?.currency ?? 'SAR', 'en')}
 									</td>
-									<td class="px-4 py-2 text-slate-700 dark:text-slate-300">
+									<td class="px-4 py-3 text-fg-secondary tabular-nums">
 										{row.share_of_revenue !== null
 											? formatPercent(row.share_of_revenue, { locale: 'en' })
 											: '—'}

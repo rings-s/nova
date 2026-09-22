@@ -2,9 +2,10 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, computed_field
 
 from app.core.schemas import ApiSchema
+from app.modules.catalog.domain import rating_average
 
 
 class CreateBusinessRequest(ApiSchema):
@@ -25,12 +26,32 @@ class BusinessOut(ApiSchema):
     is_active: bool
     #: Whether this business is advertised on the public marketplace.
     is_listed: bool
+    #: Verified ratings received (`review` module). The sum is carried only to
+    #: derive the average; clients get the average and the count.
+    rating_count: int = 0
+    rating_sum: int = Field(default=0, exclude=True)
     created_at: datetime
     updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def rating_average(self) -> float | None:
+        return rating_average(self.rating_sum, self.rating_count)
 
 
 class SetListingVisibilityRequest(ApiSchema):
     is_listed: bool
+
+
+class SetLocationPositionRequest(ApiSchema):
+    """Where a branch is on the map: both numbers, or both null to take it off.
+
+    Not optional fields with a default. A body of `{}` is a mistake to be told
+    about, not a request to clear the pin, so both keys must be present.
+    """
+
+    latitude: float | None
+    longitude: float | None
 
 
 class CreateLocationRequest(ApiSchema):

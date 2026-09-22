@@ -21,10 +21,10 @@ aliases: [Home, Map of Content]
 - [[12-Backend-Code-Walkthrough]] - 🎓 **Start here if you are new** — FastAPI basics, every file explained, worked example
 - [[02-Backend-FastAPI-DDD-Structure]] - Domain-Driven Design folder structure and rules
 - `nova_backend/README.md` - **Live code map**: dependency rules, module anatomy, traced request
-- `docs/decisions/` - ADRs 0001-0011 (monorepo, vertical slices, tenant isolation, bilingual,
+- `docs/decisions/` - ADRs 0001-0012 (monorepo, vertical slices, tenant isolation, bilingual,
   tests, API security baseline, completing the remaining contexts, booking-source attribution,
   billing money decisions, public discovery and marketplace attribution, business agents and
-  analytics)
+  analytics, maps with Leaflet and OpenStreetMap)
 
 ### 2. Domain & AI
 

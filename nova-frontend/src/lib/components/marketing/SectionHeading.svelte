@@ -13,17 +13,17 @@
 
 <div class={[align === 'center' ? 'text-center' : 'text-start', className].join(' ')}>
 	{#if eyebrow}
-		<p class="text-xs font-semibold tracking-wide text-brand-600 uppercase dark:text-brand-400">
+		<p class="text-xs font-semibold tracking-wider text-accent uppercase">
 			{eyebrow}
 		</p>
 	{/if}
-	<h2 class="mt-2 text-display-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+	<h2 class="mt-3 text-display-lg font-semibold tracking-tight text-fg">
 		{title}
 	</h2>
 	{#if subtitle}
 		<p
 			class={[
-				'mt-4 text-body-lg text-slate-600 dark:text-slate-400',
+				'mt-4 text-body-lg text-fg-muted',
 				align === 'center' ? 'mx-auto max-w-2xl' : 'max-w-2xl'
 			].join(' ')}
 		>

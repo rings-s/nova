@@ -17,14 +17,12 @@
 	};
 </script>
 
-<div
-	class="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-0 dark:border-slate-800"
->
-	<div>
-		<p class="text-sm font-medium text-slate-900 dark:text-slate-100">
+<div class="flex items-center justify-between gap-3 border-b border-line-subtle py-3 last:border-0">
+	<div class="min-w-0">
+		<p class="text-sm font-medium text-fg first-letter:uppercase">
 			{notification.template.replaceAll('_', ' ')}
 		</p>
-		<p class="text-xs text-slate-500 dark:text-slate-400">
+		<p class="text-xs text-fg-muted">
 			{notification.channel} ·
 			{notification.sent_at
 				? formatDateTime(notification.sent_at, locale)
@@ -33,8 +31,10 @@
 					: '—'}
 		</p>
 		{#if notification.error}
-			<p class="text-xs text-red-600">{notification.error}</p>
+			<p class="mt-0.5 text-xs text-red-600 dark:text-red-400">{notification.error}</p>
 		{/if}
 	</div>
-	<Badge tone={statusTone[notification.status] ?? 'neutral'} size="sm">{notification.status}</Badge>
+	<Badge tone={statusTone[notification.status] ?? 'neutral'} size="sm" dot
+		>{notification.status}</Badge
+	>
 </div>

@@ -1,17 +1,22 @@
 <script>
-	/** @type {{ size?: 'sm'|'md'|'lg', label?: string }} */
-	let { size = 'md', label = 'Loading' } = $props();
+	/** @type {{ size?: 'sm'|'md'|'lg', label?: string, class?: string }} */
+	let { size = 'md', label = 'Loading', class: className = '' } = $props();
 
-	const sizeClasses = { sm: 'size-4', md: 'size-6', lg: 'size-10' };
+	const sizeClasses = { sm: 'size-4', md: 'size-6', lg: 'size-9' };
 </script>
 
 <svg
-	class={`animate-spin text-brand-600 ${sizeClasses[size]}`}
+	class={`animate-spin text-accent ${sizeClasses[size]} ${className}`}
 	viewBox="0 0 24 24"
 	fill="none"
 	role="status"
 	aria-label={label}
 >
-	<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-	<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+	<circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+	<path
+		d="M22 12a10 10 0 0 0-10-10"
+		stroke="currentColor"
+		stroke-width="3"
+		stroke-linecap="round"
+	/>
 </svg>

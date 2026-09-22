@@ -22,7 +22,9 @@ from app.modules.identity.domain import (
     MembershipRole,
     StaffPermission,
     generate_slug,
+    manageable_roles,
     may_manage_role,
+    permissions_for,
     require_bilingual_text,
     role_allows,
     validate_gcc_phone,
@@ -529,6 +531,24 @@ class MembershipService:
             user.token_version += 1
         await self.repository.session.flush()
         return membership
+
+    async def my_access(
+        self, principal: Principal
+    ) -> tuple[MembershipRole | None, frozenset[StaffPermission], frozenset[MembershipRole]]:
+        """The caller's role here, what it unlocks, and whom it may manage.
+
+        Read from this tenant's membership row, never from `Principal.roles`,
+        which is flattened across every tenant the user belongs to. A client
+        uses this to hide what the caller cannot do; the server still checks
+        each request on its own.
+        """
+        is_service = principal.kind is PrincipalKind.SERVICE
+        role = None if is_service else await self._actor_role(principal)
+        return (
+            role,
+            permissions_for(role, actor_is_service=is_service),
+            manageable_roles(role, actor_is_service=is_service),
+        )
 
     async def require_permission(self, principal: Principal, permission: StaffPermission) -> None:
         """Refuses a caller whose role in this tenant does not carry `permission`.

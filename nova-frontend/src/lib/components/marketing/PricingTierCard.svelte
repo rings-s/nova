@@ -35,10 +35,10 @@
 
 <div
 	class={[
-		'relative flex flex-col overflow-hidden rounded-2xl border p-8',
+		'relative flex flex-col overflow-hidden rounded-card border p-8',
 		featured
-			? 'border-brand-300 bg-white shadow-xl ring-2 ring-brand-500 dark:border-brand-700 dark:bg-slate-900'
-			: 'border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900'
+			? 'border-brand-300 bg-surface shadow-xl ring-2 ring-brand-500 dark:border-brand-700'
+			: 'border-line bg-surface shadow-sm'
 	].join(' ')}
 >
 	{#if featured}
@@ -48,20 +48,20 @@
 		</div>
 	{/if}
 
-	<h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100">{name}</h3>
-	<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+	<h3 class="text-lg font-semibold text-fg">{name}</h3>
+	<p class="mt-1 text-sm text-fg-muted">{description}</p>
 
 	<p class="mt-6 flex items-baseline gap-1">
-		<span class="text-display-md font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+		<span class="text-display-md font-semibold tracking-tight text-fg">
 			{formatMoney(priceMonthly, currency, 'en')}
 		</span>
-		<span class="text-sm text-slate-500 dark:text-slate-400">/month</span>
+		<span class="text-sm text-fg-muted">/month</span>
 	</p>
 
 	<ul class="mt-6 flex-1 space-y-3">
 		{#each features as feature (feature)}
-			<li class="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
-				<Icon name="check" class="mt-0.5 size-4 shrink-0 text-brand-600 dark:text-brand-400" />
+			<li class="flex items-start gap-2 text-sm text-fg-secondary">
+				<Icon name="check" class="mt-0.5 size-4 shrink-0 text-accent" />
 				<span>{feature}</span>
 			</li>
 		{/each}

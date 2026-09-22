@@ -1,9 +1,11 @@
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 
 from app.db.repository import BaseRepository, TenantScopedRepository
+from app.modules.catalog.domain import RATING_PRIOR_MEAN, RATING_PRIOR_WEIGHT
 from app.modules.catalog.models import (
     Business,
     Location,
@@ -45,6 +47,27 @@ class _SoftDeleteAwareRepository[ModelT](TenantScopedRepository[ModelT]):
 
 class BusinessRepository(_SoftDeleteAwareRepository[Business]):
     model = Business
+
+    async def add_rating(self, business_id: UUID, rating: int) -> bool:
+        """Adds one rating to the running totals, atomically.
+
+        One `UPDATE ... SET x = x + n` rather than read-modify-write, so two
+        reviews landing at once cannot both read the old totals and lose one.
+        Returns False if no row in this tenant matched.
+        """
+        stmt = (
+            update(Business)
+            .where(Business.id == business_id, Business.tenant_id == self.tenant_id)
+            .values(
+                rating_count=Business.rating_count + 1,
+                rating_sum=Business.rating_sum + rating,
+            )
+        )
+        # Default ("auto") synchronization applies the same increments to a
+        # Business already loaded in this session, so a read later in the same
+        # transaction does not see the pre-rating totals.
+        result = await self.session.execute(stmt)
+        return bool(result.rowcount)  # type: ignore[attr-defined]
 
     async def get_by_slug(self, slug: str) -> Business | None:
         stmt = self._active(self._scope(self._base_select().where(Business.slug == slug)))
@@ -174,6 +197,7 @@ class PublicCatalogRepository(BaseRepository[Business]):
         city: str | None = None,
         category: str | None = None,
         bounding_box: tuple[float, float, float, float] | None = None,
+        order: Literal["name", "rating"] = "name",
         limit: int = 20,
         offset: int = 0,
     ) -> list[tuple[Business, Location, Decimal | None, str | None]]:
@@ -270,7 +294,20 @@ class PublicCatalogRepository(BaseRepository[Business]):
         # A stable total order. Without the id tiebreak, two branches with the
         # same name can swap places between pages and a customer sees one twice
         # while never seeing the other.
-        stmt = stmt.order_by(Business.name_en.asc(), Location.id.asc())
+        if order == "rating":
+            # `domain.rating_score`, in SQL so the database can order and page
+            # by it. Count breaks ties so more evidence wins between equals.
+            score = (Business.rating_sum + RATING_PRIOR_MEAN * RATING_PRIOR_WEIGHT) / (
+                Business.rating_count + RATING_PRIOR_WEIGHT
+            )
+            stmt = stmt.order_by(
+                score.desc(),
+                Business.rating_count.desc(),
+                Business.name_en.asc(),
+                Location.id.asc(),
+            )
+        else:
+            stmt = stmt.order_by(Business.name_en.asc(), Location.id.asc())
         stmt = stmt.limit(limit).offset(offset)
 
         result = await self.session.execute(stmt)

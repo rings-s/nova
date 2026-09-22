@@ -162,6 +162,25 @@ export function updateCustomerConsent(
 // --- Memberships (staff only) ------------------------------------------------
 
 /**
+ * @typedef {'manage_subscription'|'refund_payments'|'view_financials'|'view_analytics'|'manage_catalog'} StaffPermission
+ * @typedef {Object} MyAccess
+ * @property {MembershipRole|null} role Null for a service principal.
+ * @property {StaffPermission[]} permissions What the role unlocks here.
+ * @property {MembershipRole[]} manageable_roles Roles the caller may invite, change or revoke.
+ */
+
+/**
+ * The caller's role in this business and what it unlocks, read from this
+ * tenant's membership — never from the token's `roles`, which merges every
+ * business the user works at. For hiding what the caller can't use only;
+ * the server still checks every request.
+ * @param {string} tenantId @returns {Promise<MyAccess>}
+ */
+export function getMyAccess(tenantId) {
+	return http.get(tenantPath(tenantId, '/memberships/me'));
+}
+
+/**
  * @param {string} tenantId
  * @param {{ limit?: number, offset?: number }} [params]
  * @returns {Promise<{ items: Membership[], total: number|null }>}

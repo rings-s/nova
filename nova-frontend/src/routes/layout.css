@@ -4,8 +4,7 @@
 
 /*
  * Manual light/dark toggle instead of Tailwind's default OS-media-query
- * `dark:` variant — every `dark:` utility everywhere in the app (including
- * /app, unchanged otherwise) now responds to a `.dark` class on `<html>`
+ * `dark:` variant — every `dark:` utility now responds to a `.dark` class on `<html>`
  * instead of `prefers-color-scheme`. `src/app.html` sets that class
  * synchronously before first paint (from the stored preference, or the OS
  * preference if none is stored yet), and `$lib/stores/theme.svelte.js` keeps
@@ -61,20 +60,9 @@
 	--color-plum-900: #591a3e;
 	--color-plum-950: #330a21;
 
-	/*
-	 * Everything below is an ADDITIVE suffix under a Tailwind-reserved
-	 * namespace (--shadow, --text, --ease, --duration), never one of
-	 * Tailwind's own default scale names (sm/md/lg/xl/2xl for shadow;
-	 * 75/100/150/... for duration; in/out/in-out for ease). Reusing a
-	 * default name here would silently redefine that utility everywhere it's
-	 * already used — including every /app dashboard page via Card/Button/
-	 * Input/Modal, which must render pixel-identical to before this change.
-	 * A new suffix instead only ever generates a brand-new class name
-	 * (`shadow-glow`, `text-display-2xl`, ...) that nothing existing
-	 * references, so it cannot affect anything already on the page.
-	 */
 	--shadow-glow: 0 8px 24px -4px rgb(225 29 72 / 0.35);
 
+	/* Fluid display type — one scale for every headline in the app. */
 	--text-display-2xl: clamp(2.75rem, 2rem + 3.5vw, 4.75rem);
 	--text-display-2xl--line-height: 1.05;
 	--text-display-xl: clamp(2.25rem, 1.75rem + 2.25vw, 3.5rem);
@@ -86,10 +74,143 @@
 	--text-body-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.1875rem);
 	--text-body-lg--line-height: 1.65;
 
+	/*
+	 * Shape. Three radii, by role rather than by size: a control (button,
+	 * input, nav item), a card, and a large panel (hero, CTA band, modal).
+	 * Nested corners stay concentric because each step is one control's
+	 * padding larger than the last.
+	 */
+	--radius-control: 0.625rem;
+	--radius-card: 1rem;
+	--radius-panel: 1.5rem;
+
 	--ease-out-premium: cubic-bezier(0.16, 1, 0.3, 1);
 	--duration-fast: 150ms;
 	--duration-base: 220ms;
 	--duration-slow: 400ms;
+
+	--animate-fade-in: fade-in var(--duration-base) var(--ease-out-premium) both;
+	--animate-scale-in: scale-in var(--duration-base) var(--ease-out-premium) both;
+	--animate-slide-up: slide-up var(--duration-slow) var(--ease-out-premium) both;
+	--animate-shimmer: shimmer 1.6s ease-in-out infinite;
+	--animate-drawer-in: drawer-in var(--duration-slow) var(--ease-out-premium) both;
+
+	@keyframes fade-in {
+		from {
+			opacity: 0;
+		}
+	}
+	@keyframes scale-in {
+		from {
+			opacity: 0;
+			transform: translateY(6px) scale(0.98);
+		}
+	}
+	@keyframes slide-up {
+		from {
+			opacity: 0;
+			transform: translateY(10px);
+		}
+	}
+	@keyframes drawer-in {
+		from {
+			translate: -100% 0;
+		}
+	}
+	@keyframes shimmer {
+		50% {
+			opacity: 0.5;
+		}
+	}
+}
+
+/*
+ * Semantic color roles. Components say what a color is FOR — the page
+ * canvas, a raised surface, a hairline, primary or muted text — and the
+ * light/dark value lives here once, instead of every class list pairing
+ * `text-slate-900 dark:text-slate-100` by hand. `inline` makes each utility
+ * reference the variable at use-site, so flipping `.dark` on <html> restyles
+ * everything without a single `dark:` variant.
+ *
+ *   bg-canvas         page background
+ *   bg-surface        cards, header, popovers
+ *   bg-surface-sunken inset wells inside a surface (code, empty trays)
+ *   bg-surface-muted  hover fills, neutral chips, track backgrounds
+ *   border-line       default hairline; -subtle for row dividers; -strong for inputs
+ *   text-fg           headings and body; -secondary for nav and labels;
+ *                     -muted for supporting copy; -subtle for meta/placeholder
+ *   text-accent       brand-colored text and icons (links, active nav)
+ *   bg-accent-soft    tinted brand fill behind an accent icon or active item
+ */
+@theme inline {
+	--color-canvas: var(--nv-canvas);
+	--color-surface: var(--nv-surface);
+	--color-surface-sunken: var(--nv-surface-sunken);
+	--color-surface-muted: var(--nv-surface-muted);
+	--color-line: var(--nv-line);
+	--color-line-subtle: var(--nv-line-subtle);
+	--color-line-strong: var(--nv-line-strong);
+	--color-fg: var(--nv-fg);
+	--color-fg-secondary: var(--nv-fg-secondary);
+	--color-fg-muted: var(--nv-fg-muted);
+	--color-fg-subtle: var(--nv-fg-subtle);
+	--color-accent: var(--nv-accent);
+	--color-accent-soft: var(--nv-accent-soft);
+
+	/* Elevation: resting card, lifted (hover, dropdown), overlay (modal, toast). */
+	--shadow-card: var(--nv-shadow-card);
+	--shadow-raised: var(--nv-shadow-raised);
+	--shadow-overlay: var(--nv-shadow-overlay);
+}
+
+:root {
+	--nv-canvas: var(--color-slate-50);
+	--nv-surface: #ffffff;
+	--nv-surface-sunken: var(--color-slate-50);
+	--nv-surface-muted: var(--color-slate-100);
+	--nv-line: var(--color-slate-200);
+	--nv-line-subtle: var(--color-slate-100);
+	--nv-line-strong: var(--color-slate-300);
+	--nv-fg: var(--color-slate-900);
+	--nv-fg-secondary: var(--color-slate-600);
+	--nv-fg-muted: var(--color-slate-500);
+	--nv-fg-subtle: var(--color-slate-400);
+	--nv-accent: var(--color-brand-600);
+	--nv-accent-soft: var(--color-brand-50);
+
+	--nv-shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
+	--nv-shadow-raised: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -6px rgb(15 23 42 / 0.1);
+	--nv-shadow-overlay: 0 2px 6px rgb(15 23 42 / 0.06), 0 24px 48px -12px rgb(15 23 42 / 0.22);
+}
+
+:root.dark {
+	--nv-canvas: var(--color-slate-950);
+	--nv-surface: var(--color-slate-900);
+	--nv-surface-sunken: color-mix(in oklch, var(--color-slate-950) 55%, var(--color-slate-900));
+	--nv-surface-muted: var(--color-slate-800);
+	--nv-line: var(--color-slate-800);
+	--nv-line-subtle: color-mix(in oklch, var(--color-slate-800) 70%, var(--color-slate-900));
+	--nv-line-strong: var(--color-slate-700);
+	--nv-fg: var(--color-slate-100);
+	--nv-fg-secondary: var(--color-slate-300);
+	--nv-fg-muted: var(--color-slate-400);
+	--nv-fg-subtle: var(--color-slate-500);
+	--nv-accent: var(--color-brand-400);
+	--nv-accent-soft: color-mix(in oklch, var(--color-brand-900) 35%, transparent);
+
+	/* Shadows read as nothing on a dark canvas; a top highlight does the lifting. */
+	--nv-shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.03);
+	--nv-shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 12px 32px -8px rgb(0 0 0 / 0.6);
+	--nv-shadow-overlay: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 24px 64px -12px rgb(0 0 0 / 0.75);
+}
+
+/* One focus treatment for every interactive element. */
+@utility focus-ring {
+	outline: 2px solid transparent;
+	outline-offset: 2px;
+	&:focus-visible {
+		outline-color: var(--color-brand-500);
+	}
 }
 
 /*
@@ -149,7 +270,28 @@
 		color-scheme: dark;
 	}
 	body {
-		@apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+		@apply bg-canvas text-fg antialiased;
+		font-feature-settings: 'cv11', 'ss01';
+		text-rendering: optimizeLegibility;
+	}
+	::selection {
+		background-color: color-mix(in oklch, var(--color-brand-500) 22%, transparent);
+	}
+	:where(h1, h2, h3, h4) {
+		text-wrap: balance;
+	}
+	:where(p) {
+		text-wrap: pretty;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+			scroll-behavior: auto !important;
+		}
 	}
 }
 

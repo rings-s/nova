@@ -1,5 +1,6 @@
 <script>
 	import { resolve } from '$app/paths';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -15,10 +16,10 @@
 
 	/** @type {{ id: LayerId, label: string }[]} */
 	const layerTabs = [
-		{ id: 'holds', label: '1. Slot holds' },
-		{ id: 'bilingual', label: '2. Bilingual data' },
-		{ id: 'whatsapp', label: '3. WhatsApp' },
-		{ id: 'banking', label: '4. Payments' }
+		{ id: 'holds', label: 'Slot holds' },
+		{ id: 'bilingual', label: 'Bilingual data' },
+		{ id: 'whatsapp', label: 'WhatsApp' },
+		{ id: 'banking', label: 'Payments' }
 	];
 
 	/** @type {Record<LayerId, { title: string, tag: string, highlight: string, codeSnippet: string, description: string }>} */
@@ -137,7 +138,7 @@ POST /v1/payments
 </script>
 
 <svelte:head>
-	<title>About NOVA — Built for the GCC Salon & Spa Industry</title>
+	<title>About — NOVA</title>
 	<meta
 		name="description"
 		content="Learn about NOVA's mission: replacing fragmented salon software with a unified, bilingual operating system engineered for Saudi Arabia and the GCC."
@@ -145,81 +146,50 @@ POST /v1/payments
 </svelte:head>
 
 <!-- Master Hero Header -->
-<Section
-	tone="canvas"
-	padding="tight"
-	class="relative overflow-hidden pt-8 pb-14 sm:pt-14 sm:pb-20"
->
+<Section tone="canvas">
 	<GradientBlob variant="hero" />
 	<Container size="xl">
 		<!-- Status ribbon -->
 		<div class="flex items-center justify-center">
-			<div
-				class="inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/90 dark:text-slate-300"
+			<p
+				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
-				<span class="flex items-center gap-1.5">
-					<span class="size-2 rounded-full bg-emerald-500"></span>
-					<span>Built for the GCC</span>
-				</span>
-				<span class="text-slate-300 dark:text-slate-700">·</span>
-				<span class="font-bold text-brand-600 dark:text-brand-400">Riyadh · Jeddah · Dubai</span>
-			</div>
+				<span class="size-1.5 rounded-full bg-brand-500"></span>
+				Built for the GCC · Riyadh, Jeddah, Dubai
+			</p>
 		</div>
 
 		<!-- Core Headline -->
 		<div class="mx-auto mt-6 max-w-4xl text-center">
-			<h1
-				class="text-display-xl font-extrabold tracking-tight text-slate-900 sm:text-display-2xl dark:text-slate-100"
-			>
+			<h1 class="text-display-2xl font-semibold tracking-tight text-fg">
 				Built for the reality of GCC salons &amp; spas
 			</h1>
-			<p class="mx-auto mt-5 max-w-2xl text-body-lg text-slate-600 sm:text-xl dark:text-slate-400">
+			<p class="mx-auto mt-6 max-w-2xl text-body-lg text-fg-muted">
 				Booking, walk-ins, WhatsApp and payments are usually four disconnected tools stitched
 				together by hand. NOVA brings them into one platform, built around how a salon actually runs
 				its day.
 			</p>
 			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
 				<Button size="lg" href={resolve('/register')}>Start 14-day free trial</Button>
-				<Button size="lg" variant="outline" href={resolve('/features')}>
-					Explore OS architecture
-				</Button>
+				<Button size="lg" variant="outline" href={resolve('/features')}>Explore features</Button>
 			</div>
 		</div>
 
 		<!-- Interactive Architecture Stack Viewer -->
-		<div
-			class="mt-14 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
-		>
+		<div class="mt-16 overflow-hidden rounded-panel border border-line bg-surface shadow-overlay">
 			<!-- Stack Header Bar -->
 			<div
-				class="dark:bg-slate-850 flex flex-wrap items-center justify-between border-b border-slate-200 bg-slate-50/90 px-6 py-3.5 backdrop-blur dark:border-slate-800"
+				class="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-surface-sunken px-6 py-4"
 			>
 				<div>
-					<span class="text-xs font-bold tracking-wider text-slate-500 uppercase">
-						System Architecture Blueprint
-					</span>
-					<p class="text-xs font-semibold text-slate-700 dark:text-slate-300">
-						Inspect how NOVA solves core regional salon problems
+					<p class="text-xs font-semibold tracking-wider text-fg-subtle uppercase">
+						Under the hood
+					</p>
+					<p class="text-sm font-medium text-fg">
+						How NOVA solves the problems salons actually have
 					</p>
 				</div>
-				<div
-					class="mt-2 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold sm:mt-0 dark:border-slate-700 dark:bg-slate-800"
-				>
-					{#each layerTabs as tab (tab.id)}
-						<button
-							type="button"
-							onclick={() => (activeLayer = tab.id)}
-							class={[
-								'rounded-lg px-2.5 py-1 text-xs transition-all',
-								activeLayer === tab.id
-									? 'bg-slate-900 font-bold text-white dark:bg-slate-100 dark:text-slate-900'
-									: 'text-slate-600 hover:text-slate-900 dark:text-slate-400'
-							].join(' ')}
-						>
-							{tab.label}
-						</button>
-					{/each}
-				</div>
+				<Tabs tabs={layerTabs} bind:active={activeLayer} />
 			</div>
 
 			<!-- Active architecture details -->
@@ -228,23 +198,21 @@ POST /v1/payments
 					<div class="flex items-center gap-2">
 						<Badge tone="accent" size="sm">{current.tag}</Badge>
 					</div>
-					<h3 class="text-xl font-bold text-slate-900 dark:text-slate-100">
+					<h3 class="text-xl font-semibold tracking-tight text-fg">
 						{current.title}
 					</h3>
-					<p class="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+					<p class="text-sm leading-relaxed text-fg-muted">
 						{current.description}
 					</p>
-					<div
-						class="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs dark:border-slate-800 dark:bg-slate-800/60"
-					>
-						<span class="font-semibold text-slate-700 dark:text-slate-300">In short:</span>
-						<p class="mt-0.5 text-slate-500 dark:text-slate-400">{current.highlight}</p>
+					<div class="rounded-card border border-line bg-surface-sunken p-4 text-sm">
+						<span class="font-semibold text-fg">In short</span>
+						<p class="mt-1 text-fg-muted">{current.highlight}</p>
 					</div>
 				</div>
 
 				<div class="lg:col-span-5">
 					<div
-						class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-4 font-mono text-xs text-slate-200 shadow-inner"
+						class="overflow-hidden rounded-card border border-slate-800 bg-slate-950 p-4 font-mono text-xs text-slate-200"
 					>
 						<div
 							class="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400"
@@ -262,38 +230,36 @@ POST /v1/payments
 </Section>
 
 <!-- The Problem & Solution Comparison -->
-<Section tone="sunken" class="border-y border-slate-200 py-16 sm:py-24 dark:border-slate-800">
+<Section tone="sunken" class="border-y border-line">
 	<Container size="xl">
 		<SectionHeading
 			align="center"
-			eyebrow="Why NOVA Exists"
+			eyebrow="Why NOVA exists"
 			title="A unified OS vs. a patchwork of foreign tools"
 			subtitle="Most salons run on 4 disconnected systems that don't speak to each other. NOVA replaces the chaos with a single source of truth."
 		/>
 
 		<div class="mt-12 grid gap-6 md:grid-cols-2">
 			<!-- Fragmented legacy box -->
-			<div
-				class="rounded-3xl border border-rose-200 bg-white p-6 shadow-sm sm:p-8 dark:border-rose-950/60 dark:bg-slate-900"
-			>
-				<div class="flex items-center gap-2 text-rose-600 dark:text-rose-400">
-					<Icon name="x" class="size-5" />
-					<h3 class="text-lg font-bold">The Fragmented Traditional Approach</h3>
+			<div class="rounded-panel border border-line bg-surface p-6 shadow-card sm:p-8">
+				<div class="flex items-center gap-3">
+					<span
+						class="flex size-8 items-center justify-center rounded-full bg-surface-muted text-fg-muted"
+					>
+						<Icon name="x" class="size-4" />
+					</span>
+					<h3 class="text-lg font-semibold text-fg">The patchwork way</h3>
 				</div>
-				<p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+				<p class="mt-3 text-sm text-fg-muted">
 					How salons traditionally manage their front desk operations:
 				</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
-						<li
-							class="rounded-xl border border-rose-100 bg-rose-50/60 p-3.5 dark:border-rose-900/40 dark:bg-rose-950/20"
-						>
-							<p
-								class="text-xs font-bold tracking-wider text-rose-700 uppercase dark:text-rose-300"
-							>
+						<li class="rounded-card border border-line bg-surface-sunken p-4">
+							<p class="text-xs font-semibold tracking-wider text-fg-subtle uppercase">
 								{item.label}
 							</p>
-							<p class="mt-1 text-xs text-slate-700 dark:text-slate-300">{item.legacy}</p>
+							<p class="mt-1 text-sm text-fg-muted">{item.legacy}</p>
 						</li>
 					{/each}
 				</ul>
@@ -301,26 +267,26 @@ POST /v1/payments
 
 			<!-- NOVA unified box -->
 			<div
-				class="rounded-3xl border border-brand-300 bg-white p-6 shadow-md ring-2 ring-brand-500/20 sm:p-8 dark:border-brand-700 dark:bg-slate-900"
+				class="rounded-panel border border-brand-300 bg-surface p-6 shadow-raised ring-4 ring-brand-500/10 sm:p-8 dark:border-brand-500/40"
 			>
-				<div class="flex items-center gap-2 text-brand-600 dark:text-brand-400">
-					<Icon name="check" class="size-5" />
-					<h3 class="text-lg font-bold">The NOVA Unified Operating System</h3>
+				<div class="flex items-center gap-3">
+					<span
+						class="flex size-8 items-center justify-center rounded-full bg-brand-600 text-white"
+					>
+						<Icon name="check" class="size-4" />
+					</span>
+					<h3 class="text-lg font-semibold text-fg">The NOVA way</h3>
 				</div>
-				<p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
-					How a salon operates with NOVA:
-				</p>
+				<p class="mt-3 text-sm text-fg-muted">How a salon operates with NOVA:</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
 						<li
-							class="rounded-xl border border-brand-100 bg-brand-50/60 p-3.5 dark:border-brand-900/50 dark:bg-brand-950/30"
+							class="rounded-card border border-brand-100 bg-accent-soft/60 p-4 dark:border-brand-500/20"
 						>
-							<p
-								class="text-xs font-bold tracking-wider text-brand-700 uppercase dark:text-brand-300"
-							>
+							<p class="text-xs font-semibold tracking-wider text-accent uppercase">
 								{item.label}
 							</p>
-							<p class="mt-1 text-xs text-slate-800 dark:text-slate-200">{item.nova}</p>
+							<p class="mt-1 text-sm text-fg">{item.nova}</p>
 						</li>
 					{/each}
 				</ul>
@@ -330,11 +296,11 @@ POST /v1/payments
 </Section>
 
 <!-- The 4 Core Architectural Commitments -->
-<Section tone="canvas" class="py-16 sm:py-24">
+<Section tone="canvas">
 	<Container size="xl">
 		<SectionHeading
 			align="center"
-			eyebrow="Engineering Principles"
+			eyebrow="Engineering principles"
 			title="Built on four non-negotiable foundations"
 			subtitle="Every line of code and user experience decision is anchored in regional authenticity and computational rigor."
 		/>
@@ -342,21 +308,21 @@ POST /v1/payments
 		<div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
 			{#each pillars as pillar (pillar.title)}
 				<div
-					class="relative flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+					class="duration-base relative flex flex-col rounded-card border border-line bg-surface p-6 shadow-card transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
 				>
 					<div>
 						<div
-							class="inline-flex size-11 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-950/50 dark:text-brand-400"
+							class="inline-flex size-11 items-center justify-center rounded-control bg-accent-soft text-accent"
 						>
 							<Icon name={pillar.icon} class="size-5" />
 						</div>
-						<h3 class="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">
+						<h3 class="mt-4 text-base font-semibold text-fg">
 							{pillar.title}
 						</h3>
-						<p class="text-[11px] font-semibold text-brand-600 dark:text-brand-400">
+						<p class="text-xs font-medium text-accent">
 							{pillar.subtitle}
 						</p>
-						<p class="mt-2.5 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+						<p class="mt-3 text-sm leading-relaxed text-fg-muted">
 							{pillar.body}
 						</p>
 					</div>
@@ -367,20 +333,20 @@ POST /v1/payments
 </Section>
 
 <!-- Privacy, Isolation, and PDPL Compliance -->
-<Section tone="canvas" class="py-16 sm:py-24">
+<Section tone="canvas">
 	<Container size="xl">
 		<div class="grid items-center gap-10 lg:grid-cols-12">
 			<div class="space-y-4 lg:col-span-6">
 				<Badge tone="accent">Security &amp; privacy</Badge>
-				<h2 class="text-display-md font-bold tracking-tight text-slate-900 dark:text-slate-100">
+				<h2 class="text-display-md font-semibold tracking-tight text-fg">
 					Tenant isolation, built into the database
 				</h2>
-				<p class="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+				<p class="text-body-lg text-fg-muted">
 					Your client list, pricing and financial reports are confidential. Every query is scoped to
 					the authenticated tenant at the database level, not just in application code.
 				</p>
 				<ul class="space-y-3 pt-2">
-					<li class="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
+					<li class="flex items-start gap-3 text-sm text-fg-secondary">
 						<Icon
 							name="shield-check"
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
@@ -390,7 +356,7 @@ POST /v1/payments
 							security, not application code alone.</span
 						>
 					</li>
-					<li class="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
+					<li class="flex items-start gap-3 text-sm text-fg-secondary">
 						<Icon
 							name="shield-check"
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
@@ -400,7 +366,7 @@ POST /v1/payments
 							by Moyasar and never touch NOVA's servers.</span
 						>
 					</li>
-					<li class="flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
+					<li class="flex items-start gap-3 text-sm text-fg-secondary">
 						<Icon
 							name="shield-check"
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
@@ -413,30 +379,24 @@ POST /v1/payments
 				</ul>
 			</div>
 			<div class="lg:col-span-6">
-				<div
-					class="rounded-3xl border border-slate-200 bg-slate-50 p-8 dark:border-slate-800 dark:bg-slate-800/50"
-				>
-					<h3 class="text-base font-bold text-slate-900 dark:text-slate-100">
-						Built with PDPL in mind
-					</h3>
-					<p class="mt-2 text-xs text-slate-600 dark:text-slate-400">
+				<div class="rounded-panel border border-line bg-surface-sunken p-8">
+					<h3 class="text-base font-semibold text-fg">Built with PDPL in mind</h3>
+					<p class="mt-2 text-sm text-fg-muted">
 						Customer records carry explicit consent flags for marketing and communication,
 						reflecting the Saudi Personal Data Protection Law's consent requirements.
 					</p>
 					<div class="mt-6 space-y-3">
 						<div
-							class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900"
+							class="flex items-center justify-between rounded-card border border-line bg-surface p-4 text-sm font-medium shadow-card"
 						>
-							<span class="text-slate-700 dark:text-slate-300"
-								>Tenant-scoped by row-level security</span
-							>
-							<span class="font-mono font-bold text-emerald-600">Enforced</span>
+							<span class="text-fg-secondary">Tenant-scoped by row-level security</span>
+							<span class="font-semibold text-emerald-600 dark:text-emerald-400">Enforced</span>
 						</div>
 						<div
-							class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900"
+							class="flex items-center justify-between rounded-card border border-line bg-surface p-4 text-sm font-medium shadow-card"
 						>
-							<span class="text-slate-700 dark:text-slate-300">Per-customer consent tracking</span>
-							<span class="font-mono font-bold text-emerald-600">Built in</span>
+							<span class="text-fg-secondary">Per-customer consent tracking</span>
+							<span class="font-semibold text-emerald-600 dark:text-emerald-400">Built in</span>
 						</div>
 					</div>
 				</div>
@@ -446,9 +406,16 @@ POST /v1/payments
 </Section>
 
 <!-- Call to Action -->
-<Section tone="dark" class="py-16 sm:py-24">
-	<Container size="md" class="text-center">
-		<h2 class="text-display-lg font-bold tracking-tight text-white">Bring your salon onto NOVA</h2>
+<Section
+	tone="dark"
+	padding="tight"
+	class="mx-4 mb-16 rounded-panel sm:mx-6 lg:mx-auto lg:max-w-7xl"
+>
+	<GradientBlob variant="corner" />
+	<Container size="md" class="relative py-8 text-center sm:py-12">
+		<h2 class="text-display-lg font-semibold tracking-tight text-white">
+			Bring your salon onto NOVA
+		</h2>
 		<p class="mt-4 text-body-lg text-white/80">
 			Set up your storefront, services and providers in minutes.
 		</p>

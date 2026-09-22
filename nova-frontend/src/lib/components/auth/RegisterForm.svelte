@@ -24,10 +24,10 @@
 	 * calling back. The business id is cached client-side (`businessStore`) —
 	 * there is no endpoint to list a tenant's businesses back later.
 	 */
+	import Icon from '../ui/Icon.svelte';
 	import Input from '../ui/Input.svelte';
 	import Button from '../ui/Button.svelte';
 	import Alert from '../ui/Alert.svelte';
-	import Tabs from '../ui/Tabs.svelte';
 	import { authStore } from '../../stores/auth.svelte.js';
 	import { tenantStore } from '../../stores/tenant.svelte.js';
 	import { businessStore } from '../../stores/business.svelte.js';
@@ -138,6 +138,12 @@
 			loading = false;
 		}
 	}
+
+	/** @type {{ id: string, label: string, hint: string, icon: import('../ui/Icon.svelte').IconName }[]} */
+	const intentOptions = [
+		{ id: 'customer', label: 'Customer', hint: 'Book and join queues', icon: 'user' },
+		{ id: 'business_owner', label: 'Business', hint: 'List a salon or spa', icon: 'building' }
+	];
 </script>
 
 <form class="flex flex-col gap-4" onsubmit={handleSubmit}>
@@ -145,22 +151,36 @@
 		<Alert tone="error">{error}</Alert>
 	{/if}
 
-	<div class="flex flex-col gap-1">
-		<span class="text-sm font-medium text-slate-700 dark:text-slate-200">I'm signing up as a</span>
-		<Tabs
-			tabs={[
-				{ id: 'customer', label: 'Customer' },
-				{ id: 'business_owner', label: 'Business owner' }
-			]}
-			bind:active={intent}
-			onchange={() => (businessSubTab = 'account')}
-		/>
-		<p class="pt-1 text-xs text-slate-500 dark:text-slate-400">
-			{intent === 'customer'
-				? 'Book appointments and join queues.'
-				: 'List a salon or spa on NOVA — you become its owner.'}
-		</p>
-	</div>
+	<fieldset class="flex flex-col gap-2">
+		<legend class="mb-2 text-sm font-medium text-fg-secondary">I'm signing up as a</legend>
+		<div class="grid grid-cols-2 gap-2">
+			{#each intentOptions as option (option.id)}
+				<label
+					class={[
+						'duration-fast relative flex cursor-pointer flex-col gap-1 rounded-card border p-3 transition-[border-color,box-shadow] has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-brand-500/20',
+						intent === option.id
+							? 'border-brand-500 bg-accent-soft/60 ring-4 ring-brand-500/10'
+							: 'border-line-strong hover:border-fg-subtle'
+					].join(' ')}
+				>
+					<input
+						type="radio"
+						name="intent"
+						value={option.id}
+						class="sr-only"
+						bind:group={intent}
+						onchange={() => (businessSubTab = 'account')}
+					/>
+					<Icon
+						name={option.icon}
+						class={`size-5 ${intent === option.id ? 'text-accent' : 'text-fg-subtle'}`}
+					/>
+					<span class="text-sm font-semibold text-fg">{option.label}</span>
+					<span class="text-xs text-fg-muted">{option.hint}</span>
+				</label>
+			{/each}
+		</div>
+	</fieldset>
 
 	{#if intent === 'customer'}
 		<Input label="Full name" required autocomplete="name" bind:value={fullName} />
@@ -184,14 +204,36 @@
 
 		<Button type="submit" {loading} fullWidth>Create account</Button>
 	{:else}
-		<div class="flex flex-col gap-4 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-			<Tabs
-				tabs={[
-					{ id: 'account', label: 'Your account' },
-					{ id: 'business', label: 'Your business' }
-				]}
-				bind:active={businessSubTab}
-			/>
+		<div class="flex flex-col gap-4">
+			<ol class="flex items-center gap-2 text-xs font-medium" aria-label="Sign-up steps">
+				{#each [{ id: 'account', label: 'Your account' }, { id: 'business', label: 'Your business' }] as stepItem, index (stepItem.id)}
+					{#if index > 0}<li class="h-px flex-1 bg-line" aria-hidden="true"></li>{/if}
+					<li>
+						<button
+							type="button"
+							onclick={() =>
+								stepItem.id === 'account' ? (businessSubTab = 'account') : goToBusinessStep()}
+							aria-current={businessSubTab === stepItem.id ? 'step' : undefined}
+							class={[
+								'inline-flex items-center gap-2 rounded-full py-1 ps-1 pe-3 focus-ring transition-colors',
+								businessSubTab === stepItem.id ? 'text-fg' : 'text-fg-muted hover:text-fg'
+							].join(' ')}
+						>
+							<span
+								class={[
+									'flex size-6 items-center justify-center rounded-full text-[11px] font-semibold',
+									businessSubTab === stepItem.id
+										? 'bg-brand-600 text-white'
+										: 'border border-line-strong text-fg-muted'
+								].join(' ')}
+							>
+								{index + 1}
+							</span>
+							{stepItem.label}
+						</button>
+					</li>
+				{/each}
+			</ol>
 
 			{#if businessSubTab === 'account'}
 				<Input label="Full name" required autocomplete="name" bind:value={fullName} />
@@ -212,11 +254,14 @@
 					bind:value={password}
 				/>
 				<Button type="button" variant="outline" fullWidth onclick={goToBusinessStep}>
-					Continue to your business →
+					Continue to your business
+					<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 				</Button>
 			{:else}
-				<Input label="Business name (English)" required bind:value={businessNameEn} />
-				<Input label="Business name (Arabic)" required dir="rtl" bind:value={businessNameAr} />
+				<div class="grid gap-4 sm:grid-cols-2">
+					<Input label="Business name (English)" required bind:value={businessNameEn} />
+					<Input label="Business name (Arabic)" required dir="rtl" bind:value={businessNameAr} />
+				</div>
 				<Input type="tel" label="Business phone" required bind:value={businessPhone} />
 				<Button
 					type="button"
@@ -224,7 +269,8 @@
 					size="sm"
 					onclick={() => (businessSubTab = 'account')}
 				>
-					← Back to your account
+					<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
+					Back to your account
 				</Button>
 			{/if}
 		</div>

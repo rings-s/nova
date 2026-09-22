@@ -28,6 +28,26 @@ import { http } from './client.js';
  * @property {string|null} starting_price
  * @property {string|null} currency
  * @property {number|null} distance_km
+ * @property {number} rating_count Verified ratings received.
+ * @property {number|null} rating_average Plain average, 1–5; null when unrated.
+ */
+
+/**
+ * A branch as a GeoJSON Point Feature (RFC 7946), the shape `L.geoJSON` reads.
+ * @typedef {Object} ListingFeature
+ * @property {'Feature'} type
+ * @property {string} id The branch (location) id.
+ * @property {{ type: 'Point', coordinates: [number, number] }} geometry
+ *   `[longitude, latitude]` — GeoJSON's order, the reverse of `ListingCard`'s.
+ * @property {ListingCard} properties The same public projection a search hit carries.
+ */
+
+/**
+ * @typedef {Object} ListingFeatureCollection
+ * @property {'FeatureCollection'} type
+ * @property {ListingFeature[]} features
+ * @property {boolean} truncated More branches matched than the response's
+ *   `limit` allowed, so the map shows some of them, not all.
  */
 
 /**
@@ -78,6 +98,8 @@ import { http } from './client.js';
  * @property {string|null} description_ar
  * @property {string|null} logo_asset_id
  * @property {string|null} cover_asset_id
+ * @property {number} rating_count
+ * @property {number|null} rating_average
  * @property {StorefrontLocation[]} locations
  * @property {StorefrontService[]} services
  * @property {StorefrontProvider[]} providers
@@ -118,8 +140,18 @@ import { http } from './client.js';
 
 /**
  * Finds bookable branches. The marketplace's front door.
+ *
+ * `bbox` keeps only branches inside a map viewport, `west,south,east,north`;
+ * `toBBox` in `$lib/map/bbox.js` produces it from a Leaflet map.
+ *
+ * `sort`: `default` is nearest-first when `latitude`/`longitude` are given and
+ * by name otherwise; `distance` needs coordinates; `rating` ranks best-rated
+ * first by a confidence-weighted score, so one 5-star visit does not outrank
+ * hundreds averaging 4.8. Coordinates also limit results to `radiusKm`
+ * (default 25).
  * @param {{ q?: string|null, city?: string|null, category?: string|null, latitude?: number|null,
- *   longitude?: number|null, radiusKm?: number|null, limit?: number, offset?: number }} [params]
+ *   longitude?: number|null, radiusKm?: number|null, bbox?: string|null,
+ *   sort?: 'default'|'distance'|'rating', limit?: number, offset?: number }} [params]
  * @returns {Promise<{ items: ListingCard[] }>}
  */
 export function searchBusinesses({
@@ -129,12 +161,37 @@ export function searchBusinesses({
 	latitude = null,
 	longitude = null,
 	radiusKm = null,
+	bbox = null,
+	sort = 'default',
 	limit = 20,
 	offset = 0
 } = {}) {
 	return http.get('/discovery/businesses', {
-		query: { q, city, category, latitude, longitude, radius_km: radiusKm, limit, offset }
+		query: {
+			q,
+			city,
+			category,
+			latitude,
+			longitude,
+			radius_km: radiusKm,
+			bbox,
+			sort,
+			limit,
+			offset
+		}
 	});
+}
+
+/**
+ * The same search as `searchBusinesses`, as GeoJSON for a Leaflet map: only
+ * branches with coordinates, not paged. When `truncated` is true the cap cut
+ * some off and the customer should be asked to zoom in.
+ * @param {{ q?: string|null, city?: string|null, category?: string|null, bbox?: string|null,
+ *   limit?: number }} [params]
+ * @returns {Promise<ListingFeatureCollection>}
+ */
+export function mapBusinesses({ q = null, city = null, category = null, bbox = null, limit } = {}) {
+	return http.get('/discovery/map', { query: { q, city, category, bbox, limit } });
 }
 
 /** @param {string} slug @returns {Promise<Storefront>} */

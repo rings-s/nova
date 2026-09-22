@@ -33,6 +33,11 @@ _CONSTRAINT_ERRORS: dict[str, tuple[type[DomainError], str, str]] = {
         "duplicate_slug",
         "A location with that name already exists for this tenant.",
     ),
+    "uq_reviews_booking_id": (
+        ConflictError,
+        "already_reviewed",
+        "This visit has already been rated.",
+    ),
     "ck_bookings_end_after_start": (
         ValidationDomainError,
         "invalid_time_range",

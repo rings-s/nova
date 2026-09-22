@@ -1,8 +1,8 @@
 <script>
 	/**
 	 * @type {{
-	 *   variant?: 'primary'|'secondary'|'outline'|'ghost'|'danger'|'inverse'|'outline-inverse',
-	 *   size?: 'sm'|'md'|'lg',
+	 *   variant?: 'primary'|'secondary'|'outline'|'ghost'|'danger'|'danger-ghost'|'inverse'|'outline-inverse',
+	 *   size?: 'sm'|'md'|'lg'|'icon'|'icon-sm',
 	 *   type?: 'button'|'submit'|'reset',
 	 *   href?: string|null,
 	 *   disabled?: boolean,
@@ -28,32 +28,42 @@
 		...rest
 	} = $props();
 
+	/*
+	 * One emphasis ladder: primary (brand, the page's main action) > secondary
+	 * (ink) > outline > ghost. `inverse`/`outline-inverse` are the same two
+	 * steps for a button on a colored or dark band.
+	 */
 	const variantClasses = {
-		primary: 'bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline-brand-600',
-		secondary: 'bg-slate-900 text-white hover:bg-slate-800 focus-visible:outline-slate-900',
-		outline:
-			'bg-transparent text-slate-900 border border-slate-300 hover:bg-slate-50 focus-visible:outline-slate-400 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-slate-800',
-		ghost:
-			'bg-transparent text-slate-700 hover:bg-slate-100 focus-visible:outline-slate-400 dark:text-slate-200 dark:hover:bg-slate-800',
-		danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600',
-		// For a button placed on a colored/dark background (e.g. a marketing CTA
-		// band) — new, additive; no existing call site uses either variant.
-		inverse: 'bg-white text-brand-700 hover:bg-white/90 focus-visible:outline-white',
-		'outline-inverse':
-			'bg-transparent text-white border border-white/40 hover:bg-white/10 focus-visible:outline-white'
+		primary:
+			'bg-brand-600 text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15),0_1px_2px_rgb(190_18_60/0.3)] hover:bg-brand-700',
+		secondary:
+			'bg-slate-900 text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.1)] hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white',
+		outline: 'border border-line-strong bg-surface text-fg shadow-card hover:bg-surface-muted',
+		ghost: 'text-fg-secondary hover:bg-surface-muted hover:text-fg',
+		danger: 'bg-red-600 text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-red-700',
+		// A destructive action that isn't the row's main action (Remove, Revoke).
+		'danger-ghost':
+			'text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300',
+		inverse: 'bg-white text-brand-700 shadow-raised hover:bg-white/90',
+		'outline-inverse': 'border border-white/40 text-white hover:bg-white/10'
 	};
 
+	// Heights 32 / 40 / 48: every control in a row lines up with an Input (40).
 	const sizeClasses = {
-		sm: 'px-3 py-1.5 text-sm gap-1.5',
-		md: 'px-4 py-2 text-sm gap-2',
-		lg: 'px-5 py-2.5 text-base gap-2'
+		sm: 'h-8 px-3 text-[13px] gap-1.5',
+		md: 'h-10 px-4 text-sm gap-2',
+		lg: 'h-12 px-6 text-[15px] gap-2',
+		// Square, for an icon-only button — give it an aria-label.
+		icon: 'size-10',
+		'icon-sm': 'size-8'
 	};
 
 	let classes = $derived(
 		[
-			'inline-flex items-center justify-center rounded-lg font-medium transition-colors',
-			'focus-visible:outline-2 focus-visible:outline-offset-2',
-			'disabled:opacity-50 disabled:cursor-not-allowed',
+			'relative inline-flex shrink-0 select-none items-center justify-center rounded-control font-medium whitespace-nowrap',
+			'transition-[background-color,color,box-shadow,transform] duration-fast ease-out-premium active:scale-[0.98]',
+			'focus-ring',
+			'disabled:pointer-events-none disabled:opacity-50',
 			variantClasses[variant],
 			sizeClasses[size],
 			fullWidth ? 'w-full' : '',
@@ -72,12 +82,19 @@
 		{@render children?.()}
 	</a>
 {:else}
-	<button {type} disabled={disabled || loading} class={classes} {onclick} {...rest}>
+	<button
+		{type}
+		disabled={disabled || loading}
+		aria-busy={loading || undefined}
+		class={classes}
+		{onclick}
+		{...rest}
+	>
 		{#if loading}
 			<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
 				<path
-					class="opacity-75"
+					class="opacity-90"
 					fill="currentColor"
 					d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
 				/>

@@ -1,4 +1,5 @@
 <script>
+	import { accessStore } from '$lib/stores/access.svelte.js';
 	/**
 	 * Catalog setup: locations, then the services and providers that hang off
 	 * one location. A location must exist before either of the other two tabs
@@ -12,6 +13,7 @@
 		createBusiness,
 		createLocation,
 		listLocations,
+		setLocationPosition,
 		createService,
 		listServices,
 		createProvider,
@@ -22,6 +24,9 @@
 	import { pickBilingual } from '$lib/utils/bilingual.js';
 	import { formatMinutesOfDay, parseMinutesOfDay, weekdayLabel } from '$lib/utils/datetime.js';
 
+	import Icon from '$lib/components/ui/Icon.svelte';
+	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import { fieldBase, fieldBorder } from '$lib/components/ui/styles.js';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
@@ -34,6 +39,7 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import LocationCard from '$lib/components/catalog/LocationCard.svelte';
+	import LocationPicker from '$lib/components/map/LocationPicker.svelte';
 	import ServiceCard from '$lib/components/catalog/ServiceCard.svelte';
 	import ProviderCard from '$lib/components/catalog/ProviderCard.svelte';
 
@@ -41,6 +47,9 @@
 	// its `children` until a tenant is selected.
 	let tenantId = $derived(/** @type {string} */ (tenantStore.activeTenantId));
 	let businessId = $derived(businessStore.activeBusinessId);
+	// Owner and manager edit the catalog; everyone else reads it (and keeps the
+	// rota — the Hours button stays open to all staff).
+	let canEdit = $derived(accessStore.can('manage_catalog'));
 
 	// --- Onboarding: a tenant with no cached business id yet ------------------
 
@@ -76,7 +85,28 @@
 	let locationModalOpen = $state(false);
 	let creatingLocation = $state(false);
 	let locationError = $state(/** @type {string|null} */ (null));
-	let locationForm = $state({ nameEn: '', nameAr: '', phone: '', city: '' });
+	let locationForm = $state({
+		nameEn: '',
+		nameAr: '',
+		phone: '',
+		city: '',
+		latitude: /** @type {number|null} */ (null),
+		longitude: /** @type {number|null} */ (null)
+	});
+	// True while the picker's coordinates field holds text that is not a position.
+	let locationPinInvalid = $state(false);
+
+	// Positioning a branch that already exists (one created before a pin could be
+	// set, or one that has moved).
+	let positionModalOpen = $state(false);
+	let positionTarget = $state(/** @type {import('$lib/api/catalog.js').Location|null} */ (null));
+	let positionForm = $state({
+		latitude: /** @type {number|null} */ (null),
+		longitude: /** @type {number|null} */ (null)
+	});
+	let positionPinInvalid = $state(false);
+	let savingPosition = $state(false);
+	let positionError = $state(/** @type {string|null} */ (null));
 
 	let selectedLocationId = $state(/** @type {string|null} */ (null));
 
@@ -110,17 +140,57 @@
 				nameEn: locationForm.nameEn,
 				nameAr: locationForm.nameAr,
 				phone: locationForm.phone,
-				city: locationForm.city || null
+				city: locationForm.city || null,
+				latitude: locationForm.latitude,
+				longitude: locationForm.longitude
 			});
 			locations = [...locations, location];
 			selectedLocationId = location.id;
 			locationModalOpen = false;
-			locationForm = { nameEn: '', nameAr: '', phone: '', city: '' };
+			locationForm = {
+				nameEn: '',
+				nameAr: '',
+				phone: '',
+				city: '',
+				latitude: null,
+				longitude: null
+			};
 			toastStore.success('Location added.');
 		} catch (err) {
 			locationError = formatApiError(err);
 		} finally {
 			creatingLocation = false;
+		}
+	}
+
+	/** @param {import('$lib/api/catalog.js').Location} location */
+	function openPositionModal(location) {
+		positionTarget = location;
+		positionForm = { latitude: location.latitude, longitude: location.longitude };
+		positionError = null;
+		positionModalOpen = true;
+	}
+
+	/** @param {SubmitEvent} event */
+	async function handleSavePosition(event) {
+		event.preventDefault();
+		if (!positionTarget) return;
+		positionError = null;
+		savingPosition = true;
+		try {
+			const updated = await setLocationPosition(tenantId, positionTarget.id, {
+				latitude: positionForm.latitude,
+				longitude: positionForm.longitude
+			});
+			locations = locations.map((l) => (l.id === updated.id ? updated : l));
+			positionModalOpen = false;
+			toastStore.success(
+				updated.latitude != null ? 'Map position saved.' : 'Branch removed from the map.'
+			);
+		} catch (err) {
+			positionError = formatApiError(err);
+		} finally {
+			savingPosition = false;
 		}
 	}
 
@@ -353,82 +423,145 @@
 
 <svelte:head><title>Catalog — NOVA</title></svelte:head>
 
+{#snippet cardSkeletons()}
+	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+		{#each [0, 1, 2, 3] as n (n)}
+			<div class="rounded-card border border-line bg-surface p-4 shadow-card">
+				<div class="flex items-center gap-3">
+					<Skeleton class="size-10 rounded-control" />
+					<div class="flex-1 space-y-2">
+						<Skeleton class="h-4 w-1/2" />
+						<Skeleton class="h-3 w-1/3" />
+					</div>
+				</div>
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet locationFilter()}
+	<div class="w-full sm:w-60">
+		<Select
+			label="Location"
+			bind:value={selectedLocationId}
+			options={locations.map((l) => ({
+				value: l.id,
+				label: pickBilingual(l, 'name', 'en')
+			}))}
+		/>
+	</div>
+{/snippet}
+
 {#if !businessId}
 	<PageHeader
+		eyebrow="Business"
 		title="Catalog"
 		subtitle="Set up your storefront to start adding locations and services."
 	/>
-	<Card padding="lg">
-		{#if setupError}
-			<Alert tone="error" class="mb-4">{setupError}</Alert>
-		{/if}
-		<form class="flex flex-col gap-4" onsubmit={handleCreateBusiness}>
-			<Input label="Business name (English)" required bind:value={businessNameEn} />
-			<Input label="Business name (Arabic)" required dir="rtl" bind:value={businessNameAr} />
-			<Button type="submit" loading={settingUpBusiness}>Create storefront</Button>
-		</form>
-	</Card>
+	{#if !canEdit}
+		<Alert tone="info">The owner or a manager needs to set up the storefront first.</Alert>
+	{:else}
+		<Card padding="none" class="mx-auto max-w-xl overflow-hidden">
+			<div class="border-b border-line bg-surface-sunken px-6 py-5">
+				<div
+					class="mb-3 flex size-11 items-center justify-center rounded-card text-white shadow-glow"
+					style="background-image: var(--gradient-cta)"
+				>
+					<Icon name="sparkles" class="size-5" />
+				</div>
+				<h2 class="text-lg font-semibold tracking-tight text-fg">Create your storefront</h2>
+				<p class="mt-1 text-sm text-fg-muted">
+					Your business name appears on the marketplace in both English and Arabic.
+				</p>
+			</div>
+			<div class="p-6">
+				{#if setupError}
+					<Alert tone="error" class="mb-4">{setupError}</Alert>
+				{/if}
+				<form class="flex flex-col gap-4" onsubmit={handleCreateBusiness}>
+					<div class="grid gap-4 sm:grid-cols-2">
+						<Input label="Business name (English)" required bind:value={businessNameEn} />
+						<Input label="Business name (Arabic)" required dir="rtl" bind:value={businessNameAr} />
+					</div>
+					<Button type="submit" loading={settingUpBusiness} fullWidth>Create storefront</Button>
+				</form>
+			</div>
+		</Card>
+	{/if}
 {:else}
-	<PageHeader title="Catalog" subtitle="Locations, services and providers for this business." />
+	<PageHeader
+		eyebrow="Business"
+		title="Catalog"
+		subtitle={canEdit
+			? 'Locations, services and providers for this business.'
+			: 'Locations, services and providers for this business. Only the owner or a manager can change them.'}
+	/>
 
 	<Tabs
 		tabs={[
-			{ id: 'locations', label: 'Locations' },
+			{ id: 'locations', label: 'Locations', count: loadingLocations ? null : locations.length },
 			{ id: 'services', label: 'Services' },
 			{ id: 'providers', label: 'Providers' }
 		]}
 		bind:active={activeTab}
 	/>
 
-	<div class="mt-4">
+	<div class="mt-6">
 		{#if activeTab === 'locations'}
-			<div class="flex flex-col gap-3">
-				<div class="flex justify-end">
-					<Button size="sm" onclick={() => (locationModalOpen = true)}>Add location</Button>
+			<div class="flex flex-col gap-4">
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<p class="text-sm text-fg-muted">
+						Each branch has its own services, providers, hours and map pin.
+					</p>
+					{#if canEdit}
+						<Button size="sm" onclick={() => (locationModalOpen = true)}>
+							<Icon name="plus" class="size-4" />
+							Add location
+						</Button>
+					{/if}
 				</div>
 				{#if loadingLocations}
-					<div class="flex justify-center py-8"><Spinner /></div>
+					{@render cardSkeletons()}
 				{:else if locations.length === 0}
-					<EmptyState
-						title="No locations yet"
-						description="Add your first branch to get started."
-					/>
+					<EmptyState title="No locations yet" description="Add your first branch to get started.">
+						{#snippet icon()}<Icon name="building" class="size-6" />{/snippet}
+					</EmptyState>
 				{:else}
-					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+					<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 						{#each locations as location (location.id)}
-							<LocationCard {location} />
+							<LocationCard {location} onsetposition={canEdit ? openPositionModal : undefined} />
 						{/each}
 					</div>
 				{/if}
 			</div>
 		{:else if activeTab === 'services'}
 			{#if locations.length === 0}
-				<EmptyState title="Add a location first" description="Services belong to one branch." />
+				<EmptyState title="Add a location first" description="Services belong to one branch.">
+					{#snippet icon()}<Icon name="building" class="size-6" />{/snippet}
+				</EmptyState>
 			{:else}
-				<div class="flex flex-col gap-3">
+				<div class="flex flex-col gap-4">
 					<div class="flex flex-wrap items-end justify-between gap-3">
-						<div class="w-full max-w-xs">
-							<Select
-								label="Location"
-								bind:value={selectedLocationId}
-								options={locations.map((l) => ({
-									value: l.id,
-									label: pickBilingual(l, 'name', 'en')
-								}))}
-							/>
-						</div>
-						<Button
-							size="sm"
-							disabled={!selectedLocationId}
-							onclick={() => (serviceModalOpen = true)}>Add service</Button
-						>
+						{@render locationFilter()}
+						{#if canEdit}
+							<Button
+								size="sm"
+								disabled={!selectedLocationId}
+								onclick={() => (serviceModalOpen = true)}
+							>
+								<Icon name="plus" class="size-4" />
+								Add service
+							</Button>
+						{/if}
 					</div>
 					{#if loadingServices}
-						<div class="flex justify-center py-8"><Spinner /></div>
+						{@render cardSkeletons()}
 					{:else if services.length === 0}
-						<EmptyState title="No services yet" description="Add what this branch offers." />
+						<EmptyState title="No services yet" description="Add what this branch offers.">
+							{#snippet icon()}<Icon name="sparkles" class="size-6" />{/snippet}
+						</EmptyState>
 					{:else}
-						<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
 							{#each services as service (service.id)}
 								<ServiceCard {service} />
 							{/each}
@@ -438,49 +571,54 @@
 			{/if}
 		{:else if activeTab === 'providers'}
 			{#if locations.length === 0}
-				<EmptyState title="Add a location first" description="Providers belong to one branch." />
+				<EmptyState title="Add a location first" description="Providers belong to one branch.">
+					{#snippet icon()}<Icon name="building" class="size-6" />{/snippet}
+				</EmptyState>
 			{:else}
-				<div class="flex flex-col gap-3">
+				<div class="flex flex-col gap-4">
 					<div class="flex flex-wrap items-end justify-between gap-3">
-						<div class="w-full max-w-xs">
-							<Select
-								label="Location"
-								bind:value={selectedLocationId}
-								options={locations.map((l) => ({
-									value: l.id,
-									label: pickBilingual(l, 'name', 'en')
-								}))}
-							/>
-						</div>
-						<Button
-							size="sm"
-							disabled={!selectedLocationId}
-							onclick={() => (providerModalOpen = true)}>Add provider</Button
-						>
+						{@render locationFilter()}
+						{#if canEdit}
+							<Button
+								size="sm"
+								disabled={!selectedLocationId}
+								onclick={() => (providerModalOpen = true)}
+							>
+								<Icon name="plus" class="size-4" />
+								Add provider
+							</Button>
+						{/if}
 					</div>
 					{#if loadingProviders}
-						<div class="flex justify-center py-8"><Spinner /></div>
+						{@render cardSkeletons()}
 					{:else if providers.length === 0}
-						<EmptyState title="No providers yet" description="Add who performs the work here." />
+						<EmptyState title="No providers yet" description="Add who performs the work here.">
+							{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
+						</EmptyState>
 					{:else}
-						<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 							{#each providers as provider (provider.id)}
-								<div class="flex items-center gap-2">
-									<div class="min-w-0 flex-1"><ProviderCard {provider} /></div>
-									<Button size="sm" variant="outline" onclick={() => openSchedule(provider)}
-										>Hours</Button
-									>
-								</div>
+								<ProviderCard {provider}>
+									{#snippet actions()}
+										<Button size="sm" variant="outline" onclick={() => openSchedule(provider)}>
+											<Icon name="clock" class="size-4" />
+											Hours
+										</Button>
+									{/snippet}
+								</ProviderCard>
 							{/each}
 						</div>
 
-						{#if services.length > 0}
-							<Card padding="sm">
-								<p class="mb-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-									Qualify a provider for a service
-								</p>
-								<div class="flex flex-wrap items-end gap-3">
-									<div class="w-48">
+						{#if services.length > 0 && canEdit}
+							<Card padding="none">
+								{#snippet header()}
+									<h2 class="text-sm font-semibold text-fg">Qualify a provider for a service</h2>
+									<p class="mt-0.5 text-xs text-fg-muted">
+										Customers can only book a provider for services they are qualified for.
+									</p>
+								{/snippet}
+								<div class="flex flex-wrap items-end gap-3 p-5">
+									<div class="w-full sm:w-52">
 										<Select
 											label="Provider"
 											bind:value={assignProviderId}
@@ -490,7 +628,7 @@
 											}))}
 										/>
 									</div>
-									<div class="w-48">
+									<div class="w-full sm:w-52">
 										<Select
 											label="Service"
 											bind:value={assignServiceId}
@@ -501,11 +639,12 @@
 										/>
 									</div>
 									<Button
-										size="sm"
 										loading={assigning}
 										disabled={!assignProviderId || !assignServiceId}
-										onclick={handleAssign}>Assign</Button
+										onclick={handleAssign}
 									>
+										Assign
+									</Button>
 								</div>
 							</Card>
 						{/if}
@@ -521,15 +660,47 @@
 		<Alert tone="error" class="mb-4">{locationError}</Alert>
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleCreateLocation}>
-		<Input label="Name (English)" required bind:value={locationForm.nameEn} />
-		<Input label="Name (Arabic)" required dir="rtl" bind:value={locationForm.nameAr} />
+		<div class="grid gap-4 sm:grid-cols-2">
+			<Input label="Name (English)" required bind:value={locationForm.nameEn} />
+			<Input label="Name (Arabic)" required dir="rtl" bind:value={locationForm.nameAr} />
+		</div>
 		<Input type="tel" label="Phone" required bind:value={locationForm.phone} />
 		<Input
 			label="City"
 			hint="Optional — used by marketplace search."
 			bind:value={locationForm.city}
 		/>
-		<Button type="submit" loading={creatingLocation} fullWidth>Add location</Button>
+		<LocationPicker
+			bind:latitude={locationForm.latitude}
+			bind:longitude={locationForm.longitude}
+			city={locationForm.city}
+			onvalidity={(invalid) => (locationPinInvalid = invalid)}
+		/>
+		<Button type="submit" loading={creatingLocation} disabled={locationPinInvalid} fullWidth>
+			Add location
+		</Button>
+	</form>
+</Modal>
+
+<Modal bind:open={positionModalOpen} title="Map position">
+	{#if positionTarget}
+		<p class="mb-3 text-sm text-fg-secondary">
+			{pickBilingual(positionTarget, 'name', 'en')}
+		</p>
+	{/if}
+	{#if positionError}
+		<Alert tone="error" class="mb-4">{positionError}</Alert>
+	{/if}
+	<form class="flex flex-col gap-4" onsubmit={handleSavePosition}>
+		<LocationPicker
+			bind:latitude={positionForm.latitude}
+			bind:longitude={positionForm.longitude}
+			city={positionTarget?.city ?? null}
+			onvalidity={(invalid) => (positionPinInvalid = invalid)}
+		/>
+		<Button type="submit" loading={savingPosition} disabled={positionPinInvalid} fullWidth>
+			Save position
+		</Button>
 	</form>
 </Modal>
 
@@ -538,24 +709,28 @@
 		<Alert tone="error" class="mb-4">{serviceError}</Alert>
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleCreateService}>
-		<Input label="Name (English)" required bind:value={serviceForm.nameEn} />
-		<Input label="Name (Arabic)" required dir="rtl" bind:value={serviceForm.nameAr} />
+		<div class="grid gap-4 sm:grid-cols-2">
+			<Input label="Name (English)" required bind:value={serviceForm.nameEn} />
+			<Input label="Name (Arabic)" required dir="rtl" bind:value={serviceForm.nameAr} />
+		</div>
 		<Input label="Category" hint="Optional, e.g. Hair" bind:value={serviceForm.category} />
-		<Input
-			type="number"
-			label="Duration (minutes)"
-			required
-			min="1"
-			bind:value={serviceForm.durationMinutes}
-		/>
-		<Input
-			type="number"
-			label="Price"
-			required
-			min="0"
-			step="0.01"
-			bind:value={serviceForm.price}
-		/>
+		<div class="grid gap-4 sm:grid-cols-2">
+			<Input
+				type="number"
+				label="Duration (minutes)"
+				required
+				min="1"
+				bind:value={serviceForm.durationMinutes}
+			/>
+			<Input
+				type="number"
+				label="Price"
+				required
+				min="0"
+				step="0.01"
+				bind:value={serviceForm.price}
+			/>
+		</div>
 		<Button type="submit" loading={creatingService} fullWidth>Add service</Button>
 	</form>
 </Modal>
@@ -565,8 +740,10 @@
 		<Alert tone="error" class="mb-4">{providerError}</Alert>
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleCreateProvider}>
-		<Input label="Name (English)" required bind:value={providerForm.nameEn} />
-		<Input label="Name (Arabic)" required dir="rtl" bind:value={providerForm.nameAr} />
+		<div class="grid gap-4 sm:grid-cols-2">
+			<Input label="Name (English)" required bind:value={providerForm.nameEn} />
+			<Input label="Name (Arabic)" required dir="rtl" bind:value={providerForm.nameAr} />
+		</div>
 		<Input label="Title" hint="Optional, e.g. Senior Stylist" bind:value={providerForm.titleEn} />
 		<Button type="submit" loading={creatingProvider} fullWidth>Add provider</Button>
 	</form>
@@ -585,25 +762,31 @@
 	{#if loadingSchedule}
 		<div class="flex justify-center py-8"><Spinner /></div>
 	{:else}
-		<div class="flex flex-col gap-3">
+		<div class="flex flex-col gap-1">
 			{#each scheduleRows as row (row.weekday)}
-				<div class="flex items-center gap-3">
-					<div class="w-24 shrink-0">
+				<div
+					class="flex items-center gap-3 rounded-control px-2 py-1.5 transition-colors hover:bg-surface-sunken"
+				>
+					<div class="w-28 shrink-0">
 						<Checkbox label={weekdayLabel(row.weekday, 'en')} bind:checked={row.open} />
 					</div>
-					<input
-						type="time"
-						disabled={!row.open}
-						bind:value={row.start}
-						class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900"
-					/>
-					<span class="text-sm text-slate-400">–</span>
-					<input
-						type="time"
-						disabled={!row.open}
-						bind:value={row.end}
-						class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900"
-					/>
+					{#if row.open}
+						<input
+							type="time"
+							aria-label={`${weekdayLabel(row.weekday, 'en')} opens`}
+							bind:value={row.start}
+							class={`${fieldBase} ${fieldBorder(false)} h-9 w-32`}
+						/>
+						<span class="text-sm text-fg-subtle" aria-hidden="true">–</span>
+						<input
+							type="time"
+							aria-label={`${weekdayLabel(row.weekday, 'en')} closes`}
+							bind:value={row.end}
+							class={`${fieldBase} ${fieldBorder(false)} h-9 w-32`}
+						/>
+					{:else}
+						<span class="text-sm text-fg-subtle">Closed</span>
+					{/if}
 				</div>
 			{/each}
 			<Button class="mt-2" loading={savingSchedule} fullWidth onclick={saveSchedule}

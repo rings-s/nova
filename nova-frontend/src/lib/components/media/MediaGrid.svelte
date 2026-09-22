@@ -40,10 +40,7 @@
 <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
 	{#each assets as asset (asset.id)}
 		<Card padding="sm">
-			<p
-				class="truncate text-sm font-medium text-slate-900 dark:text-slate-100"
-				title={asset.file_name}
-			>
+			<p class="truncate text-sm font-medium text-fg" title={asset.file_name}>
 				{asset.file_name}
 			</p>
 			<div class="mt-1 flex items-center gap-1.5">

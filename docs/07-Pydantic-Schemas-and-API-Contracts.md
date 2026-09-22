@@ -30,6 +30,10 @@ related_code:
 > - **Every route requires `Authorization: Bearer <token>`** (ADR-0006). The exceptions are
 >   `/api/v1/auth/register`, `login` and `refresh`, the signature-verified
 >   `/api/v1/webhooks/moyasar`, and the public marketplace under `/api/v1/discovery/` (ADR-0010).
+>   That marketplace includes a map view: `GET /api/v1/discovery/businesses` takes a
+>   `bbox=west,south,east,north` viewport, and `GET /api/v1/discovery/map` returns the same search
+>   as a GeoJSON FeatureCollection, unpaged and capped. An owner sets where a branch appears on it
+>   with `PATCH /api/v1/tenants/{tenant_id}/catalog/locations/{location_id}/position` (ADR-0012).
 > - **Caller identity is never read from a request body.** The customer is the authenticated
 >   principal, and only staff may name someone else, with `on_behalf_of_customer_id` (ADR-0006).
 

@@ -12,6 +12,7 @@ which is the defect ADR-0007 found on the old unauthenticated `GET /tenants`.
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -44,6 +45,43 @@ class ListingCardOut(ApiSchema):
     currency: str | None = None
     #: Present only when the search supplied coordinates.
     distance_km: float | None = None
+    #: Verified ratings (`review` module): how many, and their plain average.
+    #: The search's `sort=rating` ranks by a confidence-weighted score instead,
+    #: so one 5-star visit does not outrank hundreds averaging 4.8.
+    rating_count: int = 0
+    rating_average: float | None = None
+
+
+class ListingGeometry(ApiSchema):
+    type: Literal["Point"] = "Point"
+    #: `[longitude, latitude]`: GeoJSON's order (RFC 7946 §3.1.1), the reverse
+    #: of the `latitude`/`longitude` pair everywhere else in this API.
+    coordinates: tuple[float, float]
+
+
+class ListingFeature(ApiSchema):
+    """A bookable branch as a GeoJSON Feature, ready for `L.geoJSON`.
+
+    `properties` is `ListingCardOut` itself, so a map pin carries exactly what a
+    search result does and nothing more: still no phone number, still no counts.
+    """
+
+    type: Literal["Feature"] = "Feature"
+    #: The branch (location) id, so a client can key its markers on it.
+    id: UUID
+    geometry: ListingGeometry
+    properties: ListingCardOut
+
+
+class ListingFeatureCollection(ApiSchema):
+    """Every branch in view, as GeoJSON (RFC 7946 §3.3)."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[ListingFeature]
+    #: More branches matched than `limit` allowed, so the map is showing some of
+    #: them. A foreign member, which RFC 7946 §6.1 permits, so a consumer that
+    #: only knows GeoJSON is not disturbed by it.
+    truncated: bool = False
 
 
 class StorefrontLocationOut(ApiSchema):
@@ -91,6 +129,11 @@ class StorefrontOut(ApiSchema):
     name_ar: str
     description_en: str | None = None
     description_ar: str | None = None
+    #: Verified ratings (`review` module): how many, and their plain average.
+    #: The search's `sort=rating` ranks by a confidence-weighted score instead,
+    #: so one 5-star visit does not outrank hundreds averaging 4.8.
+    rating_count: int = 0
+    rating_average: float | None = None
 
     locations: list[StorefrontLocationOut]
     services: list[StorefrontServiceOut]

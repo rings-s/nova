@@ -13,9 +13,18 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatCard from '$lib/components/ui/StatCard.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Alert from '$lib/components/ui/Alert.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Container from '$lib/components/marketing/Container.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import Textarea from '$lib/components/ui/Textarea.svelte';
+	import StarInput from '$lib/components/review/StarInput.svelte';
+	import RatingStars from '$lib/components/review/RatingStars.svelte';
+	import { listMyReviews, submitReview } from '$lib/api/review.js';
 
 	$effect(() => {
 		if (!authStore.isAuthenticated) goto(resolve('/login'));
@@ -26,6 +35,39 @@
 	let rows = $state(/** @type {Row[]} */ ([]));
 	let cancellingId = $state(/** @type {string|null} */ (null));
 	let activeTab = $state('all'); // 'all' | 'upcoming' | 'completed' | 'cancelled'
+
+	/** Booking id → the star rating the customer gave it. */
+	let ratings = $state(/** @type {Record<string, number>} */ ({}));
+	let rateTarget = $state(/** @type {Row | null} */ (null));
+	let rateValue = $state(0);
+	let rateComment = $state('');
+	let rating = $state(false);
+
+	/** @param {Row} row */
+	function openRate(row) {
+		rateTarget = row;
+		rateValue = 0;
+		rateComment = '';
+	}
+
+	async function submitRating() {
+		if (!rateTarget || rateValue < 1) return;
+		rating = true;
+		try {
+			const review = await submitReview(rateTarget.tenantId, {
+				bookingId: rateTarget.booking.id,
+				rating: rateValue,
+				comment: rateComment.trim() || null
+			});
+			ratings = { ...ratings, [review.booking_id]: review.rating };
+			toastStore.success(`Thanks — you rated ${rateTarget.businessName} ${review.rating}/5.`);
+			rateTarget = null;
+		} catch (err) {
+			toastStore.fromError(err);
+		} finally {
+			rating = false;
+		}
+	}
 
 	async function loadAll() {
 		loading = true;
@@ -39,6 +81,14 @@
 						booking
 					}));
 				})
+			);
+			// What has already been rated, so a finished visit shows its stars
+			// instead of asking again. One call per salon the customer has used.
+			const reviewed = await Promise.all(
+				customerTenantsStore.all.map((tenant) => listMyReviews(tenant.tenantId).catch(() => []))
+			);
+			ratings = Object.fromEntries(
+				reviewed.flat().map((review) => [review.booking_id, review.rating])
 			);
 			rows = results
 				.flat()
@@ -77,6 +127,9 @@
 			.length
 	);
 	let completedCount = $derived(rows.filter((r) => r.booking.status === 'completed').length);
+	let cancelledCount = $derived(
+		rows.filter((r) => r.booking.status === 'cancelled' || r.booking.status === 'no_show').length
+	);
 
 	let filteredRows = $derived(
 		rows.filter((r) => {
@@ -87,7 +140,7 @@
 				return r.booking.status === 'completed';
 			}
 			if (activeTab === 'cancelled') {
-				return r.booking.status === 'cancelled';
+				return r.booking.status === 'cancelled' || r.booking.status === 'no_show';
 			}
 			return true;
 		})
@@ -95,188 +148,129 @@
 </script>
 
 <svelte:head>
-	<title>My Bookings &amp; Appointments — NOVA</title>
+	<title>My bookings — NOVA</title>
 </svelte:head>
 
-<div class="min-h-[calc(100vh-60px)] bg-slate-50/60 pb-20 dark:bg-slate-950">
-	<!-- Page Header Hero -->
-	<section
-		class="border-b border-slate-200 bg-white py-10 sm:py-12 dark:border-slate-800 dark:bg-slate-900"
+<Container size="lg" class="py-10 sm:py-14">
+	<PageHeader
+		eyebrow="Your account"
+		title="My bookings"
+		subtitle="Every appointment you've made across NOVA salons and spas."
 	>
-		<Container size="lg">
-			<div class="flex flex-wrap items-center justify-between gap-4">
-				<div>
-					<div class="flex items-center gap-2">
-						<Badge tone="accent" size="sm">Client Portal</Badge>
-						<span class="text-xs font-medium text-slate-500">
-							{rows.length} total visit records
-						</span>
-					</div>
-					<h1
-						class="mt-2 text-display-md font-bold tracking-tight text-slate-900 sm:text-display-lg dark:text-slate-100"
-					>
-						My Salon Bookings
-					</h1>
-					<p class="mt-1 text-xs text-slate-600 dark:text-slate-400">
-						Live status, deterministic slot holds, and automated WhatsApp reminders.
-					</p>
-				</div>
+		{#snippet actions()}
+			<Button href={resolve('/discover')} variant="outline">
+				<Icon name="search" class="size-4" />
+				Find a salon
+			</Button>
+		{/snippet}
+	</PageHeader>
 
-				<div class="flex items-center gap-2">
-					<Button href={resolve('/discover')} variant="outline" size="md">
-						<Icon name="search" class="size-4" />
-						<span>Explore Salons</span>
-					</Button>
-				</div>
-			</div>
+	{#if loading}
+		<div class="flex justify-center py-20"><Spinner size="lg" /></div>
+	{:else if rows.length === 0}
+		<EmptyState
+			title="No bookings yet"
+			description="Find a salon on the marketplace and book your first visit."
+		>
+			{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
+			{#snippet action()}
+				<Button href={resolve('/discover')}>Browse salons</Button>
+			{/snippet}
+		</EmptyState>
+	{:else}
+		<div class="mb-8 grid grid-cols-3 gap-3 sm:gap-4">
+			<StatCard label="Upcoming" icon="calendar" value={upcomingCount} />
+			<StatCard label="Completed" icon="check" value={completedCount} />
+			<StatCard label="Cancelled" icon="x" value={cancelledCount} />
+		</div>
 
-			<!-- Quick Summary Counters -->
-			<div class="mt-8 grid grid-cols-2 gap-4">
-				<div
-					class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
-				>
-					<span class="text-xs font-medium text-slate-500">Upcoming</span>
-					<p class="mt-1 font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">
-						{upcomingCount}
-					</p>
-				</div>
-				<div
-					class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50"
-				>
-					<span class="text-xs font-medium text-slate-500">Completed</span>
-					<p class="mt-1 font-mono text-xl font-bold text-slate-900 dark:text-slate-100">
-						{completedCount}
-					</p>
-				</div>
-			</div>
+		<div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+			<Tabs
+				tabs={[
+					{ id: 'all', label: 'All', count: rows.length },
+					{ id: 'upcoming', label: 'Upcoming', count: upcomingCount },
+					{ id: 'completed', label: 'Completed', count: completedCount },
+					{ id: 'cancelled', label: 'Cancelled', count: cancelledCount }
+				]}
+				bind:active={activeTab}
+			/>
+		</div>
 
-			<!-- Filter Tabs -->
-			<div
-				class="mt-8 flex items-center gap-1 border-t border-slate-100 pt-4 dark:border-slate-800"
-			>
-				{#each [{ id: 'all', label: `All (${rows.length})` }, { id: 'upcoming', label: `Upcoming (${upcomingCount})` }, { id: 'completed', label: `Completed (${completedCount})` }, { id: 'cancelled', label: 'Cancelled' }] as tab (tab.id)}
-					<button
-						type="button"
-						onclick={() => (activeTab = tab.id)}
-						class={[
-							'rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all',
-							activeTab === tab.id
-								? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-								: 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
-						].join(' ')}
-					>
-						{tab.label}
-					</button>
-				{/each}
-			</div>
-		</Container>
-	</section>
-
-	<!-- Content Section -->
-	<Container size="lg" class="py-10">
-		{#if loading}
-			<div class="flex flex-col items-center justify-center py-20">
-				<Spinner size="lg" />
-				<p class="mt-4 font-mono text-xs text-slate-500">
-					Syncing customer day sheet across GCC salons...
-				</p>
-			</div>
-		{:else if rows.length === 0}
-			<div
-				class="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900"
-			>
-				<div
-					class="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-950/60 dark:text-brand-400"
-				>
-					<Icon name="calendar" class="size-6" />
-				</div>
-				<h3 class="mt-4 text-lg font-bold text-slate-900 dark:text-slate-100">
-					No salon bookings yet
-				</h3>
-				<p class="mx-auto mt-2 max-w-sm text-xs text-slate-500 dark:text-slate-400">
-					Find a salon on the marketplace to get started.
-				</p>
-				<div class="mt-6">
-					<Button href={resolve('/discover')}>Browse marketplace salons</Button>
-				</div>
-			</div>
-		{:else if filteredRows.length === 0}
-			<div
-				class="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900"
-			>
-				No appointments match the "{activeTab}" filter.
-			</div>
+		{#if filteredRows.length === 0}
+			<EmptyState title="Nothing here" description="No appointments match this filter." />
 		{:else}
-			<div class="space-y-4">
+			<div class="flex flex-col gap-3">
 				{#each filteredRows as row (row.booking.id)}
-					<div
-						class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
-					>
-						<div
-							class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 dark:border-slate-800"
-						>
-							<div class="flex items-center gap-2">
-								<span
-									class="rounded-lg bg-brand-50 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-950/60 dark:text-brand-300"
+					<BookingCard booking={row.booking} title={row.businessName}>
+						{#snippet actions()}
+							{#if row.booking.status === 'completed'}
+								{#if ratings[row.booking.id]}
+									<span class="inline-flex items-center gap-2 text-xs text-fg-muted">
+										You rated
+										<RatingStars
+											average={ratings[row.booking.id]}
+											count={1}
+											size="sm"
+											showCount={false}
+										/>
+									</span>
+								{:else}
+									<Button size="sm" onclick={() => openRate(row)}>
+										<Icon name="star" class="size-4" />
+										Rate visit
+									</Button>
+								{/if}
+							{/if}
+							{#if row.booking.status === 'confirmed' || row.booking.status === 'pending_payment'}
+								<Button
+									size="sm"
+									variant="danger-ghost"
+									loading={cancellingId === row.booking.id}
+									onclick={() => handleCancel(row)}
 								>
-									{row.businessName}
-								</span>
-								<span class="font-mono text-xs text-slate-400">
-									#{row.booking.id.slice(0, 8)}
-								</span>
-							</div>
-
-							<div class="flex items-center gap-2">
-								<span
-									class={[
-										'rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase',
-										row.booking.status === 'confirmed'
-											? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-											: row.booking.status === 'pending_payment'
-												? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-												: row.booking.status === 'completed'
-													? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-													: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-									].join(' ')}
-								>
-									{row.booking.status.replace('_', ' ')}
-								</span>
-							</div>
-						</div>
-
-						<div class="mt-4">
-							<BookingCard booking={row.booking}>
-								{#snippet actions()}
-									<div class="flex items-center gap-2">
-										{#if row.booking.status === 'confirmed' || row.booking.status === 'pending_payment'}
-											<Button
-												size="sm"
-												variant="outline"
-												loading={cancellingId === row.booking.id}
-												onclick={() => handleCancel(row)}
-											>
-												Cancel Appointment
-											</Button>
-										{/if}
-										<Button size="sm" variant="ghost" href={resolve('/discover')}>Rebook</Button>
-									</div>
-								{/snippet}
-							</BookingCard>
-						</div>
-
-						<!-- WhatsApp Assistance Micro-Tip -->
-						<div
-							class="mt-4 flex items-center gap-1.5 rounded-xl bg-slate-50 px-4 py-2 text-[11px] text-slate-500 dark:bg-slate-800/50 dark:text-slate-400"
-						>
-							<span class="size-2 rounded-full bg-emerald-500"></span>
-							<span
-								>Need to modify time or directions? Reply directly to your WhatsApp confirmation
-								message.</span
-							>
-						</div>
-					</div>
+									Cancel
+								</Button>
+							{/if}
+							<Button size="sm" variant="outline" href={resolve('/discover')}>Book again</Button>
+						{/snippet}
+					</BookingCard>
 				{/each}
 			</div>
+			<Alert tone="info" class="mt-6">
+				Need to change a time or get directions? Reply to your WhatsApp confirmation message.
+			</Alert>
 		{/if}
-	</Container>
-</div>
+	{/if}
+</Container>
+
+<Modal
+	open={rateTarget !== null}
+	title="Rate your visit"
+	description={rateTarget?.businessName ?? null}
+	size="sm"
+	onclose={() => (rateTarget = null)}
+>
+	<form
+		id="rate-form"
+		class="flex flex-col gap-5"
+		onsubmit={(event) => {
+			event.preventDefault();
+			submitRating();
+		}}
+	>
+		<StarInput bind:value={rateValue} label="How was it?" />
+		<Textarea
+			label="Anything to add?"
+			hint="Optional. Only the salon's staff see your comment; your stars count toward its public rating."
+			rows={3}
+			maxlength={1000}
+			bind:value={rateComment}
+		/>
+	</form>
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (rateTarget = null)}>Cancel</Button>
+		<Button type="submit" form="rate-form" loading={rating} disabled={rateValue < 1}>
+			Submit rating
+		</Button>
+	{/snippet}
+</Modal>

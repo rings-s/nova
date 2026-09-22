@@ -11,6 +11,8 @@
 	 * relay it out of band.
 	 */
 	import { tenantStore } from '$lib/stores/tenant.svelte.js';
+	import { authStore } from '$lib/stores/auth.svelte.js';
+	import { accessStore } from '$lib/stores/access.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import { formatApiError, errorMessage } from '$lib/utils/errors.js';
 	import { formatDate } from '$lib/utils/datetime.js';
@@ -22,6 +24,8 @@
 		revokeMembership
 	} from '$lib/api/identity.js';
 
+	import Icon from '$lib/components/ui/Icon.svelte';
+	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -42,6 +46,15 @@
 		{ value: 'receptionist', label: 'Receptionist' },
 		{ value: 'provider', label: 'Provider' }
 	];
+
+	// What this person may do here, from their membership in this business. An
+	// owner manages everyone; a manager only receptionists and providers;
+	// anyone else just sees the roster. The server enforces the same rule.
+	let canInvite = $derived(accessStore.manageableRoles.length > 0);
+	let grantableOptions = $derived(
+		ROLE_OPTIONS.filter((option) => accessStore.canManage(option.value))
+	);
+	let myUserId = $derived(String(authStore.principal?.sub ?? ''));
 
 	let loading = $state(true);
 	let loadErrorMessage = $state(/** @type {string|null} */ (null));
@@ -165,7 +178,20 @@
 
 <svelte:head><title>Team — NOVA</title></svelte:head>
 
-<PageHeader title="Team" subtitle="Who has access to this business, and at what rank." />
+<PageHeader
+	eyebrow="Business"
+	title="Team"
+	subtitle="Who has access to this business, and at what rank."
+>
+	{#snippet actions()}
+		{#if canInvite}
+			<Button onclick={() => (inviteModalOpen = true)}>
+				<Icon name="plus" class="size-4" />
+				Invite someone
+			</Button>
+		{/if}
+	{/snippet}
+</PageHeader>
 
 {#if issuedInvite}
 	<Alert tone="success" class="mb-4" dismissible ondismiss={() => (issuedInvite = null)}>
@@ -173,9 +199,9 @@
 			Invite created for <strong>{issuedInvite.email}</strong> ({issuedInvite.role}). Send this
 			token to them yourself — NOVA won't, and it won't be shown again.
 		</p>
-		<div class="mt-2 flex items-center gap-2">
+		<div class="mt-3 flex items-center gap-2">
 			<code
-				class="flex-1 truncate rounded-md bg-emerald-100 px-2 py-1 text-xs text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100"
+				class="h-8 flex-1 truncate rounded-control border border-emerald-200 bg-surface px-3 font-mono text-xs leading-8 text-fg dark:border-emerald-500/20"
 				>{issuedInvite.token}</code
 			>
 			<Button size="sm" variant="outline" onclick={copyInviteToken}>Copy</Button>
@@ -183,47 +209,60 @@
 	</Alert>
 {/if}
 
-<div class="mb-4 flex justify-end">
-	<Button onclick={() => (inviteModalOpen = true)}>Invite someone</Button>
-</div>
-
 {#if loading}
 	<div class="flex justify-center py-12"><Spinner /></div>
 {:else if loadErrorMessage}
 	<Alert tone="error">{loadErrorMessage}</Alert>
 {:else}
-	<section class="mb-8">
-		<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Members</h2>
+	<section class="mb-10">
+		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">
+			Members <span class="ms-1 text-sm font-normal text-fg-muted">{members.length}</span>
+		</h2>
 		{#if members.length === 0}
-			<EmptyState title="No members yet" />
+			<EmptyState title="No members yet">
+				{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
+			</EmptyState>
 		{:else}
 			<Card padding="none">
-				<div class="divide-y divide-slate-100 dark:divide-slate-800">
+				<div class="divide-y divide-line-subtle">
 					{#each members as member (member.id)}
-						<div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-							<div class="min-w-0">
-								<p class="text-sm font-medium text-slate-900 dark:text-slate-100">
-									{member.full_name}
-								</p>
-								<p class="text-xs text-slate-500 dark:text-slate-400">{member.email}</p>
-							</div>
-							<div class="flex items-center gap-2">
-								<div class="w-40">
-									<Select bind:value={roleDrafts[member.id]} options={ROLE_OPTIONS} />
+						<div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+							<div class="flex min-w-0 items-center gap-3">
+								<Avatar name={member.full_name} />
+								<div class="min-w-0">
+									<p class="truncate text-sm font-medium text-fg">{member.full_name}</p>
+									<p class="truncate text-xs text-fg-muted">{member.email}</p>
 								</div>
-								<Button
-									size="sm"
-									variant="outline"
-									disabled={roleDrafts[member.id] === member.role}
-									loading={savingRoleId === member.id}
-									onclick={() => saveRole(member)}
-								>
-									Save
-								</Button>
-								<Button size="sm" variant="danger" onclick={() => (revokeTarget = member)}>
-									Revoke
-								</Button>
 							</div>
+							{#if !accessStore.canManage(member.role) || member.user_id === myUserId}
+								<Badge tone={member.role === 'owner' ? 'accent' : 'neutral'} size="sm">
+									{member.role.replace(/^\w/, (c) => c.toUpperCase())}{member.user_id === myUserId
+										? ' · you'
+										: ''}
+								</Badge>
+							{:else}
+								<div class="flex items-center gap-2">
+									<div class="w-36">
+										<Select
+											aria-label={`Role for ${member.full_name}`}
+											bind:value={roleDrafts[member.id]}
+											options={grantableOptions}
+										/>
+									</div>
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={roleDrafts[member.id] === member.role}
+										loading={savingRoleId === member.id}
+										onclick={() => saveRole(member)}
+									>
+										Save
+									</Button>
+									<Button size="sm" variant="danger-ghost" onclick={() => (revokeTarget = member)}>
+										Revoke
+									</Button>
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -232,21 +271,33 @@
 	</section>
 
 	<section>
-		<h2 class="mb-3 font-medium text-slate-900 dark:text-slate-100">Pending invites</h2>
+		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Pending invites</h2>
 		{#if invites.length === 0}
-			<EmptyState title="No pending invites" />
+			<EmptyState
+				title="No pending invites"
+				description="Invites you send appear here until they're accepted."
+			>
+				{#snippet icon()}<Icon name="user-check" class="size-6" />{/snippet}
+			</EmptyState>
 		{:else}
 			<Card padding="none">
-				<div class="divide-y divide-slate-100 dark:divide-slate-800">
+				<div class="divide-y divide-line-subtle">
 					{#each invites as invite (invite.id)}
-						<div class="flex items-center justify-between px-4 py-3">
-							<div>
-								<p class="text-sm font-medium text-slate-900 dark:text-slate-100">{invite.email}</p>
-								<p class="text-xs text-slate-500 dark:text-slate-400">
-									Expires {formatDate(invite.expires_at, 'en')}
-								</p>
+						<div class="flex items-center justify-between gap-3 px-5 py-3.5">
+							<div class="flex min-w-0 items-center gap-3">
+								<span
+									class="flex size-10 shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-subtle"
+								>
+									<Icon name="user" class="size-4" />
+								</span>
+								<div class="min-w-0">
+									<p class="truncate text-sm font-medium text-fg">{invite.email}</p>
+									<p class="text-xs text-fg-muted">
+										Expires {formatDate(invite.expires_at, 'en')}
+									</p>
+								</div>
 							</div>
-							<Badge tone="info">{invite.role}</Badge>
+							<Badge tone="info" size="sm">{invite.role}</Badge>
 						</div>
 					{/each}
 				</div>
@@ -261,14 +312,14 @@
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleInvite}>
 		<Input type="email" label="Email" required bind:value={inviteForm.email} />
-		<Select label="Role" bind:value={inviteForm.role} options={ROLE_OPTIONS} />
+		<Select label="Role" bind:value={inviteForm.role} options={grantableOptions} />
 		<Button type="submit" loading={inviting} fullWidth>Send invite</Button>
 	</form>
 </Modal>
 
 <Modal open={revokeTarget !== null} title="Revoke access" onclose={() => (revokeTarget = null)}>
 	{#if revokeTarget}
-		<p class="text-sm text-slate-700 dark:text-slate-200">
+		<p class="text-sm text-fg-secondary">
 			Revoke <strong>{revokeTarget.full_name}</strong>'s access to this business? They'll be signed
 			out everywhere and will need a new invite to come back.
 		</p>

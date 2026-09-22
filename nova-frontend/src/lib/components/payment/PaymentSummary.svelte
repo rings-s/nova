@@ -19,10 +19,10 @@
 <Card padding="sm">
 	<div class="flex items-start justify-between gap-3">
 		<div>
-			<p class="text-lg font-semibold text-slate-900 dark:text-slate-100">
+			<p class="text-lg font-semibold text-fg">
 				{formatMoney(payment.amount, payment.currency, locale)}
 			</p>
-			<p class="text-sm text-slate-500 dark:text-slate-400">
+			<p class="text-sm text-fg-muted">
 				{payment.gateway}
 				{#if payment.captured_at}
 					· captured {formatDateTime(payment.captured_at, locale)}

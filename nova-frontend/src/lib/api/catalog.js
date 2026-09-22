@@ -20,6 +20,8 @@ import { http, tenantPath } from './client.js';
  * @property {string|null} cover_asset_id
  * @property {boolean} is_active
  * @property {boolean} is_listed Advertised on the public marketplace.
+ * @property {number} rating_count Verified ratings received.
+ * @property {number|null} rating_average Plain average, 1–5; null when unrated.
  * @property {string} created_at
  * @property {string} updated_at
  */
@@ -138,6 +140,21 @@ export function createLocation(
 		phone,
 		timezone,
 		city,
+		latitude,
+		longitude
+	});
+}
+
+/**
+ * Puts a branch on the marketplace map, moves it, or takes it off. Send both
+ * numbers, or both as null to remove the pin (the API refuses a half pair).
+ * @param {string} tenantId
+ * @param {string} locationId
+ * @param {{ latitude: number|null, longitude: number|null }} position
+ * @returns {Promise<Location>}
+ */
+export function setLocationPosition(tenantId, locationId, { latitude, longitude }) {
+	return http.patch(tenantPath(tenantId, `/catalog/locations/${locationId}/position`), {
 		latitude,
 		longitude
 	});

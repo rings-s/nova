@@ -16,7 +16,7 @@
 		heatmapDataFromFigure
 	} from '../../utils/chartData.js';
 	import { errorMessage } from '../../utils/errors.js';
-	import Spinner from '../ui/Spinner.svelte';
+	import Skeleton from '../ui/Skeleton.svelte';
 	import Alert from '../ui/Alert.svelte';
 	import BarSeriesChart from './charts/BarSeriesChart.svelte';
 	import DonutChart from './charts/DonutChart.svelte';
@@ -79,14 +79,14 @@
 	});
 </script>
 
-<div>
-	<p class="text-sm font-medium text-slate-700 dark:text-slate-200">{chart?.title ?? ''}</p>
+<div class="min-w-0">
+	<p class="text-sm font-semibold text-fg">{chart?.title ?? ''}</p>
 	{#if chart?.description}
-		<p class="mb-2 text-xs text-slate-500 dark:text-slate-400">{chart.description}</p>
+		<p class="mb-3 text-xs text-fg-muted">{chart.description}</p>
 	{/if}
 
 	{#if loading}
-		<div class="flex justify-center py-8"><Spinner /></div>
+		<Skeleton class="h-[220px] w-full rounded-control" />
 	{:else if error}
 		<Alert tone={errorIsExpected ? 'info' : 'error'}>{error}</Alert>
 	{:else if chart}

@@ -10,15 +10,22 @@
 	let { children } = $props();
 
 	let showFooter = $derived(isPublicChromeRoute(page.url.pathname));
+	// The dashboard is its own shell with its own <main>; wrapping it in this
+	// one would nest two main landmarks and put its sidebar inside "main".
+	let isDashboard = $derived(page.url.pathname.startsWith('/app'));
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
 <div class={showFooter ? 'flex min-h-dvh flex-col' : 'min-h-dvh'}>
 	<SiteHeader />
-	<main class={showFooter ? 'flex-1' : undefined}>
+	{#if isDashboard}
 		{@render children()}
-	</main>
+	{:else}
+		<main class={showFooter ? 'flex-1' : undefined}>
+			{@render children()}
+		</main>
+	{/if}
 	{#if showFooter}
 		<Footer />
 	{/if}

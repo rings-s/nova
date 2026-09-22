@@ -22,6 +22,7 @@
 	import { formatDateTime } from '$lib/utils/datetime.js';
 	import { formatMoney } from '$lib/utils/money.js';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
+	import Card from '$lib/components/ui/Card.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
@@ -31,6 +32,7 @@
 	import BookingStatusBadge from '$lib/components/booking/BookingStatusBadge.svelte';
 	import Container from '$lib/components/marketing/Container.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
+	import RatingStars from '$lib/components/review/RatingStars.svelte';
 
 	let slug = $derived(/** @type {string} */ (page.params.slug));
 	let loading = $state(true);
@@ -138,220 +140,165 @@
 </script>
 
 <svelte:head>
-	<title
-		>{storefront ? pickBilingual(storefront, 'name', 'en') : 'Storefront'} — Verified GCC Salon | NOVA</title
-	>
+	<title>{storefront ? pickBilingual(storefront, 'name', 'en') : 'Storefront'} — NOVA</title>
 </svelte:head>
+
+{#snippet step(/** @type {number} */ n, /** @type {string} */ label, /** @type {boolean} */ done)}
+	<div class="mb-4 flex items-center gap-3">
+		<span
+			class={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${done ? 'bg-brand-600 text-white' : 'border border-line-strong text-fg-muted'}`}
+		>
+			{#if done}<Icon name="check" class="size-3.5" />{:else}{n}{/if}
+		</span>
+		<h2 class="text-base font-semibold tracking-tight text-fg">{label}</h2>
+	</div>
+{/snippet}
 
 {#if loading}
 	<Container size="lg" class="py-24">
-		<div class="flex flex-col items-center justify-center">
-			<Spinner size="lg" />
-			<p class="mt-4 font-mono text-xs text-slate-500">
-				Loading salon storefront &amp; verified schedule...
-			</p>
-		</div>
+		<div class="flex justify-center"><Spinner size="lg" /></div>
 	</Container>
 {:else if loadError}
 	<Container size="lg" class="py-14">
 		<Alert tone="error">{loadError}</Alert>
 	</Container>
 {:else if storefront}
-	<!-- Salon Hero Header -->
-	<section
-		class="relative overflow-hidden border-b border-slate-200 bg-white py-10 sm:py-14 dark:border-slate-800 dark:bg-slate-900"
-	>
+	<!-- Salon header -->
+	<section class="relative overflow-hidden border-b border-line bg-surface">
 		<GradientBlob variant="hero" />
-		<Container size="lg" class="relative z-10">
-			<!-- Telemetry Status Line -->
-			<div class="flex flex-wrap items-center justify-between gap-3">
-				<div
-					class="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-3.5 py-1 text-xs font-semibold text-slate-700 shadow-xs backdrop-blur dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300"
-				>
-					<span class="size-2 animate-pulse rounded-full bg-emerald-500"></span>
-					<span class="font-bold text-slate-900 dark:text-slate-100"
-						>Live Concurrency Protection</span
-					>
-					<span class="text-slate-300 dark:text-slate-600">·</span>
-					<span>Deterministic 10-min Holds</span>
-				</div>
-			</div>
-
-			<div class="mt-6 flex flex-wrap items-start justify-between gap-6">
-				<div>
-					<div class="flex items-center gap-2.5">
-						{#if storefront.locations.length > 0}
-							<span class="text-xs font-medium text-slate-500">
-								{storefront.locations.length}
-								{storefront.locations.length === 1 ? 'Location' : 'Locations'}
-							</span>
-						{/if}
-					</div>
-
-					<h1
-						class="mt-3 text-display-md font-extrabold tracking-tight text-slate-900 sm:text-display-lg dark:text-slate-100"
-					>
+		<Container size="lg" class="relative z-10 py-10 sm:py-14">
+			<a
+				href={resolve('/discover')}
+				class="mb-6 inline-flex items-center gap-1 text-sm font-medium text-fg-muted transition-colors hover:text-fg"
+			>
+				<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
+				All salons
+			</a>
+			<div class="flex flex-wrap items-end justify-between gap-8">
+				<div class="max-w-2xl min-w-0">
+					<h1 class="text-display-lg font-semibold tracking-tight text-fg">
 						{pickBilingual(storefront, 'name', 'en')}
 					</h1>
-
 					{#if storefront.name_ar}
-						<p class="mt-1 font-sans text-sm text-slate-500 dark:text-slate-400" dir="rtl">
+						<p class="mt-1 w-fit text-base text-fg-muted" dir="rtl" lang="ar">
 							{storefront.name_ar}
 						</p>
 					{/if}
-
+					<div class="mt-4">
+						<RatingStars
+							average={storefront.rating_average}
+							count={storefront.rating_count}
+							size="lg"
+						/>
+					</div>
 					{#if pickBilingual(storefront, 'description', 'en')}
-						<p class="mt-3 max-w-2xl text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+						<p class="mt-4 text-body-lg text-fg-secondary">
 							{pickBilingual(storefront, 'description', 'en')}
 						</p>
 					{/if}
-
 					{#if storefront.locations.length > 0}
-						<div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-							<Icon name="map-pin" class="size-3.5 text-brand-600" />
-							<span
-								>{storefront.locations.map((l) => pickBilingual(l, 'name', 'en')).join(' · ')}</span
-							>
+						<div class="mt-5 flex flex-wrap gap-2">
+							{#each storefront.locations as location (location.id)}
+								<span
+									class="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-fg-secondary"
+								>
+									<Icon name="map-pin" class="size-3.5 text-accent" />
+									{pickBilingual(location, 'name', 'en')}
+								</span>
+							{/each}
 						</div>
 					{/if}
 				</div>
 
-				<div
-					class="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 backdrop-blur dark:border-slate-800 dark:bg-slate-800/60"
-				>
-					<span class="text-xs font-bold tracking-wider text-slate-500 uppercase"
-						>Salon Guarantees</span
-					>
-					<ul class="mt-3 space-y-2 text-xs text-slate-700 dark:text-slate-300">
-						<li class="flex items-center gap-2">
-							<Icon name="check" class="size-3.5 text-emerald-600" />
-							<span>Instant WhatsApp confirmation &amp; reminders</span>
+				<ul class="grid gap-2.5 text-sm text-fg-secondary">
+					{#each ['Instant WhatsApp confirmation', 'No double bookings — your slot is held', 'Apple Pay & Mada deposits'] as item (item)}
+						<li class="flex items-center gap-2.5">
+							<span
+								class="flex size-5 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+							>
+								<Icon name="check" class="size-3" />
+							</span>
+							{item}
 						</li>
-						<li class="flex items-center gap-2">
-							<Icon name="check" class="size-3.5 text-emerald-600" />
-							<span>Zero double bookings guaranteed</span>
-						</li>
-						<li class="flex items-center gap-2">
-							<Icon name="check" class="size-3.5 text-emerald-600" />
-							<span>Apple Pay &amp; Mada deposits via Moyasar</span>
-						</li>
-					</ul>
-				</div>
+					{/each}
+				</ul>
 			</div>
 		</Container>
 	</section>
 
-	<!-- Booking Interface Grid -->
 	<Container size="lg" class="py-10 sm:py-14">
-		<div class="grid grid-cols-1 gap-8 lg:grid-cols-12">
-			<!-- Service Menu List -->
-			<div class="lg:col-span-6">
-				<div class="mb-4 flex items-center justify-between">
-					<h2 class="text-base font-bold text-slate-900 dark:text-slate-100">
-						Signature Treatments &amp; Services
-					</h2>
-					<span class="text-xs font-medium text-slate-500">
-						{storefront.services.length} available
-					</span>
+		<div class="grid grid-cols-1 items-start gap-10 lg:grid-cols-12">
+			<!-- 1. Services -->
+			<section class="lg:col-span-7">
+				<div class="flex items-center justify-between">
+					{@render step(1, 'Choose a service', Boolean(selectedService))}
+					<span class="mb-4 text-xs text-fg-muted">{storefront.services.length} available</span>
 				</div>
-
 				{#if storefront.services.length === 0}
 					<EmptyState title="No services listed yet" />
 				{:else}
-					<div class="flex flex-col gap-3">
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 						{#each storefront.services as service (service.id)}
-							<div class="cursor-pointer transition-all">
-								<ServiceCard
-									{service}
-									selected={selectedService?.id === service.id}
-									onselect={selectService}
-								/>
-							</div>
+							<ServiceCard
+								{service}
+								selected={selectedService?.id === service.id}
+								onselect={selectService}
+							/>
 						{/each}
 					</div>
 				{/if}
-			</div>
+			</section>
 
-			<!-- Slot Picker & Checkout Desk -->
-			<div class="lg:col-span-6">
-				<div class="mb-4 flex items-center justify-between">
-					<h2 class="text-base font-bold text-slate-900 dark:text-slate-100">
-						Select Date &amp; Time
-					</h2>
-					{#if selectedService}
-						<span class="text-xs font-semibold text-brand-600 dark:text-brand-400">
-							{pickBilingual(selectedService, 'name', 'en')}
-						</span>
-					{/if}
-				</div>
-
-				{#if !selectedService}
-					<div
-						class="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900"
-					>
-						<div
-							class="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-950/60 dark:text-brand-400"
-						>
-							<Icon name="sparkles" class="size-6" />
-						</div>
-						<h3 class="mt-4 text-base font-bold text-slate-900 dark:text-slate-100">
-							Choose a service to view live slots
-						</h3>
-						<p class="mx-auto mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">
-							Click any treatment on the left to inspect real-time chair availability across our
-							therapists.
-						</p>
-					</div>
-				{:else if booking}
-					<div
-						class="rounded-3xl border border-emerald-300 bg-white p-6 shadow-md ring-2 ring-emerald-500/20 dark:border-emerald-800 dark:bg-slate-900"
-					>
-						<div
-							class="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800"
-						>
-							<div>
+			<!-- 2–3. Time and confirmation, kept in view while the menu scrolls -->
+			<section class="lg:sticky lg:top-24 lg:col-span-5">
+				{#if booking}
+					<Card padding="none" class="overflow-hidden">
+						<div class="border-b border-line bg-emerald-50/70 px-6 py-5 dark:bg-emerald-500/10">
+							<div class="flex items-center gap-3">
 								<span
-									class="text-[11px] font-bold tracking-wider text-emerald-600 uppercase dark:text-emerald-400"
+									class="flex size-10 items-center justify-center rounded-full bg-emerald-500 text-white"
 								>
-									Appointment Confirmed
+									<Icon name="check" class="size-5" />
 								</span>
-								<p class="mt-1 text-base font-bold text-slate-900 dark:text-slate-100">
-									{formatDateTime(booking.starts_at, 'en')}
-								</p>
-								<p class="mt-0.5 text-xs text-slate-500">
-									Total: {formatMoney(booking.price, booking.currency, 'en')}
-								</p>
+								<div>
+									<p class="font-semibold text-fg">You're booked</p>
+									<p class="text-sm text-fg-muted">{formatDateTime(booking.starts_at, 'en')}</p>
+								</div>
 							</div>
-							<BookingStatusBadge status={booking.status} />
 						</div>
-
-						<div
-							class="mt-4 rounded-2xl bg-slate-50 p-3.5 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300"
-						>
-							<p>
-								A confirmation with your appointment time and salon location was prepared. If you
-								selected deposit, pay below to lock your chair.
+						<div class="space-y-4 p-6">
+							<div class="flex items-center justify-between text-sm">
+								<span class="text-fg-muted">Status</span>
+								<BookingStatusBadge status={booking.status} />
+							</div>
+							<div class="flex items-center justify-between text-sm">
+								<span class="text-fg-muted">Total</span>
+								<span class="font-semibold text-fg tabular-nums">
+									{formatMoney(booking.price, booking.currency, 'en')}
+								</span>
+							</div>
+							<p class="rounded-control bg-surface-sunken p-3 text-xs text-fg-secondary">
+								A confirmation with your time and the salon's location is on its way to WhatsApp. If
+								a deposit is due, pay it below to secure your slot.
 							</p>
-						</div>
-
-						{#if booking.status === 'pending_payment'}
-							<div class="mt-4">
-								<Button fullWidth loading={payLoading} onclick={payNow}>
-									Pay Deposit via Apple Pay / Mada
-								</Button>
-							</div>
-						{/if}
-
-						<div class="mt-3">
+							{#if booking.status === 'pending_payment'}
+								<Button fullWidth loading={payLoading} onclick={payNow}>Pay deposit</Button>
+							{/if}
 							<Button fullWidth variant="outline" href={resolve('/bookings')}>
-								View in My Bookings
+								View my bookings
 							</Button>
 						</div>
-					</div>
+					</Card>
 				{:else}
-					<div
-						class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900"
-					>
+					{@render step(2, 'Pick a time', Boolean(selectedSlot))}
+					{#if !selectedService}
+						<EmptyState
+							title="Choose a service first"
+							description="Available times appear here as soon as you pick a treatment."
+						>
+							{#snippet icon()}<Icon name="clock" class="size-6" />{/snippet}
+						</EmptyState>
+					{:else}
 						<SlotPicker
 							source="public"
 							{slug}
@@ -363,58 +310,49 @@
 						/>
 
 						{#if selectedSlot}
-							<div
-								class="mt-6 rounded-2xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-900/60 dark:bg-brand-950/40"
-							>
-								{#if bookingError}
-									<Alert tone="error" class="mb-3">{bookingError}</Alert>
-								{/if}
-
-								<div class="flex items-center justify-between">
-									<div>
-										<span
-											class="text-[11px] font-bold tracking-wider text-brand-700 uppercase dark:text-brand-300"
-										>
-											Selected Slot
-										</span>
-										<p class="text-xs font-bold text-slate-900 dark:text-slate-100">
-											{formatDateTime(selectedSlot.starts_at, 'en')}
-										</p>
-									</div>
-									<span
-										class="font-mono text-base font-extrabold text-slate-900 dark:text-slate-100"
-									>
-										{formatMoney(selectedService.price, selectedService.currency, 'en')}
-									</span>
-								</div>
-
-								{#if !authStore.isAuthenticated}
-									<div
-										class="mt-4 rounded-xl border border-brand-200 bg-white p-3 text-xs dark:border-slate-800 dark:bg-slate-900"
-									>
-										<p class="text-slate-700 dark:text-slate-300">
-											Please sign in or create an account to secure this appointment with instant
-											WhatsApp alerts.
-										</p>
-										<div class="mt-3 flex gap-2">
-											<Button size="sm" href={resolve('/login')}>Sign in</Button>
-											<Button size="sm" variant="outline" href={resolve('/register')}>
-												Create account
-											</Button>
+							<div class="mt-8">
+								{@render step(3, 'Confirm', false)}
+								<Card padding="none">
+									<div class="space-y-3 p-5">
+										{#if bookingError}
+											<Alert tone="error">{bookingError}</Alert>
+										{/if}
+										<div class="flex items-start justify-between gap-4">
+											<div class="min-w-0">
+												<p class="truncate font-semibold text-fg">
+													{pickBilingual(selectedService, 'name', 'en')}
+												</p>
+												<p class="text-sm text-fg-muted">
+													{formatDateTime(selectedSlot.starts_at, 'en')}
+												</p>
+											</div>
+											<span class="text-base font-semibold text-fg tabular-nums">
+												{formatMoney(selectedService.price, selectedService.currency, 'en')}
+											</span>
 										</div>
 									</div>
-								{:else}
-									<div class="mt-4">
-										<Button fullWidth loading={confirming} onclick={confirmBooking}>
-											Lock Chair &amp; Confirm Booking
-										</Button>
+									<div class="rounded-b-card border-t border-line bg-surface-sunken p-5">
+										{#if !authStore.isAuthenticated}
+											<p class="mb-3 text-sm text-fg-secondary">
+												Sign in to book — we'll send your confirmation on WhatsApp.
+											</p>
+											<div class="grid grid-cols-2 gap-2">
+												<Button variant="outline" href={resolve('/register')}>Create account</Button
+												>
+												<Button href={resolve('/login')}>Sign in</Button>
+											</div>
+										{:else}
+											<Button fullWidth size="lg" loading={confirming} onclick={confirmBooking}>
+												Confirm booking
+											</Button>
+										{/if}
 									</div>
-								{/if}
+								</Card>
 							</div>
 						{/if}
-					</div>
+					{/if}
 				{/if}
-			</div>
+			</section>
 		</div>
 	</Container>
 {/if}

@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -32,6 +33,14 @@ class Business(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     """The public-facing storefront for a tenant."""
 
     __tablename__ = "businesses"
+    __table_args__ = (
+        CheckConstraint("rating_count >= 0", name="rating_count_non_negative"),
+        # Every rating is 1..5, so the sum is bounded by the count on both sides.
+        CheckConstraint(
+            "rating_sum BETWEEN rating_count AND rating_count * 5",
+            name="rating_sum_in_range",
+        ),
+    )
 
     name_en: Mapped[str] = mapped_column(String(255), nullable=False)
     name_ar: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -55,6 +64,20 @@ class Business(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     #: Defaults to listed because docs/11 section 2 gives every plan tier a
     #: marketplace profile; it is an opt-out, not an opt-in.
     is_listed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    #: Running totals of the verified ratings this business has received
+    #: (`review` module). Kept here rather than aggregated from `reviews` on
+    #: every search because the marketplace reads businesses through the
+    #: SELECT-only discovery window, and ratings are an attribute of the
+    #: listing a customer is choosing between — not a reason to open a second
+    #: cross-tenant window onto another table. `ReviewService` bumps both in
+    #: the same transaction that inserts the review, with an atomic UPDATE.
+    rating_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    rating_sum: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     locations: Mapped[list["Location"]] = relationship(
         back_populates="business", cascade="all, delete-orphan"

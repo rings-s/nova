@@ -19,7 +19,11 @@ from app.core.validators import (
 __all__ = [
     "MAX_SERVICE_DURATION_MINUTES",
     "MIN_SERVICE_DURATION_MINUTES",
+    "RATING_PRIOR_MEAN",
+    "RATING_PRIOR_WEIGHT",
     "generate_slug",
+    "rating_average",
+    "rating_score",
     "require_bilingual_text",
     "validate_coordinates",
     "validate_gcc_phone",
@@ -27,6 +31,35 @@ __all__ = [
     "validate_service_price",
     "validate_timezone",
 ]
+
+#: Ranking by raw average would put a salon with one 5-star visit above one
+#: with two hundred visits averaging 4.8. Instead a business is ranked as if it
+#: had also received `RATING_PRIOR_WEIGHT` ratings of `RATING_PRIOR_MEAN`: the
+#: prior dominates while there is little evidence and fades as real ratings
+#: accumulate (a Bayesian average). The prior sits below "good", so a new
+#: salon has to earn its place rather than start near the top.
+RATING_PRIOR_MEAN = 3.5
+RATING_PRIOR_WEIGHT = 5
+
+
+def rating_average(rating_sum: int, rating_count: int) -> float | None:
+    """The plain average, for display. None when nobody has rated yet."""
+    if rating_count <= 0:
+        return None
+    return round(rating_sum / rating_count, 2)
+
+
+def rating_score(rating_sum: int, rating_count: int) -> float:
+    """The confidence-weighted score the marketplace ranks by (see above).
+
+    `PublicCatalogRepository` computes the same expression in SQL so the
+    database can order and page by it; this is the reference definition, and
+    the test that pins the two together lives with the catalog tests.
+    """
+    return (rating_sum + RATING_PRIOR_MEAN * RATING_PRIOR_WEIGHT) / (
+        rating_count + RATING_PRIOR_WEIGHT
+    )
+
 
 # A treatment shorter than 5 minutes is a data-entry slip, and one longer than a
 # working day breaks availability generation.

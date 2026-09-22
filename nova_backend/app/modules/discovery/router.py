@@ -36,9 +36,15 @@ from app.core.throttling import (
 from app.db.session import set_tenant_scope
 from app.modules.booking.dependencies import build_booking_service
 from app.modules.booking.service import BookingService
+from app.modules.catalog.domain import rating_average
+from app.modules.catalog.service import ListingCard
 from app.modules.discovery.dependencies import get_discovery_service
+from app.modules.discovery.domain import SearchSort
 from app.modules.discovery.schemas import (
     ListingCardOut,
+    ListingFeature,
+    ListingFeatureCollection,
+    ListingGeometry,
     PublicAvailabilityOut,
     PublicSlotOut,
     ReferralOut,
@@ -74,6 +80,35 @@ async def _availability_reader(session: AsyncSession, tenant_id: UUID) -> Bookin
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 
+def _listing_card(card: ListingCard) -> ListingCardOut:
+    """The public projection of a search hit, shared by the list and the map.
+
+    One function so the two cannot drift: whatever the search result leaves out
+    (ADR-0010: phone numbers, internal flags, counts) the map leaves out too.
+    """
+    return ListingCardOut(
+        business_id=card.business.id,
+        tenant_id=card.business.tenant_id,
+        slug=card.business.slug,
+        name_en=card.business.name_en,
+        name_ar=card.business.name_ar,
+        description_en=card.business.description_en,
+        description_ar=card.business.description_ar,
+        location_id=card.location.id,
+        location_name_en=card.location.name_en,
+        location_name_ar=card.location.name_ar,
+        city=card.location.city,
+        latitude=card.location.latitude,
+        longitude=card.location.longitude,
+        timezone=card.location.timezone,
+        starting_price=card.starting_price,
+        currency=card.currency,
+        distance_km=card.distance_km,
+        rating_count=card.business.rating_count,
+        rating_average=rating_average(card.business.rating_sum, card.business.rating_count),
+    )
+
+
 @router.get(
     "/businesses",
     response_model=Page[ListingCardOut],
@@ -86,6 +121,16 @@ async def search_businesses(
     latitude: float | None = Query(default=None, ge=-90, le=90),
     longitude: float | None = Query(default=None, ge=-180, le=180),
     radius_km: float | None = Query(default=None, gt=0, le=100),
+    bbox: str | None = Query(
+        default=None,
+        max_length=120,
+        description="A map viewport, `west,south,east,north` in degrees.",
+    ),
+    sort: SearchSort = Query(
+        default="default",
+        description="`default` (nearest first when located, else by name), "
+        "`distance` (needs coordinates), or `rating` (best rated first).",
+    ),
     params: PageParams = Depends(),
     service: DiscoveryService = Depends(get_discovery_service),
 ) -> Page[ListingCardOut]:
@@ -93,7 +138,8 @@ async def search_businesses(
 
     `latitude`/`longitude` must be supplied together; `radius_km` defaults to a
     city-sized 25km. With coordinates the result is ordered nearest-first,
-    otherwise alphabetically.
+    otherwise alphabetically. `bbox` keeps only branches inside a map viewport,
+    and combines with the radius by intersection.
     """
     cards = await service.search(
         term=q,
@@ -102,36 +148,74 @@ async def search_businesses(
         latitude=latitude,
         longitude=longitude,
         radius_km=radius_km,
+        bbox=bbox,
+        sort=sort,
         limit=params.limit,
         offset=params.offset,
     )
     return Page(
-        items=[
-            ListingCardOut(
-                business_id=card.business.id,
-                tenant_id=card.business.tenant_id,
-                slug=card.business.slug,
-                name_en=card.business.name_en,
-                name_ar=card.business.name_ar,
-                description_en=card.business.description_en,
-                description_ar=card.business.description_ar,
-                location_id=card.location.id,
-                location_name_en=card.location.name_en,
-                location_name_ar=card.location.name_ar,
-                city=card.location.city,
-                latitude=card.location.latitude,
-                longitude=card.location.longitude,
-                timezone=card.location.timezone,
-                starting_price=card.starting_price,
-                currency=card.currency,
-                distance_km=card.distance_km,
-            )
-            for card in cards
-        ],
+        items=[_listing_card(card) for card in cards],
         # No `total`: this result is paged, and reporting the size of the page
         # as the size of the result set is worse than reporting nothing. A real
         # count means a second aggregate over the same predicates, which is a
         # cost to pay when a client actually needs to render "1 of 12 pages".
+    )
+
+
+# `/map`, not `/businesses/map`: the latter would be captured by
+# `/businesses/{slug}` above it, and would shadow any business whose slug is
+# "map" besides.
+@router.get(
+    "/map",
+    response_model=ListingFeatureCollection,
+    dependencies=[Depends(discovery_read_rate_limit)],
+)
+async def map_businesses(
+    q: str | None = Query(default=None, max_length=120, description="Free text, EN or AR."),
+    city: str | None = Query(default=None, max_length=120),
+    category: str | None = Query(default=None, max_length=120),
+    bbox: str | None = Query(
+        default=None,
+        max_length=120,
+        description="A map viewport, `west,south,east,north` in degrees.",
+    ),
+    limit: int = Query(default=200, ge=1, le=500),
+    service: DiscoveryService = Depends(get_discovery_service),
+) -> ListingFeatureCollection:
+    """The same search as `/businesses`, as GeoJSON for a Leaflet map.
+
+    Only branches with coordinates are returned, and they are not paged: a map
+    shows what is in view or it misleads. `limit` caps the response instead, and
+    `truncated` is true when the cap cut branches off, so a client can ask the
+    customer to zoom in. A `bbox` from `map.getBounds().toBBoxString()` goes
+    through as it is.
+
+    The body is a GeoJSON FeatureCollection (RFC 7946) served as
+    `application/json`, not the `application/geo+json` the RFC registers.
+    FastAPI documents a route's error responses under the route's own media
+    type, so a `geo+json` route would publish its errors as `geo+json` too,
+    while `error_handlers` always sends them as JSON — and the contract test in
+    `test_error_contract.py` exists to keep those two the same.
+    """
+    found = await service.search_on_map(
+        term=q, city=city, category=category, bbox=bbox, limit=limit
+    )
+    return ListingFeatureCollection(
+        features=[
+            ListingFeature(
+                id=card.location.id,
+                # GeoJSON is [longitude, latitude]. Not a typo.
+                geometry=ListingGeometry(
+                    coordinates=(card.location.longitude, card.location.latitude)
+                ),
+                properties=_listing_card(card),
+            )
+            for card in found.cards
+            # The search already leaves out branches with no coordinates; this
+            # says so to the type checker, and to a reader, at the point of use.
+            if card.location.latitude is not None and card.location.longitude is not None
+        ],
+        truncated=found.truncated,
     )
 
 
@@ -161,6 +245,8 @@ async def get_storefront(
         name_ar=business.name_ar,
         description_en=business.description_en,
         description_ar=business.description_ar,
+        rating_count=business.rating_count,
+        rating_average=rating_average(business.rating_sum, business.rating_count),
         locations=[StorefrontLocationOut.model_validate(row) for row in storefront.locations],
         services=[StorefrontServiceOut.model_validate(row) for row in storefront.services],
         providers=[StorefrontProviderOut.model_validate(row) for row in storefront.providers],

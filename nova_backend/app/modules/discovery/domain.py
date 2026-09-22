@@ -13,6 +13,7 @@ import hashlib
 import math
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from app.core.exceptions import ValidationDomainError
 
@@ -38,6 +39,15 @@ MAX_SEARCH_RADIUS_KM = 100.0
 #: table and cost a scan to prove it.
 MIN_SEARCH_TERM_LENGTH = 2
 
+#: `(min_lat, max_lat, min_lng, max_lng)` — the order `catalog`'s repository
+#: unpacks. Note it is not the order `bbox` arrives in; see `parse_bbox`.
+type BoundingBox = tuple[float, float, float, float]
+
+#: The whole globe, as a `bbox` string. `catalog` reads any bounding box as a
+#: demand for coordinates, so passing this is how a map asks for "every branch
+#: that can be drawn" and leaves the ones with no coordinates out.
+WORLD_BBOX = "-180,-90,180,90"
+
 
 def normalize_search_term(term: str | None) -> str | None:
     """Trims a search box into something worth querying, or nothing.
@@ -55,6 +65,31 @@ def normalize_search_term(term: str | None) -> str | None:
     if len(cleaned) < MIN_SEARCH_TERM_LENGTH:
         return None
     return cleaned.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+#: What a search may be ordered by, as the client asks for it.
+SearchSort = Literal["default", "distance", "rating"]
+#: What the search is actually ordered by, once the request is understood.
+SearchOrder = Literal["name", "distance", "rating"]
+
+
+def resolve_search_order(sort: SearchSort, *, located: bool) -> SearchOrder:
+    """Turns the requested sort into the ordering the search will apply.
+
+    `default` means "whatever answers the question best": nearest first when
+    the customer said where they are, alphabetical otherwise. `distance` has no
+    meaning without a position to measure from, so asking for it without
+    coordinates is refused rather than quietly answered alphabetically.
+    """
+    if sort == "distance":
+        if not located:
+            raise ValidationDomainError(
+                "Sorting by distance needs a latitude and longitude to measure from."
+            )
+        return "distance"
+    if sort == "rating":
+        return "rating"
+    return "distance" if located else "name"
 
 
 def validate_radius_km(radius_km: float) -> float:
@@ -80,9 +115,7 @@ def validate_coordinate_pair(latitude: float | None, longitude: float | None) ->
         raise ValidationDomainError("longitude must be between -180 and 180.")
 
 
-def bounding_box(
-    *, latitude: float, longitude: float, radius_km: float
-) -> tuple[float, float, float, float]:
+def bounding_box(*, latitude: float, longitude: float, radius_km: float) -> BoundingBox:
     """The smallest lat/lng square containing the search circle.
 
     A prefilter, not an answer: the square is larger than the circle, so it
@@ -109,6 +142,56 @@ def bounding_box(
         max(longitude - lng_delta, -180.0),
         min(longitude + lng_delta, 180.0),
     )
+
+
+def parse_bbox(raw: str) -> BoundingBox:
+    """Reads a map viewport, `west,south,east,north`, into a `BoundingBox`.
+
+    That wire order is GeoJSON's (RFC 7946 §5) and what Leaflet's
+    `LatLngBounds.toBBoxString()` produces, so a map client can send its
+    viewport as it is. The tuple returned is in `bounding_box`'s order instead,
+    which is what the repository unpacks — this is the one place the two meet.
+
+    A box that crosses the antimeridian (west greater than east) is refused, not
+    guessed at. No branch NOVA serves is anywhere near 180°, and reading it as
+    an empty box would look to a customer like "no salons here".
+    """
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 4:
+        raise ValidationDomainError("bbox must be four numbers: west,south,east,north.")
+    try:
+        west, south, east, north = (float(part) for part in parts)
+    except ValueError:
+        raise ValidationDomainError("bbox must be four numbers: west,south,east,north.") from None
+
+    # Range checks are written as `-x <= v <= x` and negated at the `if`, not
+    # inverted into `v < -x or v > x`: "nan" parses as a float and compares
+    # false to everything, so only the first form refuses it.
+    if not (-90 <= south <= 90 and -90 <= north <= 90):
+        raise ValidationDomainError("bbox latitudes must be between -90 and 90.")
+    if not (-180 <= west <= 180 and -180 <= east <= 180):
+        raise ValidationDomainError("bbox longitudes must be between -180 and 180.")
+    if south > north:
+        raise ValidationDomainError("bbox south must not be greater than north.")
+    if west > east:
+        raise ValidationDomainError(
+            "bbox west must not be greater than east; a box across the antimeridian "
+            "is not supported."
+        )
+    return (south, north, west, east)
+
+
+def intersect_boxes(a: BoundingBox, b: BoundingBox) -> BoundingBox | None:
+    """Where two boxes overlap, or None when they do not meet at all.
+
+    Two boxes that only touch along an edge do meet: the result is a zero-width
+    box, which still matches a branch sitting exactly on that line.
+    """
+    min_lat, max_lat = max(a[0], b[0]), min(a[1], b[1])
+    min_lng, max_lng = max(a[2], b[2]), min(a[3], b[3])
+    if min_lat > max_lat or min_lng > max_lng:
+        return None
+    return (min_lat, max_lat, min_lng, max_lng)
 
 
 def distance_km(*, from_lat: float, from_lng: float, to_lat: float, to_lng: float) -> float:

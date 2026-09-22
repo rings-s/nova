@@ -28,13 +28,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.events import publish_event
 from app.modules.catalog.service import ListingCard, PublicCatalogService
 from app.modules.discovery.domain import (
+    WORLD_BBOX,
+    SearchSort,
     bounding_box,
     distance_km,
     hash_referral_token,
+    intersect_boxes,
     is_referral_live,
     new_referral_token,
     normalize_search_term,
+    parse_bbox,
     referral_expiry,
+    resolve_search_order,
     validate_availability_window,
     validate_coordinate_pair,
     validate_radius_km,
@@ -54,6 +59,14 @@ _GEO_OVERFETCH = 50
 #: wide enough to cover Riyadh's inner districts, narrow enough that "near me"
 #: still means something.
 _DEFAULT_RADIUS_KM = 25.0
+
+
+@dataclass(frozen=True)
+class MapSearchResult:
+    """The pins for one map view, and whether the cap cut any off."""
+
+    cards: list[ListingCard]
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -139,18 +152,29 @@ class DiscoveryService:
         latitude: float | None = None,
         longitude: float | None = None,
         radius_km: float | None = None,
+        bbox: str | None = None,
+        sort: SearchSort = "default",
         limit: int = 20,
         offset: int = 0,
     ) -> list[ListingCard]:
         """Published branches matching the filters, nearest first when located.
+
+        `sort="rating"` ranks by the confidence-weighted rating score instead
+        (`catalog.domain.rating_score`), with or without a position.
 
         Geography is a two-step: the database narrows to a bounding box it can
         use an index for, and `distance_km` then trims the corners of that
         square down to the circle the customer actually asked for. Trigonometry
         in SQL would be exact but could not use an index; the box alone would
         report a branch 40km away as being within 30.
+
+        `bbox` is a map viewport, `west,south,east,north`. A rectangle asked for
+        is a rectangle answered, so on its own it needs no trimming and the
+        database pages it like any other filter. Given together with a radius the
+        two are intersected, and the circle is trimmed as above.
         """
         validate_coordinate_pair(latitude, longitude)
+        order = resolve_search_order(sort, located=latitude is not None)
 
         box = None
         origin: tuple[float, float] | None = None
@@ -160,17 +184,26 @@ class DiscoveryService:
             origin = (latitude, longitude)
             box = bounding_box(latitude=latitude, longitude=longitude, radius_km=radius)
 
+        # `is not None`, not truthiness: `?bbox=` is a malformed viewport and
+        # should be refused, not quietly read as "no viewport".
+        if bbox is not None:
+            viewport = parse_bbox(bbox)
+            box = viewport if box is None else intersect_boxes(box, viewport)
+            if box is None:
+                return []  # the circle and the viewport never meet
+
         cards = await self.catalog.search(
             term=normalize_search_term(term),
             city=city.strip() if city else None,
             category=category.strip() if category else None,
             bounding_box=box,
-            # The database pages the result except under a geo filter. There the
+            order="rating" if order == "rating" else "name",
+            # The database pages the result except under a radius. There the
             # box over-selects, and the corner rows have to be dropped *before*
             # the page is cut or the page comes back short — so over-fetch a
             # bounded window and slice below.
-            limit=limit if box is None else limit + offset + _GEO_OVERFETCH,
-            offset=offset if box is None else 0,
+            limit=limit if origin is None else limit + offset + _GEO_OVERFETCH,
+            offset=offset if origin is None else 0,
         )
 
         if origin is None:
@@ -200,10 +233,42 @@ class DiscoveryService:
             )
 
         # Nearest first: once coordinates are given, distance is the ranking the
-        # customer means and alphabetical order stops being useful. The id
-        # tiebreak keeps the order total, so paging cannot repeat a row.
-        measured.sort(key=lambda card: (card.distance_km or 0.0, str(card.location.id)))
+        # customer means and alphabetical order stops being useful — unless they
+        # asked for the best-rated, in which case the database's rating order
+        # survives the corner-trimming above (it is a stable filter) and
+        # distance only breaks ties. The id tiebreak keeps the order total, so
+        # paging cannot repeat a row.
+        if order == "distance":
+            measured.sort(key=lambda card: (card.distance_km or 0.0, str(card.location.id)))
         return measured[offset : offset + limit]
+
+    async def search_on_map(
+        self,
+        *,
+        term: str | None = None,
+        city: str | None = None,
+        category: str | None = None,
+        bbox: str | None = None,
+        limit: int = 200,
+    ) -> MapSearchResult:
+        """The branches a map can draw: the search filters, minus the paging.
+
+        Not paged, because a page of pins is a map with holes in it. The cap
+        bounds the response instead, and `truncated` says when it bit — one row
+        past `limit` is read to find that out — so the client can ask the
+        customer to zoom in rather than showing a partial map as a whole one.
+
+        With no viewport the whole globe is searched (`WORLD_BBOX`), which is
+        what keeps branches that have no coordinates off the map.
+        """
+        cards = await self.search(
+            term=term,
+            city=city,
+            category=category,
+            bbox=bbox if bbox is not None else WORLD_BBOX,
+            limit=limit + 1,
+        )
+        return MapSearchResult(cards=cards[:limit], truncated=len(cards) > limit)
 
     # --- storefront ---------------------------------------------------------
 

@@ -9,7 +9,7 @@ point of the vertical-slice layout.
 
 Import order matters for SQLAlchemy relationship resolution: a module must be
 imported after the modules it holds ForeignKeys into (catalog -> identity,
-discovery -> catalog).
+discovery -> catalog, review -> booking/catalog/identity).
 """
 
 # Cross-cutting tables that belong to no single module. Imported for their
@@ -41,6 +41,8 @@ from app.modules.payment.router import webhook_router
 from app.modules.queue import models as queue_models  # noqa: F401
 from app.modules.queue.router import router as queue_router
 from app.modules.queue.router import ticket_router
+from app.modules.review import models as review_models  # noqa: F401
+from app.modules.review.router import router as review_router
 
 routers = [
     auth_router,
@@ -53,6 +55,7 @@ routers = [
     schedule_router,
     queue_router,
     ticket_router,
+    review_router,
     payment_router,
     webhook_router,
     notification_router,

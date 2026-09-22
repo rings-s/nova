@@ -449,3 +449,254 @@ async def test_a_backwards_availability_window_is_refused(
         },
     )
     assert backwards.status_code == 422
+
+
+# --- map viewport and GeoJSON ------------------------------------------------
+
+#: A viewport over Riyadh in Leaflet's `toBBoxString()` order: west,south,east,north.
+RIYADH_VIEWPORT = "46.5,24.5,46.9,24.9"
+
+
+async def test_a_viewport_keeps_the_branches_inside_it(
+    client, tenant_factory, business_factory, location_factory
+):
+    tenant = await tenant_factory()
+    inside = await business_factory(tenant, name_en="Viewport Inside")
+    outside = await business_factory(tenant, name_en="Viewport Outside")
+    unplaced = await business_factory(tenant, name_en="Viewport Unplaced")
+    await location_factory(inside, latitude=RIYADH[0], longitude=RIYADH[1])
+    await location_factory(outside, latitude=JEDDAH[0], longitude=JEDDAH[1])
+    await location_factory(unplaced)  # no coordinates: cannot be inside anything
+
+    items = (
+        await client.get(
+            DISCOVERY + "/businesses", params={"q": "Viewport", "bbox": RIYADH_VIEWPORT}
+        )
+    ).json()["items"]
+
+    assert [item["business_id"] for item in items] == [str(inside.id)]
+
+
+async def test_the_viewport_is_longitude_first_like_leaflet_sends_it(
+    client, tenant_factory, business_factory, location_factory
+):
+    """The same four numbers with latitude first describe a valid box that is
+    nowhere near Riyadh.
+
+    Both orders are valid boxes, so nothing errors when they are swapped — the
+    map just goes quietly empty. This pins the order at the HTTP boundary.
+    """
+    business = await business_factory(await tenant_factory(), name_en="Order Salon")
+    await location_factory(business, latitude=RIYADH[0], longitude=RIYADH[1])
+
+    lat_first = "24.5,46.5,24.9,46.9"
+    swapped = (
+        await client.get(DISCOVERY + "/businesses", params={"q": "Order", "bbox": lat_first})
+    ).json()["items"]
+    correct = (
+        await client.get(DISCOVERY + "/businesses", params={"q": "Order", "bbox": RIYADH_VIEWPORT})
+    ).json()["items"]
+
+    assert swapped == []
+    assert [item["business_id"] for item in correct] == [str(business.id)]
+
+
+async def test_a_viewport_search_is_paged_by_the_database(
+    client, tenant_factory, business_factory, location_factory
+):
+    """A viewport is exact, so it pages like any filter — no over-fetch, no trim.
+
+    Under a radius the search reads a wider window and slices it in Python. If
+    a viewport alone were routed down that path, nothing would do the slicing:
+    the database would be asked for `limit + offset + 50` rows from row zero,
+    and the caller would get that whole window back instead of one page.
+    """
+    tenant = await tenant_factory()
+    for name in ("Paged Alpha", "Paged Bravo", "Paged Charlie"):
+        business = await business_factory(tenant, name_en=name)
+        await location_factory(business, latitude=RIYADH[0], longitude=RIYADH[1])
+
+    second = (
+        await client.get(
+            DISCOVERY + "/businesses",
+            params={"q": "Paged", "bbox": RIYADH_VIEWPORT, "limit": 1, "offset": 1},
+        )
+    ).json()["items"]
+
+    assert [item["name_en"] for item in second] == ["Paged Bravo"]
+
+
+async def test_a_viewport_and_a_radius_must_both_be_satisfied(
+    client, tenant_factory, business_factory, location_factory
+):
+    tenant = await tenant_factory()
+    close = await business_factory(tenant, name_en="Both Close")
+    # Inside the Riyadh viewport, but ~25km from the search origin.
+    distant = await business_factory(tenant, name_en="Both Distant")
+    await location_factory(close, latitude=RIYADH[0], longitude=RIYADH[1])
+    await location_factory(distant, latitude=24.55, longitude=46.85)
+    origin = {"latitude": RIYADH[0], "longitude": RIYADH[1], "radius_km": 5}
+
+    items = (
+        await client.get(
+            DISCOVERY + "/businesses", params={"q": "Both", "bbox": RIYADH_VIEWPORT, **origin}
+        )
+    ).json()["items"]
+
+    assert [item["business_id"] for item in items] == [str(close.id)]
+    assert items[0]["distance_km"] == pytest.approx(0.0, abs=0.1)
+
+
+async def test_a_viewport_that_never_meets_the_radius_is_an_empty_result_not_an_error(
+    client, tenant_factory, business_factory, location_factory
+):
+    business = await business_factory(await tenant_factory(), name_en="Disjoint Salon")
+    await location_factory(business, latitude=RIYADH[0], longitude=RIYADH[1])
+    jeddah_viewport = "39.0,21.0,39.5,22.0"
+
+    response = await client.get(
+        DISCOVERY + "/businesses",
+        params={
+            "q": "Disjoint",
+            "bbox": jeddah_viewport,
+            "latitude": RIYADH[0],
+            "longitude": RIYADH[1],
+            "radius_km": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+
+
+@pytest.mark.parametrize(
+    "bbox",
+    ["", "1,2,3", "a,b,c,d", "46.9,24.5,46.5,24.9", "46.5,24.9,46.9,24.5", "nan,24.5,46.9,24.9"],
+    ids=["empty", "three-numbers", "words", "west-over-east", "south-over-north", "nan"],
+)
+async def test_a_malformed_viewport_is_refused_not_ignored(client, bbox):
+    """Ignoring it would answer a map's question with the whole country."""
+    assert (await client.get(DISCOVERY + "/businesses", params={"bbox": bbox})).status_code == 422
+    assert (await client.get(DISCOVERY + "/map", params={"bbox": bbox})).status_code == 422
+
+
+async def test_the_map_is_a_geojson_collection_with_longitude_first(
+    client, tenant_factory, business_factory, location_factory
+):
+    business = await business_factory(
+        await tenant_factory(), name_en="Mapped Salon", slug="mapped-salon"
+    )
+    location = await location_factory(
+        business, city="Riyadh", latitude=RIYADH[0], longitude=RIYADH[1]
+    )
+
+    response = await client.get(DISCOVERY + "/map", params={"q": "Mapped"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    assert body["type"] == "FeatureCollection"
+    assert body["truncated"] is False
+    [feature] = body["features"]
+    assert feature["type"] == "Feature"
+    assert feature["id"] == str(location.id)
+    # [longitude, latitude]: the reverse of everything else in the API.
+    assert feature["geometry"] == {"type": "Point", "coordinates": [RIYADH[1], RIYADH[0]]}
+    assert feature["properties"]["slug"] == "mapped-salon"
+    assert feature["properties"]["latitude"] == RIYADH[0]
+    assert feature["properties"]["longitude"] == RIYADH[1]
+
+
+async def test_the_map_leaves_out_branches_with_no_coordinates(
+    client, tenant_factory, business_factory, location_factory
+):
+    tenant = await tenant_factory()
+    placed = await business_factory(tenant, name_en="Pin Placed")
+    unplaced = await business_factory(tenant, name_en="Pin Unplaced")
+    await location_factory(placed, latitude=RIYADH[0], longitude=RIYADH[1])
+    await location_factory(unplaced)
+
+    features = (await client.get(DISCOVERY + "/map", params={"q": "Pin"})).json()["features"]
+
+    assert [f["properties"]["business_id"] for f in features] == [str(placed.id)]
+
+
+async def test_the_map_honours_a_viewport_and_the_search_filters(
+    client, tenant_factory, business_factory, location_factory
+):
+    tenant = await tenant_factory()
+    riyadh = await business_factory(tenant, name_en="Filtered Riyadh")
+    jeddah = await business_factory(tenant, name_en="Filtered Jeddah")
+    other = await business_factory(tenant, name_en="Elsewhere Riyadh")
+    await location_factory(riyadh, city="Riyadh", latitude=RIYADH[0], longitude=RIYADH[1])
+    await location_factory(jeddah, city="Jeddah", latitude=JEDDAH[0], longitude=JEDDAH[1])
+    await location_factory(other, city="Riyadh", latitude=RIYADH[0], longitude=RIYADH[1])
+
+    def ids(response):
+        return [f["properties"]["business_id"] for f in response.json()["features"]]
+
+    in_view = await client.get(
+        DISCOVERY + "/map", params={"q": "Filtered", "bbox": RIYADH_VIEWPORT}
+    )
+    by_city = await client.get(DISCOVERY + "/map", params={"q": "Filtered", "city": "jeddah"})
+
+    assert ids(in_view) == [str(riyadh.id)]
+    assert ids(by_city) == [str(jeddah.id)]
+
+
+async def test_the_map_says_when_it_was_cut_short(
+    client, tenant_factory, business_factory, location_factory
+):
+    """A map that silently shows some of the salons reads as all of them."""
+    tenant = await tenant_factory()
+    for name in ("Capped Alpha", "Capped Bravo", "Capped Charlie"):
+        business = await business_factory(tenant, name_en=name)
+        await location_factory(business, latitude=RIYADH[0], longitude=RIYADH[1])
+
+    cut = (await client.get(DISCOVERY + "/map", params={"q": "Capped", "limit": 2})).json()
+    whole = (await client.get(DISCOVERY + "/map", params={"q": "Capped", "limit": 3})).json()
+
+    assert len(cut["features"]) == 2
+    assert cut["truncated"] is True
+    assert len(whole["features"]) == 3
+    assert whole["truncated"] is False
+
+
+@pytest.mark.parametrize("limit", [0, 501])
+async def test_the_map_limit_is_bounded(client, limit):
+    assert (await client.get(DISCOVERY + "/map", params={"limit": limit})).status_code == 422
+
+
+async def test_the_map_does_not_leak_phone_numbers(
+    client, tenant_factory, business_factory, location_factory
+):
+    """The map is a second door onto the same directory; it must not be a wider one."""
+    business = await business_factory(await tenant_factory(), name_en="Private Pin Salon")
+    await location_factory(business, phone="+966500008888", latitude=RIYADH[0], longitude=RIYADH[1])
+
+    body = (await client.get(DISCOVERY + "/map", params={"q": "Private Pin"})).text
+
+    assert "Private Pin Salon" in body
+    assert "+966500008888" not in body
+
+
+async def test_the_map_shows_only_published_listings(
+    client, tenant_factory, business_factory, location_factory, db_session, as_owner
+):
+    """Same rule as search, asserted separately: this is a second query path.
+
+    As in `TestOnlyPublishedRowsAreVisible`, the flag is changed as the schema
+    owner so that `public_discovery` — not a leftover tenant scope — is what
+    refuses the row.
+    """
+    business = await business_factory(await tenant_factory(), name_en="Delisted Pin Salon")
+    await location_factory(business, latitude=RIYADH[0], longitude=RIYADH[1])
+    async with as_owner():
+        business.is_listed = False
+        await db_session.flush()
+
+    features = (await client.get(DISCOVERY + "/map", params={"q": "Delisted Pin"})).json()[
+        "features"
+    ]
+
+    assert features == []

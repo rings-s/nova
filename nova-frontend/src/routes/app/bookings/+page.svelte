@@ -24,6 +24,8 @@
 		markBookingNoShow
 	} from '$lib/api/booking.js';
 
+	import Icon from '$lib/components/ui/Icon.svelte';
+	import { fieldBase, fieldBorder } from '$lib/components/ui/styles.js';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Select from '$lib/components/ui/Select.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -195,7 +197,7 @@
 
 <svelte:head><title>Bookings — NOVA</title></svelte:head>
 
-<PageHeader title="Bookings" subtitle="One provider's day sheet." />
+<PageHeader eyebrow="Operate" title="Bookings" subtitle="One provider's day sheet." />
 
 {#if !businessId}
 	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
@@ -206,15 +208,15 @@
 {:else if locations.length === 0}
 	<EmptyState title="Add a location first" description="Bookings belong to one branch." />
 {:else}
-	<div class="mb-4 flex flex-wrap items-end gap-3">
-		<div class="w-full max-w-xs">
+	<div class="mb-6 flex flex-wrap items-end gap-3">
+		<div class="w-full sm:w-56">
 			<Select
 				label="Location"
 				bind:value={selectedLocationId}
 				options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name', 'en') }))}
 			/>
 		</div>
-		<div class="w-full max-w-xs">
+		<div class="w-full sm:w-56">
 			<Select
 				label="Provider"
 				disabled={providers.length === 0}
@@ -223,17 +225,18 @@
 				options={providers.map((p) => ({ value: p.id, label: pickBilingual(p, 'name', 'en') }))}
 			/>
 		</div>
-		<div class="flex items-end gap-1">
-			<Button variant="outline" size="md" onclick={() => shiftDay(-1)} aria-label="Previous day">
-				←
+		<div class="flex items-end gap-1.5">
+			<Button variant="outline" size="icon" onclick={() => shiftDay(-1)} aria-label="Previous day">
+				<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
 			</Button>
 			<input
 				type="date"
+				aria-label="Day"
 				bind:value={selectedDate}
-				class="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+				class={`${fieldBase} ${fieldBorder(false)} h-10 w-40`}
 			/>
-			<Button variant="outline" size="md" onclick={() => shiftDay(1)} aria-label="Next day">
-				→
+			<Button variant="outline" size="icon" onclick={() => shiftDay(1)} aria-label="Next day">
+				<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
 			</Button>
 		</div>
 	</div>
@@ -245,8 +248,16 @@
 	{:else if loadErrorMessage}
 		<Alert tone="error">{loadErrorMessage}</Alert>
 	{:else if bookings.length === 0}
-		<EmptyState title="Nothing booked" description={formatDate(selectedDate, 'en')} />
+		<EmptyState title="Nothing booked" description={formatDate(selectedDate, 'en')}>
+			{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
+		</EmptyState>
 	{:else}
+		<div class="mb-3 flex items-baseline justify-between">
+			<h2 class="text-sm font-semibold text-fg">{formatDate(selectedDate, 'en')}</h2>
+			<p class="text-xs text-fg-muted">
+				{bookings.length} appointment{bookings.length === 1 ? '' : 's'}
+			</p>
+		</div>
 		<div class="flex flex-col gap-3">
 			{#each bookings as booking (booking.id)}
 				<BookingCard {booking}>

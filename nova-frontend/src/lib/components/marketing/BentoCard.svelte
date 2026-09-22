@@ -1,9 +1,6 @@
 <script>
 	/**
-	 * A marketing-only feature tile. Deliberately its own surface rather than
-	 * `ui/Card.svelte` — its larger radius and hover-lift are part of the
-	 * bespoke marketing look and must never cascade into /app, which reuses
-	 * `ui/Card.svelte` directly.
+	 * A marketing feature tile: the card surface with a softer hover lift.
 	 *
 	 * @type {{
 	 *   span?: 1|2,
@@ -16,7 +13,7 @@
 
 <div
 	class={[
-		'rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-shadow duration-200 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900',
+		'duration-base rounded-card border border-line bg-surface p-6 shadow-card transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised',
 		span === 2 ? 'sm:col-span-2' : '',
 		className
 	].join(' ')}

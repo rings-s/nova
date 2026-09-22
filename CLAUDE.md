@@ -57,7 +57,7 @@ CI (`.github/workflows/ci.yml`) runs:
 
 ### Vertical slices with enforced layering
 
-Each bounded context is a package under `app/modules/`: identity, catalog, discovery, booking, queue, payment, billing, analytics, media, notification, ai_agents. Every package has the same files: `router`, `schemas`, `service`, `domain`, `models`, `repository`, `events`, `exceptions`, `dependencies`. `booking` is the reference implementation.
+Each bounded context is a package under `app/modules/`: identity, catalog, discovery, booking, queue, review, payment, billing, analytics, media, notification, ai_agents. Every package has the same files: `router`, `schemas`, `service`, `domain`, `models`, `repository`, `events`, `exceptions`, `dependencies`. `booking` is the reference implementation.
 
 `analytics` (docs/13, ADR-0011) is the exception. It owns no tables, so it has no `models`, `repository` or `events`. It reads fact projections (`BookingFact`, `PaymentFact`, …) through the other modules' services, and adds `metrics.py` (pandas and numpy) and `charts.py` (Plotly JSON).
 
@@ -71,7 +71,7 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
   - Outside request DI (worker, webhooks, other services), use the `build_*_service(session, tenant_id)` factory in that module's `dependencies.py` rather than wiring repositories by hand.
   - For a reaction rather than a question, publish a domain event instead. Booking never imports notification or billing.
 - **`domain.py` comes in two styles.** Use a rich entity only when the thing can be in an invalid state.
-  - _Pure validator functions_, where the ORM model is the entity: identity, catalog, discovery, media, notification. `analytics` is pure too, with no ORM model at all.
+  - _Pure validator functions_, where the ORM model is the entity: identity, catalog, discovery, review, media, notification. `analytics` is pure too, with no ORM model at all.
   - _Rich entities with state machines_, kept separate from the ORM record, with the repository mapping between them (e.g. `domain.Booking` vs `models.BookingRecord`): booking, queue, payment, billing.
 - **`app/modules/registry.py` is the single wiring point.**
   - It imports every module's models, which Alembic autogenerate needs.
@@ -116,7 +116,8 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
   - Every request re-reads a staff or customer token's account (`token_version`, `is_active`) through `get_token_state_lookup`, in a session of its own. Bumping `token_version` (logout-everywhere, `MembershipService.revoke`) ends every token at once. Tests that run the real token path override that dependency (`tests/modules/identity/test_token_revocation.py`).
   - `kind=service` skips that account re-check — it names no account — so it is the one claim a leaked `SECRET_KEY` turns into permanent, unrevocable access (docs/14 TM-03). The app itself never puts it on a bearer token; a request bearing one is refused outside `local`/`test`. Every token's `exp - iat` is also capped at the refresh-token TTL, so a forged token cannot claim an unbounded lifetime either.
   - A customer may reach any tenant, because it is a marketplace. So operational routes need `Depends(require_staff)`, and customer reads need per-row ownership checks (see `BookingService.get_for_principal`).
-  - Routes that move money or read what a business earns need a role permission instead: `Depends(RequirePermission(StaffPermission.X))` from `identity/dependencies.py`. The role is read from this tenant's `memberships` row, never from `Principal.roles`, which is flattened across tenants. The policy is one table in `identity/domain.py`. `tests/test_route_guards.py` lists which routes need which permission.
+  - Routes that move money, read what a business earns, or change the catalog (services, prices, locations, providers, marketplace listing: `manage_catalog`, owner and manager) need a role permission instead: `Depends(RequirePermission(StaffPermission.X))` from `identity/dependencies.py`. The role is read from this tenant's `memberships` row, never from `Principal.roles`, which is flattened across tenants. The policy is one table in `identity/domain.py`. `tests/test_route_guards.py` lists which routes need which permission.
+  - The dashboard learns the caller's role and permissions for one business from `GET /tenants/{id}/memberships/me` (`accessStore` in the frontend), only to hide what they can't use; every route still checks for itself.
   - With `AUTH_DEV_BYPASS=true`, a request without an `Authorization` header becomes a SERVICE principal. `Settings` refuses to load with the flag set unless `ENV` is `local` or `test`, and whenever `CLOUDFLARE_TUNNEL_TOKEN` is set (`config.py::dev_bypass_refusal`).
 - **Rate limits.** Write endpoints declare `dependencies=[Depends(write_rate_limit)]` from `core/throttling.py`.
   - IP buckets come from `client_ip_key`. That is the TCP peer, or the header `Settings.trusted_client_ip_header` names: `CLIENT_IP_HEADER`, else `CF-Connecting-IP` while a tunnel token is set. Never `X-Forwarded-For`, whose first entry the client writes.

@@ -23,14 +23,14 @@
 
 <label
 	for={boxId}
-	class="inline-flex items-center gap-2 text-sm text-slate-700 select-none dark:text-slate-200"
+	class="inline-flex cursor-pointer items-center gap-2.5 text-sm text-fg-secondary select-none has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
 >
 	<input
 		id={boxId}
 		type="checkbox"
 		{disabled}
 		bind:checked
-		class={`size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700 ${className}`}
+		class={`size-4 rounded-[5px] border-line-strong bg-surface text-brand-600 shadow-card transition-colors focus:ring-2 focus:ring-brand-500/30 focus:ring-offset-0 ${className}`}
 		{...rest}
 	/>
 	{#if label}<span>{label}</span>{/if}

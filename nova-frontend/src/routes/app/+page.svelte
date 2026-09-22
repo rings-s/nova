@@ -2,139 +2,172 @@
 	import { resolve } from '$app/paths';
 	import { businessStore } from '$lib/stores/business.svelte.js';
 	import { tenantStore } from '$lib/stores/tenant.svelte.js';
-	import { listBookings } from '$lib/api/booking.js';
+	import { accessStore } from '$lib/stores/access.svelte.js';
+
+	import { listProviderCalendar } from '$lib/api/booking.js';
 	import { listServices, listProviders, listLocations } from '$lib/api/catalog.js';
+
 	import { formatMoney } from '$lib/utils/money.js';
+	import { formatTime } from '$lib/utils/datetime.js';
 
 	import Card from '$lib/components/ui/Card.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatCard from '$lib/components/ui/StatCard.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
+	import BookingStatusBadge from '$lib/components/booking/BookingStatusBadge.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 
 	let businessId = $derived(businessStore.activeBusinessId);
-	let tenantId = $derived(tenantStore.activeTenantId);
+	let tenantId = $derived(/** @type {string|null} */ (tenantStore.activeTenantId));
 
 	let loading = $state(true);
+
 	let bookingCount = $state(0);
 	let confirmedCount = $state(0);
 	let serviceCount = $state(0);
 	let providerCount = $state(0);
 	let locationCount = $state(0);
+
+	/** @type {import('$lib/api/booking.js').Booking[]} */
 	let recentBookings = $state([]);
 
-	const modules = [
+	/**
+	 * @type {{
+	 *   title: string,
+	 *   icon: import('$lib/components/ui/Icon.svelte').IconName,
+	 *   description: string,
+	 *   href: '/app/queue'|'/app/bookings'|'/app/catalog'|'/app/billing'|'/app/team'|'/app/analytics'|'/app/customers',
+	 *   needs?: import('$lib/api/identity.js').StaffPermission
+	 * }[]}
+	 */
+	const shortcuts = [
 		{
-			title: 'Queue',
-			label: 'Front desk',
-			description: 'Walk-ins, tickets and live customer flow.',
+			title: 'Walk-in queue',
 			icon: 'users',
-			href: '/app/queue',
-			tone: 'accent'
+			description: 'Issue tickets and call the next customer.',
+			href: '/app/queue'
 		},
 		{
-			title: 'Bookings',
-			label: 'Schedule',
-			description: 'Manage today’s appointments and visits.',
+			title: 'Day sheet',
 			icon: 'calendar',
-			href: '/app/bookings',
-			tone: 'success'
+			description: 'Confirm, check in and complete visits.',
+			href: '/app/bookings'
 		},
 		{
 			title: 'Catalog',
-			label: 'Services',
-			description: 'Services, pricing, branches and providers.',
-			icon: 'sparkles',
-			href: '/app/catalog',
-			tone: 'neutral'
+			icon: 'layers',
+			description: 'Locations, bilingual services and providers.',
+			href: '/app/catalog'
 		},
 		{
-			title: 'Billing',
-			label: 'Finance',
-			description: 'Payments, deposits and settlements.',
-			icon: 'credit-card',
-			href: '/app/billing',
-			tone: 'success'
-		},
-		{
-			title: 'Team',
-			label: 'Access',
-			description: 'Staff roles and permissions.',
-			icon: 'user-check',
-			href: '/app/team',
-			tone: 'neutral'
+			title: 'Customers',
+			icon: 'user',
+			description: 'Search your customers and manage consent.',
+			href: '/app/customers'
 		},
 		{
 			title: 'Analytics',
-			label: 'Insights',
-			description: 'Performance, retention and revenue.',
 			icon: 'chart-bar',
+			description: 'Bookings, revenue and utilization.',
 			href: '/app/analytics',
-			tone: 'info'
+			needs: 'view_analytics'
+		},
+		{
+			title: 'Billing',
+			icon: 'credit-card',
+			description: 'Subscription, invoices and payouts.',
+			href: '/app/billing',
+			needs: 'view_financials'
+		},
+		{
+			title: 'Team',
+			icon: 'user-check',
+			description: 'Who works here, and at what role.',
+			href: '/app/team'
 		}
 	];
 
+	const greeting = (() => {
+		const hour = new Date().getHours();
+		return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+	})();
+
+	/**
+	 * Load dashboard data for the active tenant.
+	 */
 	$effect(() => {
 		if (!tenantId || !businessId) {
 			loading = false;
 			return;
 		}
 
+		const tenant = tenantId;
+		const business = businessId;
 		let cancelled = false;
 
+		loading = true;
+
 		async function loadDashboard() {
-			loading = true;
+			/** @type {import('$lib/api/catalog.js').Location[]} */
+			const locations = (await listLocations(tenant, business).catch(() => ({ items: [] }))).items;
+			if (cancelled) return;
+			locationCount = locations.length;
 
-			try {
-				const [bookingsRes, locationsRes] = await Promise.all([
-					listBookings(tenantId, { limit: 10 }).catch(() => ({ items: [] })),
-					listLocations(tenantId, businessId).catch(() => ({ items: [] }))
-				]);
-
-				if (cancelled) return;
-
-				const bookings = bookingsRes?.items ?? [];
-				const locations = locationsRes?.items ?? [];
-
-				recentBookings = bookings.slice(0, 5);
-				bookingCount = bookings.length;
-				confirmedCount = bookings.filter(
-					(booking) =>
-						booking.status === 'confirmed' ||
-						booking.status === 'in_service'
-				).length;
-
-				locationCount = locations.length;
-
-				const [services, providers] = await Promise.all([
-					Promise.all(
-						locations.map((location) =>
-							listServices(tenantId, location.id).catch(() => ({ items: [] }))
-						)
-					),
-					Promise.all(
-						locations.map((location) =>
-							listProviders(tenantId, location.id).catch(() => ({ items: [] }))
-						)
+			const [serviceResponses, providerResponses] = await Promise.all([
+				Promise.all(
+					locations.map((location) =>
+						listServices(tenant, location.id).catch(() => ({ items: [] }))
 					)
-				]);
+				),
+				Promise.all(
+					locations.map((location) =>
+						listProviders(tenant, location.id).catch(() => ({ items: [] }))
+					)
+				)
+			]);
+			if (cancelled) return;
 
-				if (cancelled) return;
+			serviceCount = serviceResponses.reduce((total, r) => total + (r?.items?.length ?? 0), 0);
+			const providers = providerResponses.flatMap((r) => r?.items ?? []);
+			providerCount = providers.length;
 
-				serviceCount = services.reduce(
-					(total, response) => total + (response?.items?.length ?? 0),
-					0
-				);
+			// Today's appointments, from each provider's day sheet: the staff view
+			// of bookings. (`GET /bookings` is a customer's own history and has
+			// nothing to say to a staff account.)
+			const now = new Date();
+			const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+			const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+			const range = { dateFrom: start.toISOString(), dateTo: end.toISOString() };
+			const calendars = await Promise.all(
+				providers.map((provider) =>
+					listProviderCalendar(tenant, provider.id, range).catch(() => ({ items: [] }))
+				)
+			);
+			if (cancelled) return;
 
-				providerCount = providers.reduce(
-					(total, response) => total + (response?.items?.length ?? 0),
-					0
-				);
-			} finally {
-				if (!cancelled) loading = false;
-			}
+			/** @type {import('$lib/api/booking.js').Booking[]} */
+			const today = calendars
+				.flatMap((calendar) => calendar.items)
+				.filter((booking) => booking.status !== 'cancelled')
+				.sort((x, y) => new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime());
+
+			bookingCount = today.length;
+			confirmedCount = today.filter((booking) =>
+				['confirmed', 'checked_in', 'in_service', 'completed'].includes(booking.status)
+			).length;
+			// What is still ahead today, soonest first; the rest of the day if
+			// nothing is.
+			const ahead = today.filter((booking) => new Date(booking.ends_at).getTime() >= now.getTime());
+			recentBookings = (ahead.length ? ahead : today).slice(0, 5);
 		}
 
-		loadDashboard();
+		loadDashboard().finally(() => {
+			if (!cancelled) {
+				loading = false;
+			}
+		});
 
 		return () => {
 			cancelled = true;
@@ -143,444 +176,164 @@
 </script>
 
 <svelte:head>
-	<title>Command Center — NOVA</title>
+	<title>Dashboard — NOVA</title>
 </svelte:head>
 
-<div class="min-h-full space-y-10">
+<PageHeader eyebrow="Overview" title={greeting} subtitle="Here's how your business looks today.">
+	{#snippet actions()}
+		<Button variant="outline" href={resolve('/app/bookings')}>
+			<Icon name="calendar" class="size-4" />
+			Day sheet
+		</Button>
+		<Button href={resolve('/app/queue')}>
+			<Icon name="users" class="size-4" />
+			Open queue
+		</Button>
+	{/snippet}
+</PageHeader>
 
-	<!-- ========================================================= -->
-	<!-- HERO -->
-	<!-- ========================================================= -->
-
-	<section
-		class="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-slate-950 text-white shadow-xl dark:border-slate-800"
-	>
-		<!-- Ambient light -->
-		<div
-			class="pointer-events-none absolute -right-32 -top-32 size-96 rounded-full bg-brand-500/20 blur-3xl"
-		></div>
-
-		<div
-			class="pointer-events-none absolute -bottom-40 left-1/3 size-96 rounded-full bg-blue-500/10 blur-3xl"
-		></div>
-
-		<div class="relative grid lg:grid-cols-[1.4fr_0.6fr]">
-
-			<!-- Main hero copy -->
-			<div class="flex flex-col justify-between p-7 sm:p-10 lg:p-14">
-
-				<div>
-					<div class="mb-6 flex items-center gap-3">
-						<span class="flex size-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-
-						<span class="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300">
-							Live Command Center
-						</span>
-
-						<span class="text-slate-600">/</span>
-
-						<span class="text-[11px] uppercase tracking-wider text-slate-400">
-							NOVA OS
-						</span>
-					</div>
-
-					<h1
-						class="max-w-3xl text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl"
-					>
-						Everything your salon needs.
-						<span class="text-slate-400">
-							One operating system.
-						</span>
-					</h1>
-
-					<p
-						class="mt-6 max-w-2xl text-sm leading-7 text-slate-400 sm:text-base"
-					>
-						Run bookings, walk-ins, staff, services, payments and customer
-						relationships from one synchronized command center.
-					</p>
-				</div>
-
-				<div class="mt-10 flex flex-wrap gap-3">
-					<Button href={resolve('/app/queue')} size="md">
-						<Icon name="users" class="size-4" />
-						Open live queue
-					</Button>
-
-					<Button
-						href={resolve('/app/bookings')}
-						variant="outline"
-						size="md"
-						class="border-slate-700 bg-white/5 text-white hover:bg-white/10"
-					>
-						<Icon name="calendar" class="size-4" />
-						View day sheet
-					</Button>
-				</div>
+{#if !businessId}
+	<Card padding="lg" class="overflow-hidden">
+		<div class="flex flex-col gap-5 sm:flex-row sm:items-center">
+			<div
+				class="flex size-12 shrink-0 items-center justify-center rounded-card text-white shadow-glow"
+				style="background-image: var(--gradient-cta)"
+			>
+				<Icon name="sparkles" class="size-6" />
 			</div>
-
-			<!-- Hero telemetry -->
-			<div class="border-t border-white/10 bg-white/[0.03] lg:border-l lg:border-t-0">
-
-				<div class="grid h-full grid-cols-2">
-
-					<div class="border-b border-r border-white/10 p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Appointments
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold">
-							{loading ? '—' : bookingCount}
-						</p>
-
-						<p class="mt-2 text-xs text-emerald-400">
-							{confirmedCount} active
-						</p>
-					</div>
-
-					<div class="border-b border-white/10 p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Providers
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold">
-							{loading ? '—' : providerCount}
-						</p>
-
-						<p class="mt-2 text-xs text-slate-500">
-							Across {locationCount || 1} locations
-						</p>
-					</div>
-
-					<div class="border-r border-white/10 p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Services
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold">
-							{loading ? '—' : serviceCount}
-						</p>
-
-						<p class="mt-2 text-xs text-slate-500">
-							Arabic + English
-						</p>
-					</div>
-
-					<div class="p-6">
-						<span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-							Protection
-						</span>
-
-						<p class="mt-3 font-mono text-4xl font-bold text-emerald-400">
-							86%
-						</p>
-
-						<p class="mt-2 text-xs text-slate-500">
-							No-show shield
-						</p>
-					</div>
-
-				</div>
-			</div>
-		</div>
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- SYSTEM STATUS -->
-	<!-- ========================================================= -->
-
-	<section class="flex flex-wrap items-center justify-between gap-4">
-
-		<div>
-			<p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-				System status
-			</p>
-
-			<h2 class="mt-1 text-lg font-bold text-slate-900 dark:text-white">
-				Your operation is synchronized
-			</h2>
-		</div>
-
-		<div class="flex flex-wrap gap-2">
-			<Badge tone="success" size="sm">Moyasar connected</Badge>
-			<Badge tone="neutral" size="sm">ZATCA Phase 2</Badge>
-			<Badge tone="accent" size="sm">Live sync</Badge>
-		</div>
-
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- MODULE NAVIGATION -->
-	<!-- ========================================================= -->
-
-	<section>
-
-		<div class="mb-5 flex items-end justify-between gap-4">
-			<div>
-				<p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-					Workspace
+			<div class="flex-1">
+				<h2 class="text-lg font-semibold tracking-tight text-fg">Set up your storefront</h2>
+				<p class="mt-1 text-sm text-fg-muted">
+					Add a location, your services and your staff before you start accepting bookings.
 				</p>
-
-				<h2 class="mt-1 text-xl font-bold text-slate-900 dark:text-white">
-					Operating modules
-				</h2>
 			</div>
-
-			<span class="hidden text-xs text-slate-400 sm:block">
-				Everything connected. Everything in one place.
-			</span>
+			<Button href={resolve('/app/catalog')}>
+				Go to catalog
+				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+			</Button>
 		</div>
-
-
-		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-
-			{#each modules as module (module.href)}
-
-				<a
-					href={resolve(module.href)}
-					class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-800"
-				>
-
-					<div class="flex items-start justify-between">
-
-						<div
-							class="flex size-11 items-center justify-center rounded-xl bg-slate-100 text-slate-700 transition-colors group-hover:bg-brand-50 group-hover:text-brand-600 dark:bg-slate-800 dark:text-slate-300 dark:group-hover:bg-brand-950/40 dark:group-hover:text-brand-400"
-						>
-							<Icon name={module.icon} class="size-5" />
-						</div>
-
-						<Icon
-							name="arrow-right"
-							class="size-4 text-slate-300 transition-all group-hover:translate-x-1 group-hover:text-brand-500"
-						/>
-
-					</div>
-
-					<p
-						class="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400"
-					>
-						{module.label}
-					</p>
-
-					<h3
-						class="mt-1 text-lg font-bold text-slate-900 dark:text-white"
-					>
-						{module.title}
-					</h3>
-
-					<p class="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-						{module.description}
-					</p>
-
-				</a>
-
-			{/each}
-
-		</div>
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- LIVE OPERATIONS -->
-	<!-- ========================================================= -->
-
-	<section class="grid gap-6 lg:grid-cols-[1fr_320px]">
-
-		<!-- Activity stream -->
-		<Card padding="none">
-
-			<div class="flex items-center justify-between border-b border-slate-100 p-6 dark:border-slate-800">
-
-				<div>
-					<p class="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-						Live operations
-					</p>
-
-					<h2 class="mt-1 text-base font-bold text-slate-900 dark:text-white">
-						Today’s activity
-					</h2>
-				</div>
-
-				<Button
-					href={resolve('/app/bookings')}
-					variant="outline"
-					size="sm"
-				>
-					Day sheet
-				</Button>
-
-			</div>
-
-			{#if recentBookings.length > 0}
-
-				<div class="divide-y divide-slate-100 dark:divide-slate-800">
-
-					{#each recentBookings as booking (booking.id)}
-
-						<div class="flex items-center justify-between gap-4 p-5">
-
-							<div class="flex min-w-0 items-center gap-4">
-
-								<div
-									class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 font-mono text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-								>
-									{booking.starts_at
-										? new Date(booking.starts_at).toLocaleTimeString('en-US', {
-												hour: '2-digit',
-												minute: '2-digit'
-											})
-										: '—'}
-								</div>
-
-								<div class="min-w-0">
-									<p class="truncate text-sm font-semibold text-slate-900 dark:text-white">
-										{booking.customer_name || 'Walk-in Guest'}
-									</p>
-
-									<p class="truncate text-xs text-slate-500">
-										{booking.service_name || 'Salon Service'}
-									</p>
-								</div>
-
-							</div>
-
-							<div class="flex shrink-0 items-center gap-3">
-
-								<span class="hidden font-mono text-xs font-semibold text-emerald-600 sm:block">
-									{booking.price
-										? formatMoney(booking.price, booking.currency, 'en')
-										: 'Deposit paid'}
-								</span>
-
-								<Badge
-									tone={booking.status === 'confirmed' ? 'success' : 'neutral'}
-									size="sm"
-								>
-									{booking.status}
-								</Badge>
-
-							</div>
-
-						</div>
-
-					{/each}
-
-				</div>
-
-			{:else}
-
-				<div class="p-10 text-center">
-					<Icon name="calendar" class="mx-auto size-8 text-slate-300" />
-
-					<p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-						No recent bookings
-					</p>
-
-					<p class="mt-1 text-xs text-slate-400">
-						New appointments will appear here.
-					</p>
-				</div>
-
-			{/if}
-
-		</Card>
-
-
-		<!-- Quick control panel -->
-		<Card padding="lg">
-
-			<p class="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-				Quick controls
-			</p>
-
-			<h2 class="mt-1 text-base font-bold text-slate-900 dark:text-white">
-				Go directly to work
-			</h2>
-
-			<div class="mt-5 space-y-2">
-
-				<a
-					href={resolve('/app/queue')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="users" class="size-4" />
-					Open queue
-				</a>
-
-				<a
-					href={resolve('/app/bookings')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="calendar" class="size-4" />
-					Today's bookings
-				</a>
-
-				<a
-					href={resolve('/app/catalog')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="sparkles" class="size-4" />
-					Service catalog
-				</a>
-
-				<a
-					href={resolve('/app/billing')}
-					class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-600 dark:border-slate-800 dark:text-slate-300"
-				>
-					<Icon name="credit-card" class="size-4" />
-					Billing
-				</a>
-
-			</div>
-
-		</Card>
-
-	</section>
-
-
-	<!-- ========================================================= -->
-	<!-- ONBOARDING -->
-	<!-- ========================================================= -->
-
-	{#if !businessId}
-
-		<section
-			class="overflow-hidden rounded-2xl border border-brand-200 bg-brand-50/60 dark:border-brand-900/60 dark:bg-brand-950/30"
-		>
-
-			<div class="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
-
-				<div class="flex items-start gap-4">
-
-					<div
-						class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white"
-					>
-						<Icon name="sparkles" class="size-5" />
-					</div>
-
-					<div>
-						<h2 class="font-bold text-slate-900 dark:text-white">
-							Complete your storefront
-						</h2>
-
-						<p class="mt-1 max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-400">
-							Set up your primary location, services and staff before
-							accepting online bookings.
-						</p>
-					</div>
-
-				</div>
-
-				<Button href={resolve('/app/catalog')} size="sm">
-					Complete setup
-				</Button>
-
-			</div>
-
+	</Card>
+{:else}
+	<div class="space-y-8">
+		<section class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4" aria-label="Key numbers">
+			<StatCard
+				label="Today"
+				icon="calendar"
+				{loading}
+				value={bookingCount}
+				hint={`${confirmedCount} confirmed or underway`}
+				href={resolve('/app/bookings')}
+			/>
+			<StatCard
+				label="Providers"
+				icon="users"
+				{loading}
+				value={providerCount}
+				hint={`Across ${locationCount} location${locationCount === 1 ? '' : 's'}`}
+			/>
+			<StatCard
+				label="Services"
+				icon="sparkles"
+				{loading}
+				value={serviceCount}
+				hint="Arabic & English"
+			/>
+			<StatCard
+				label="Locations"
+				icon="map-pin"
+				{loading}
+				value={locationCount}
+				hint="Active branches"
+				href={resolve('/app/catalog')}
+			/>
 		</section>
 
-	{/if}
+		<div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+			<Card padding="none">
+				{#snippet header()}
+					<div class="flex items-center justify-between gap-4">
+						<div>
+							<h2 class="font-semibold text-fg">Today's appointments</h2>
+							<p class="mt-0.5 text-xs text-fg-muted">Next up across your providers</p>
+						</div>
+						<Button href={resolve('/app/bookings')} variant="ghost" size="sm">
+							View all
+							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+						</Button>
+					</div>
+				{/snippet}
 
-</div>
+				{#if loading}
+					<div class="divide-y divide-line-subtle">
+						{#each [0, 1, 2] as row (row)}
+							<div class="flex items-center justify-between gap-4 px-5 py-4">
+								<Skeleton class="h-4 w-40" />
+								<Skeleton class="h-5 w-20 rounded-full" />
+							</div>
+						{/each}
+					</div>
+				{:else if recentBookings.length === 0}
+					<div class="p-5">
+						<EmptyState
+							title="Nothing booked today"
+							description="New appointments will appear here as customers book."
+						>
+							{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
+						</EmptyState>
+					</div>
+				{:else}
+					<ul class="divide-y divide-line-subtle">
+						{#each recentBookings as booking (booking.id)}
+							<li class="flex items-center justify-between gap-4 px-5 py-3.5">
+								<div class="flex min-w-0 items-center gap-3">
+									<span
+										class="flex size-9 shrink-0 items-center justify-center rounded-control bg-surface-muted text-fg-muted"
+									>
+										<Icon name="clock" class="size-4" />
+									</span>
+									<p class="truncate text-sm font-medium text-fg">
+										{formatTime(booking.starts_at, 'en')} – {formatTime(booking.ends_at, 'en')}
+									</p>
+								</div>
+								<div class="flex shrink-0 items-center gap-3">
+									<span class="text-sm font-medium text-fg tabular-nums">
+										{formatMoney(booking.price, booking.currency, 'en')}
+									</span>
+									<BookingStatusBadge status={booking.status} />
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</Card>
+
+			<section aria-labelledby="shortcuts-heading">
+				<h2 id="shortcuts-heading" class="mb-3 text-sm font-semibold text-fg">Shortcuts</h2>
+				<ul class="overflow-hidden rounded-card border border-line bg-surface shadow-card">
+					{#each shortcuts.filter((item) => !item.needs || accessStore.can(item.needs)) as item (item.href)}
+						<li class="border-b border-line-subtle last:border-b-0">
+							<a
+								href={resolve(item.href)}
+								class="group duration-fast flex items-center gap-3 px-4 py-3 focus-ring transition-colors hover:bg-surface-sunken"
+							>
+								<span
+									class="flex size-9 shrink-0 items-center justify-center rounded-control bg-accent-soft text-accent"
+								>
+									<Icon name={item.icon} class="size-[18px]" />
+								</span>
+								<span class="min-w-0 flex-1">
+									<span class="block text-sm font-medium text-fg">{item.title}</span>
+									<span class="block truncate text-xs text-fg-muted">{item.description}</span>
+								</span>
+								<Icon
+									name="chevron-right"
+									class="duration-fast size-4 text-fg-subtle transition-transform group-hover:translate-x-0.5 rtl:rotate-180"
+								/>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		</div>
+	</div>
+{/if}

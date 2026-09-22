@@ -59,12 +59,12 @@
 	{:else}
 		<div class="flex items-center justify-between">
 			<div>
-				<p class="text-sm text-slate-500 dark:text-slate-400">Your place in line</p>
-				<p class="text-3xl font-semibold text-slate-900 dark:text-slate-100">
+				<p class="text-sm text-fg-muted">Your place in line</p>
+				<p class="text-3xl font-semibold text-fg">
 					{entry.place_in_line ?? '—'}
 				</p>
 				{#if entry.estimated_wait_minutes !== null}
-					<p class="text-sm text-slate-500 dark:text-slate-400">
+					<p class="text-sm text-fg-muted">
 						~{entry.estimated_wait_minutes} min estimated wait
 					</p>
 				{/if}

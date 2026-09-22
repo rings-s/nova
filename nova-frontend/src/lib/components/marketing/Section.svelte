@@ -20,7 +20,7 @@
 
 	const toneClasses = {
 		canvas: '',
-		sunken: 'bg-slate-50 dark:bg-slate-900/40',
+		sunken: 'bg-surface-sunken',
 		dark: 'text-white'
 	};
 

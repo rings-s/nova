@@ -74,6 +74,8 @@ _ANALYTICS = "/tenants/{tenant_id}/analytics"
 _MANAGE = frozenset({StaffPermission.MANAGE_SUBSCRIPTION})
 _FINANCIALS = frozenset({StaffPermission.VIEW_FINANCIALS})
 _INSIGHTS = frozenset({StaffPermission.VIEW_ANALYTICS})
+_CATALOG = "/tenants/{tenant_id}/catalog"
+_MANAGE_CATALOG = frozenset({StaffPermission.MANAGE_CATALOG})
 
 #: Every billing route but the price list, the refund, and the analytics routes
 #: that need more than the router's `view_analytics`, with what each demands.
@@ -211,6 +213,24 @@ def test_money_routes_are_gated_by_role() -> None:
         actual = _permissions(route.dependant)
         if actual != expected:
             wrong.append(f"{method} {path}: demands {sorted(actual)}, expected {sorted(expected)}")
+    assert wrong == []
+
+
+def test_catalog_writes_need_the_catalog_permission() -> None:
+    """What the salon sells, at what price, and whether it is advertised at all:
+    owner and manager work. `require_staff` alone let a receptionist hide the
+    business from the marketplace (found 2026-09-22)."""
+    writes = [
+        (method, path, route)
+        for method, path, route in _routes()
+        if path.startswith(_CATALOG) and method in WRITE_METHODS
+    ]
+    assert writes, "no catalog writes found; did the prefix change?"
+    wrong = [
+        f"{method} {path}: demands {sorted(_permissions(route.dependant))}"
+        for method, path, route in writes
+        if _permissions(route.dependant) != _MANAGE_CATALOG
+    ]
     assert wrong == []
 
 

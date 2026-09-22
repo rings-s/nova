@@ -5,7 +5,7 @@ from pydantic import Field, field_validator
 
 from app.core.schemas import ApiSchema
 from app.core.validators import validate_email
-from app.modules.identity.domain import MembershipRole
+from app.modules.identity.domain import MembershipRole, StaffPermission
 
 
 class CreateTenantRequest(ApiSchema):
@@ -104,6 +104,20 @@ class AcceptInviteRequest(ApiSchema):
 
 class UpdateMembershipRoleRequest(ApiSchema):
     role: MembershipRole
+
+
+class MyAccessOut(ApiSchema):
+    """What the caller may do in this business, for showing the right screens.
+
+    `role` is None for a service principal, which is platform machinery rather
+    than a member. Informational only: every request is still authorized on
+    its own, so a stale copy of this in a client can hide a button but never
+    grant anything.
+    """
+
+    role: MembershipRole | None
+    permissions: list[StaffPermission]
+    manageable_roles: list[MembershipRole]
 
 
 class MembershipOut(ApiSchema):

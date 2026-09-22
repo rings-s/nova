@@ -5,6 +5,7 @@ Services flush, never commit — the router owns the transaction boundary.
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from app.core.events import publish_event
@@ -102,6 +103,17 @@ class CatalogService:
             raise BusinessNotFoundError(business_id)
         return business
 
+    async def record_rating(self, business_id: UUID, rating: int) -> None:
+        """Counts one verified rating toward this business's listing score.
+
+        Called by `review.ReviewService` in the transaction that stores the
+        review, so the totals can never disagree with the reviews table. The
+        rating's 1..5 range is enforced by the caller's domain rule and again
+        by `ck_businesses_rating_sum_in_range`.
+        """
+        if not await self.businesses.add_rating(business_id, rating):
+            raise BusinessNotFoundError(business_id)
+
     # --- Location -----------------------------------------------------------
 
     async def create_location(
@@ -158,6 +170,23 @@ class CatalogService:
     async def list_locations(self, business_id: UUID) -> list[Location]:
         await self.get_business(business_id)
         return await self.locations.list_for_business(business_id)
+
+    async def set_location_position(
+        self, location_id: UUID, *, latitude: float | None, longitude: float | None
+    ) -> Location:
+        """Puts a branch on the marketplace map, moves it, or takes it off.
+
+        Its own verb, like `set_listing_visibility`, and for the same reason: it
+        changes one thing that a customer can see and nothing the business runs
+        on. A branch with no position is still bookable and still found by name
+        or city; it is only absent from the map. Both `None` clears the pin.
+        """
+        validate_coordinates(latitude, longitude)
+        location = await self.get_location(location_id)
+        location.latitude = latitude
+        location.longitude = longitude
+        await self.locations.session.flush()
+        return location
 
     # --- Service ------------------------------------------------------------
 
@@ -334,6 +363,7 @@ class PublicCatalogService:
         city: str | None = None,
         category: str | None = None,
         bounding_box: tuple[float, float, float, float] | None = None,
+        order: Literal["name", "rating"] = "name",
         limit: int = 20,
         offset: int = 0,
     ) -> list[ListingCard]:
@@ -342,6 +372,7 @@ class PublicCatalogService:
             city=city,
             category=category,
             bounding_box=bounding_box,
+            order=order,
             limit=limit,
             offset=offset,
         )

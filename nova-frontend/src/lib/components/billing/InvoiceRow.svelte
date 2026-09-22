@@ -1,4 +1,5 @@
 <script>
+	import Icon from '../ui/Icon.svelte';
 	import Badge from '../ui/Badge.svelte';
 	import { formatMoney } from '../../utils/money.js';
 	import { formatDate } from '../../utils/datetime.js';
@@ -25,20 +26,28 @@
 <button
 	type="button"
 	onclick={() => onviewlines?.(invoice)}
-	class="flex w-full items-center justify-between gap-4 rounded-lg border border-slate-200 px-4 py-3 text-start hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50"
+	class="group duration-fast flex w-full items-center justify-between gap-4 px-5 py-3.5 text-start focus-ring transition-colors hover:bg-surface-sunken"
 >
-	<div>
-		<p class="font-medium text-slate-900 dark:text-slate-100">
-			{formatDate(invoice.period_start, locale)} – {formatDate(invoice.period_end, locale)}
-		</p>
-		<p class="text-sm text-slate-500 dark:text-slate-400">
-			{invoice.due_at ? `Due ${formatDate(invoice.due_at, locale)}` : 'Not yet issued'}
-		</p>
+	<div class="flex min-w-0 items-center gap-3">
+		<span
+			class="flex size-9 shrink-0 items-center justify-center rounded-control bg-surface-muted text-fg-muted"
+		>
+			<Icon name="receipt" class="size-4" />
+		</span>
+		<div class="min-w-0">
+			<p class="truncate text-sm font-medium text-fg">
+				{formatDate(invoice.period_start, locale)} – {formatDate(invoice.period_end, locale)}
+			</p>
+			<p class="text-xs text-fg-muted">
+				{invoice.due_at ? `Due ${formatDate(invoice.due_at, locale)}` : 'Not yet issued'}
+			</p>
+		</div>
 	</div>
-	<div class="flex items-center gap-3">
-		<p class="text-lg font-semibold text-slate-900 dark:text-slate-100">
+	<div class="flex shrink-0 items-center gap-3">
+		<Badge tone={statusTone[invoice.status] ?? 'neutral'} size="sm" dot>{invoice.status}</Badge>
+		<p class="w-28 text-end text-sm font-semibold text-fg tabular-nums">
 			{formatMoney(invoice.total_amount, invoice.currency, locale)}
 		</p>
-		<Badge tone={statusTone[invoice.status] ?? 'neutral'}>{invoice.status}</Badge>
+		<Icon name="chevron-right" class="size-4 text-fg-subtle rtl:rotate-180" />
 	</div>
 </button>

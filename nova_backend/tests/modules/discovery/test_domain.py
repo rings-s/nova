@@ -19,12 +19,15 @@ from app.core.exceptions import ValidationDomainError
 from app.modules.discovery.domain import (
     MAX_SEARCH_RADIUS_KM,
     REFERRAL_WINDOW_DAYS,
+    WORLD_BBOX,
     bounding_box,
     distance_km,
     hash_referral_token,
+    intersect_boxes,
     is_referral_live,
     new_referral_token,
     normalize_search_term,
+    parse_bbox,
     referral_expiry,
     validate_availability_window,
     validate_coordinate_pair,
@@ -161,6 +164,115 @@ class TestBoundingBox:
         )
         assert -90.0 <= min_lat <= max_lat <= 90.0
         assert -180.0 <= min_lng <= max_lng <= 180.0
+
+
+class TestParseBbox:
+    def test_the_wire_order_is_west_south_east_north(self):
+        """Leaflet's `toBBoxString()` order, and GeoJSON's.
+
+        The returned tuple is in `bounding_box`'s order instead —
+        `(min_lat, max_lat, min_lng, max_lng)` — and this is the test that pins
+        the conversion, because swapping lat and lng still yields a valid box
+        (just nowhere near Riyadh) and no error to notice.
+        """
+        assert parse_bbox("46.5,24.6,46.9,24.9") == (24.6, 24.9, 46.5, 46.9)
+
+    def test_it_reads_what_leaflet_sends(self):
+        """`LatLngBounds.toBBoxString()` — comma-separated, no spaces, decimals."""
+        assert parse_bbox("46.123456,24.123456,46.654321,24.654321") == (
+            24.123456,
+            24.654321,
+            46.123456,
+            46.654321,
+        )
+
+    def test_whitespace_around_the_numbers_is_tolerated(self):
+        assert parse_bbox(" 46.5 , 24.6 , 46.9 , 24.9 ") == (24.6, 24.9, 46.5, 46.9)
+
+    def test_a_zero_area_box_is_allowed(self):
+        """A branch on exactly one point is still findable by that point."""
+        assert parse_bbox("46.7,24.7,46.7,24.7") == (24.7, 24.7, 46.7, 46.7)
+
+    def test_the_world_is_a_valid_box(self):
+        assert parse_bbox(WORLD_BBOX) == (-90.0, 90.0, -180.0, 180.0)
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["", "1,2,3", "1,2,3,4,5", "a,b,c,d", "46.5;24.6;46.9;24.9", "46.5,24.6,46.9,"],
+        ids=["empty", "three", "five", "words", "wrong-separator", "trailing-blank"],
+    )
+    def test_anything_that_is_not_four_numbers_is_refused(self, raw):
+        with pytest.raises(ValidationDomainError):
+            parse_bbox(raw)
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["nan,24.6,46.9,24.9", "46.5,nan,46.9,24.9", "inf,24.6,46.9,24.9", "46.5,24.6,46.9,-inf"],
+    )
+    def test_nan_and_infinity_are_refused(self, raw):
+        """Both parse as floats. NaN compares false to everything, so a range
+        check written the natural way, `v < lo or v > hi`, would wave it through
+        into a query that then matches nothing and says nothing."""
+        with pytest.raises(ValidationDomainError):
+            parse_bbox(raw)
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "46.5,-90.1,46.9,24.9",
+            "46.5,24.6,46.9,90.1",
+            "-180.1,24.6,46.9,24.9",
+            "46.5,24.6,180.1,24.9",
+        ],
+        ids=["south", "north", "west", "east"],
+    )
+    def test_out_of_range_is_refused(self, raw):
+        with pytest.raises(ValidationDomainError):
+            parse_bbox(raw)
+
+    def test_south_above_north_is_refused(self):
+        with pytest.raises(ValidationDomainError):
+            parse_bbox("46.5,24.9,46.9,24.6")
+
+    def test_a_box_across_the_antimeridian_is_refused_not_emptied(self):
+        """West greater than east. Reading it as an empty box would show a
+        customer "no salons here" for a request that was merely unsupported."""
+        with pytest.raises(ValidationDomainError):
+            parse_bbox("170,10,-170,20")
+
+
+class TestIntersectBoxes:
+    def test_overlapping_boxes_give_their_overlap(self):
+        a = (24.0, 25.0, 46.0, 47.0)
+        b = (24.5, 25.5, 46.5, 47.5)
+        assert intersect_boxes(a, b) == (24.5, 25.0, 46.5, 47.0)
+
+    def test_it_is_symmetric(self):
+        a = (24.0, 25.0, 46.0, 47.0)
+        b = (24.5, 25.5, 46.5, 47.5)
+        assert intersect_boxes(a, b) == intersect_boxes(b, a)
+
+    def test_a_box_inside_another_is_its_own_intersection(self):
+        outer = (20.0, 30.0, 40.0, 50.0)
+        inner = (24.0, 25.0, 46.0, 47.0)
+        assert intersect_boxes(outer, inner) == inner
+
+    def test_disjoint_boxes_do_not_meet(self):
+        riyadh = (24.0, 25.0, 46.0, 47.0)
+        jeddah = (21.0, 22.0, 39.0, 40.0)
+        assert intersect_boxes(riyadh, jeddah) is None
+
+    def test_boxes_disjoint_in_only_one_axis_do_not_meet(self):
+        """Overlapping latitudes are not enough; both axes have to overlap."""
+        assert intersect_boxes((24.0, 25.0, 46.0, 47.0), (24.0, 25.0, 50.0, 51.0)) is None
+
+    def test_boxes_sharing_only_an_edge_meet_in_a_line(self):
+        assert intersect_boxes((24.0, 25.0, 46.0, 47.0), (25.0, 26.0, 46.0, 47.0)) == (
+            25.0,
+            25.0,
+            46.0,
+            47.0,
+        )
 
 
 class TestReferralTokens:

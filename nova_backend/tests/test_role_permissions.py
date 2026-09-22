@@ -24,6 +24,7 @@ _MANAGE = {StaffPermission.MANAGE_SUBSCRIPTION}
 _REFUND = {StaffPermission.REFUND_PAYMENTS}
 _FINANCIALS = {StaffPermission.VIEW_FINANCIALS}
 _INSIGHTS = {StaffPermission.VIEW_ANALYTICS}
+_CATALOG = {StaffPermission.MANAGE_CATALOG}
 
 #: A request that reaches each gate, and the permissions it needs. Bodies are
 #: minimal: a caller let through may still get a 404 or a 422, and only an
@@ -41,6 +42,13 @@ GATED = [
     ("POST", "payments/{stranger}/refund", _REFUND),
     ("GET", "analytics/overview?business_id={business_id}", _INSIGHTS),
     ("GET", "analytics/financial-summary?business_id={business_id}", _INSIGHTS | _FINANCIALS),
+    ("POST", "catalog/businesses", _CATALOG),
+    ("PATCH", "catalog/businesses/{business_id}/listing", _CATALOG),
+    ("POST", "catalog/locations", _CATALOG),
+    ("PATCH", "catalog/locations/{stranger}/position", _CATALOG),
+    ("POST", "catalog/services", _CATALOG),
+    ("POST", "catalog/providers", _CATALOG),
+    ("POST", "catalog/providers/{stranger}/services", _CATALOG),
 ]
 
 
@@ -88,13 +96,77 @@ async def test_each_money_route_admits_exactly_the_roles_holding_its_permissions
         response = await client.request(
             method,
             f"/api/v1/tenants/{tenant.id}/{path}",
-            json={} if method == "POST" else None,
+            json={} if method in {"POST", "PATCH"} else None,
         )
         allowed = all(role_allows(role, permission) for permission in permissions)
         if allowed == _refused(response):
             mismatched.append(f"{method} {path} -> {response.status_code}")
 
     assert mismatched == []
+
+
+async def test_a_receptionist_cannot_take_the_salon_off_the_marketplace(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, as_owner, salon
+):
+    """The concrete case behind `manage_catalog`, reproduced live on 2026-09-22."""
+    tenant, business = salon
+    principal = await _staff(db_session, as_owner, tenant, MembershipRole.RECEPTIONIST)
+    app.dependency_overrides[get_principal] = lambda: principal
+
+    response = await client.patch(
+        f"/api/v1/tenants/{tenant.id}/catalog/businesses/{business.id}/listing",
+        json={"is_listed": False},
+    )
+
+    assert _refused(response)
+
+
+@pytest.mark.parametrize("role", list(MembershipRole))
+async def test_my_access_reports_this_salons_role_and_what_it_unlocks(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, as_owner, salon, role
+):
+    tenant, _ = salon
+    principal = await _staff(db_session, as_owner, tenant, role)
+    app.dependency_overrides[get_principal] = lambda: principal
+
+    response = await client.get(f"/api/v1/tenants/{tenant.id}/memberships/me")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["role"] == role.value
+    assert set(body["permissions"]) == {p.value for p in StaffPermission if role_allows(role, p)}
+
+
+async def test_my_access_is_per_salon_not_the_flattened_token(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, as_owner, tenant_factory
+):
+    """Owner of one salon, receptionist at another: each salon answers for itself."""
+    owned, staffed = await tenant_factory(), await tenant_factory()
+    principal = await _staff(db_session, as_owner, owned, MembershipRole.OWNER)
+    async with as_owner():
+        db_session.add(
+            Membership(
+                user_id=principal.subject_id,
+                tenant_id=staffed.id,
+                role=MembershipRole.RECEPTIONIST,
+            )
+        )
+        await db_session.flush()
+    both = Principal(
+        subject_id=principal.subject_id,
+        kind=PrincipalKind.STAFF,
+        tenant_ids=frozenset({owned.id, staffed.id}),
+        roles=frozenset({"owner", "receptionist"}),
+    )
+    app.dependency_overrides[get_principal] = lambda: both
+
+    at_owned = (await client.get(f"/api/v1/tenants/{owned.id}/memberships/me")).json()
+    at_staffed = (await client.get(f"/api/v1/tenants/{staffed.id}/memberships/me")).json()
+
+    assert at_owned["role"] == "owner"
+    assert at_staffed["role"] == "receptionist"
+    assert at_staffed["permissions"] == []
+    assert at_staffed["manageable_roles"] == []
 
 
 async def test_a_staff_token_with_no_membership_here_is_refused(

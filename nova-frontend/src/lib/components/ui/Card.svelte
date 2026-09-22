@@ -1,7 +1,12 @@
 <script>
 	/**
+	 * The one surface container. `interactive` adds the hover lift used by
+	 * clickable cards (pass `href` to render the whole card as a link).
+	 *
 	 * @type {{
 	 *   padding?: 'none'|'sm'|'md'|'lg',
+	 *   interactive?: boolean,
+	 *   href?: string|null,
 	 *   header?: import('svelte').Snippet,
 	 *   footer?: import('svelte').Snippet,
 	 *   children?: import('svelte').Snippet,
@@ -9,20 +14,33 @@
 	 *   [key: string]: unknown
 	 * }}
 	 */
-	let { padding = 'md', header, footer, children, class: className = '', ...rest } = $props();
+	let {
+		padding = 'md',
+		interactive = false,
+		href = null,
+		header,
+		footer,
+		children,
+		class: className = '',
+		...rest
+	} = $props();
 
-	const paddingClasses = { none: '', sm: 'p-3', md: 'p-5', lg: 'p-7' };
+	const paddingClasses = { none: '', sm: 'p-4', md: 'p-5', lg: 'p-6 sm:p-7' };
+
+	let classes = $derived(
+		[
+			'block rounded-card border border-line bg-surface shadow-card',
+			interactive || href
+				? 'transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised focus-ring'
+				: '',
+			className
+		].join(' ')
+	);
 </script>
 
-<div
-	class={[
-		'rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900',
-		className
-	].join(' ')}
-	{...rest}
->
+{#snippet body()}
 	{#if header}
-		<div class="border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+		<div class="border-b border-line px-5 py-4">
 			{@render header()}
 		</div>
 	{/if}
@@ -30,8 +48,15 @@
 		{@render children?.()}
 	</div>
 	{#if footer}
-		<div class="border-t border-slate-200 px-5 py-3 dark:border-slate-800">
+		<div class="rounded-b-card border-t border-line bg-surface-sunken px-5 py-3">
 			{@render footer()}
 		</div>
 	{/if}
-</div>
+{/snippet}
+
+{#if href}
+	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- callers pass a resolved path -->
+	<a {href} class={classes} {...rest}>{@render body()}</a>
+{:else}
+	<div class={classes} {...rest}>{@render body()}</div>
+{/if}

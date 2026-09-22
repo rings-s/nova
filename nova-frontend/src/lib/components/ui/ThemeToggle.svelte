@@ -1,6 +1,7 @@
 <script>
 	import { themeStore } from '$lib/stores/theme.svelte.js';
 	import Icon from './Icon.svelte';
+	import { iconButton } from './styles.js';
 
 	/** @type {{ class?: string }} */
 	let { class: className = '' } = $props();
@@ -9,10 +10,7 @@
 <button
 	type="button"
 	onclick={() => themeStore.toggle()}
-	class={[
-		'inline-flex size-9 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
-		className
-	].join(' ')}
+	class={[`${iconButton} size-9`, className].join(' ')}
 	aria-label={themeStore.isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 	title={themeStore.isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 >

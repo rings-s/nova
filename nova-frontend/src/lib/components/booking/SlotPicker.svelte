@@ -1,4 +1,6 @@
 <script>
+	import Icon from '../ui/Icon.svelte';
+	import { iconButton } from '../ui/styles.js';
 	/**
 	 * Fetches and renders bookable slots for one provider/service pair. Works
 	 * against either the authenticated `getAvailability` (booking.js) or the
@@ -224,45 +226,35 @@
 {:else if error}
 	<Alert tone="error">{error}</Alert>
 {:else if slots.length === 0}
-	<EmptyState title="No free slots" description="Try a different date range or provider." />
+	<EmptyState title="No free slots" description="Try a different date range or provider.">
+		{#snippet icon()}<Icon name="clock" class="size-6" />{/snippet}
+	</EmptyState>
 {:else}
 	<div class="flex flex-col gap-4">
-		<div class="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-			<div class="mb-2 flex items-center justify-between">
+		<div class="rounded-card border border-line bg-surface p-3 shadow-card">
+			<div class="mb-3 flex items-center justify-between">
 				<button
 					type="button"
 					disabled={!canGoPrevMonth}
 					onclick={() => shiftMonth(-1)}
 					aria-label="Previous month"
-					class="rounded-md p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent dark:text-slate-400 dark:hover:bg-slate-800"
+					class={`${iconButton} size-8 disabled:pointer-events-none disabled:opacity-30`}
 				>
-					<svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-						<path
-							fill-rule="evenodd"
-							d="M12.79 5.23a.75.75 0 010 1.06L9.06 10l3.73 3.71a.75.75 0 11-1.06 1.06l-4.25-4.25a.75.75 0 010-1.06l4.25-4.25a.75.75 0 011.06 0z"
-							clip-rule="evenodd"
-						/>
-					</svg>
+					<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
 				</button>
-				<p class="text-sm font-medium text-slate-900 dark:text-slate-100">{monthLabel}</p>
+				<p class="text-sm font-semibold text-fg">{monthLabel}</p>
 				<button
 					type="button"
 					disabled={!canGoNextMonth}
 					onclick={() => shiftMonth(1)}
 					aria-label="Next month"
-					class="rounded-md p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent dark:text-slate-400 dark:hover:bg-slate-800"
+					class={`${iconButton} size-8 disabled:pointer-events-none disabled:opacity-30`}
 				>
-					<svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-						<path
-							fill-rule="evenodd"
-							d="M7.21 14.77a.75.75 0 010-1.06L10.94 10 7.21 6.29a.75.75 0 111.06-1.06l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06 0z"
-							clip-rule="evenodd"
-						/>
-					</svg>
+					<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
 				</button>
 			</div>
 
-			<div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 dark:text-slate-500">
+			<div class="grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-fg-subtle">
 				{#each WEEKDAYS as weekday (weekday)}
 					<div>{shortWeekdayLabel(weekday, locale)}</div>
 				{/each}
@@ -278,12 +270,12 @@
 							aria-pressed={cell.key === selectedDayKey}
 							onclick={() => (selectedDayKey = cell.key)}
 							class={[
-								'relative flex aspect-square flex-col items-center justify-center rounded-lg text-sm transition-colors disabled:cursor-not-allowed',
+								'duration-fast relative flex aspect-square flex-col items-center justify-center rounded-control text-sm tabular-nums focus-ring transition-colors disabled:cursor-not-allowed',
 								cell.key === selectedDayKey
-									? 'bg-brand-600 font-medium text-white'
+									? 'bg-brand-600 font-semibold text-white shadow-glow'
 									: cell.hasSlots
-										? 'text-slate-700 hover:bg-brand-50 dark:text-slate-200 dark:hover:bg-brand-950/30'
-										: 'text-slate-300 dark:text-slate-700',
+										? 'font-medium text-fg hover:bg-accent-soft hover:text-accent'
+										: 'text-fg-subtle/50',
 								cell.isToday && cell.key !== selectedDayKey
 									? 'ring-1 ring-brand-400 ring-inset'
 									: ''
@@ -309,9 +301,7 @@
 				{#each PERIOD_ORDER as period (period)}
 					{#if periods[period].length > 0}
 						<div>
-							<p
-								class="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400"
-							>
+							<p class="mb-2 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">
 								{PERIOD_LABELS[locale]?.[period] ?? PERIOD_LABELS.en[period]}
 							</p>
 							<div class="flex flex-wrap gap-2">
@@ -320,10 +310,10 @@
 										type="button"
 										onclick={() => onselect(slot)}
 										class={[
-											'rounded-lg border px-3 py-1.5 text-sm transition-colors',
+											'duration-fast inline-flex h-9 items-center rounded-control border px-3.5 text-sm font-medium tabular-nums focus-ring transition-[border-color,background-color,color]',
 											slot.slot_id === selectedSlotId
-												? 'border-brand-600 bg-brand-600 text-white'
-												: 'border-slate-300 text-slate-700 hover:border-brand-400 dark:border-slate-700 dark:text-slate-200'
+												? 'border-brand-600 bg-brand-600 text-white shadow-glow'
+												: 'border-line-strong bg-surface text-fg hover:border-brand-400 hover:bg-accent-soft hover:text-accent'
 										].join(' ')}
 									>
 										{formatTime(slot.starts_at, locale)}

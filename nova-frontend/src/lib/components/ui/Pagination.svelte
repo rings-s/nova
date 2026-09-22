@@ -1,4 +1,7 @@
 <script>
+	import Button from './Button.svelte';
+	import Icon from './Icon.svelte';
+
 	/**
 	 * Pairs with the backend's `limit`/`offset` paging (core/pagination.py).
 	 * `total` is `null` on endpoints that deliberately don't count the full
@@ -19,30 +22,35 @@
 	let hasPrev = $derived(offset > 0);
 </script>
 
-<div class="flex items-center justify-between gap-4 text-sm text-slate-600 dark:text-slate-300">
-	<p>
+<nav
+	class="flex items-center justify-between gap-4 border-t border-line pt-4 text-sm"
+	aria-label="Pagination"
+>
+	<p class="text-fg-muted tabular-nums">
 		{#if totalPages}
-			Page {currentPage} of {totalPages}
+			Page <span class="font-medium text-fg">{currentPage}</span> of {totalPages}
 		{:else}
-			Page {currentPage}
+			Page <span class="font-medium text-fg">{currentPage}</span>
 		{/if}
 	</p>
 	<div class="flex gap-2">
-		<button
-			type="button"
+		<Button
+			variant="outline"
+			size="sm"
 			disabled={!hasPrev}
 			onclick={() => onchange(Math.max(0, offset - limit))}
-			class="rounded-lg border border-slate-300 px-3 py-1.5 disabled:opacity-40 dark:border-slate-700"
 		>
+			<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
 			Previous
-		</button>
-		<button
-			type="button"
+		</Button>
+		<Button
+			variant="outline"
+			size="sm"
 			disabled={!hasNext}
 			onclick={() => onchange(offset + limit)}
-			class="rounded-lg border border-slate-300 px-3 py-1.5 disabled:opacity-40 dark:border-slate-700"
 		>
 			Next
-		</button>
+			<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
+		</Button>
 	</div>
-</div>
+</nav>

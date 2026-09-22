@@ -12,7 +12,7 @@
 </script>
 
 <div
-	class="relative flex min-h-[calc(100dvh-57px)] flex-col items-center justify-center overflow-hidden bg-slate-50 px-4 py-10 sm:px-6 sm:py-12 dark:bg-slate-950"
+	class="relative flex min-h-[calc(100dvh-57px)] flex-col items-center justify-center overflow-hidden bg-canvas px-4 py-10 sm:px-6 sm:py-12"
 >
 	<GradientBlob variant="hero" />
 
