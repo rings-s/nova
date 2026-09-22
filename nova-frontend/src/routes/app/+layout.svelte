@@ -49,7 +49,10 @@
 
 	$effect(() => {
 		if (!authStore.isAuthenticated) {
-			goto(resolve('/login'));
+			// Come back to this exact page after signing in.
+			const next = encodeURIComponent(page.url.pathname + page.url.search);
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			goto(`${resolve('/login')}?next=${next}`, { replaceState: true });
 		} else if (!authStore.isStaff) {
 			toastStore.info('That area is for business staff.');
 			goto(resolve('/'));

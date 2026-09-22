@@ -1,16 +1,21 @@
 <script>
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { untrack } from 'svelte';
+	import { landingPath } from '$lib/utils/landing.js';
 	import { authStore } from '$lib/stores/auth.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import RegisterForm from '$lib/components/auth/RegisterForm.svelte';
 	import Logo from '$lib/components/layout/Logo.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 
+	// Only for someone who arrives already signed in. Registering signs the new
+	// account in *before* a business owner's salon is created, so reacting to
+	// that sign-in would pull them off this page mid-registration.
 	$effect(() => {
-		if (authStore.isAuthenticated) {
-			goto(resolve('/'));
-		}
+		untrack(() => {
+			if (authStore.isAuthenticated) goto(resolve(landingPath(authStore)));
+		});
 	});
 
 	/**

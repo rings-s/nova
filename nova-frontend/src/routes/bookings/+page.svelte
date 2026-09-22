@@ -27,7 +27,10 @@
 	import { listMyReviews, submitReview } from '$lib/api/review.js';
 
 	$effect(() => {
-		if (!authStore.isAuthenticated) goto(resolve('/login'));
+		if (!authStore.isAuthenticated) {
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			goto(`${resolve('/login')}?next=${encodeURIComponent('/bookings')}`, { replaceState: true });
+		}
 	});
 
 	/** @typedef {{ tenantId: string, businessName: string, booking: import('$lib/api/booking.js').Booking }} Row */
