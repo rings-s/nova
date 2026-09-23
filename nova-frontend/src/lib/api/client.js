@@ -13,6 +13,17 @@ const API_ORIGIN = (
 ).replace(/\/+$/, '');
 export const API_ROOT = `${API_ORIGIN}/api/v1`;
 
+/**
+ * An absolute URL for a path the API handed back (`/api/v1/discovery/photos/…`),
+ * for use where the browser fetches it itself — an <img src>.
+ * @param {string|null|undefined} path
+ * @returns {string|null}
+ */
+export function apiAssetUrl(path) {
+	if (!path) return null;
+	return path.startsWith('/') ? `${API_ORIGIN}${path}` : path;
+}
+
 export const CORRELATION_ID_HEADER = 'X-Correlation-ID';
 
 /** Mirrors `ErrorDetail` in nova_backend/app/core/schemas.py. */
@@ -97,7 +108,15 @@ async function performFetch(path, options) {
 	const { method = 'GET', body, query, headers = {}, idempotencyKey, signal, skipAuth } = options;
 	const url = `${API_ROOT}${path}${buildQuery(query)}`;
 	const requestHeaders = new Headers(headers);
-	if (body !== undefined) requestHeaders.set('Content-Type', 'application/json');
+	// A File/Blob goes as its own bytes and type (photo uploads); anything
+	// else is JSON.
+	const raw = typeof Blob !== 'undefined' && body instanceof Blob;
+	if (body !== undefined) {
+		requestHeaders.set(
+			'Content-Type',
+			raw ? body.type || 'application/octet-stream' : 'application/json'
+		);
+	}
 	if (idempotencyKey) requestHeaders.set('Idempotency-Key', idempotencyKey);
 
 	if (!skipAuth) {
@@ -109,7 +128,8 @@ async function performFetch(path, options) {
 		return await fetch(url, {
 			method,
 			headers: requestHeaders,
-			body: body !== undefined ? JSON.stringify(body) : undefined,
+			body:
+				body === undefined ? undefined : raw ? /** @type {Blob} */ (body) : JSON.stringify(body),
 			signal
 		});
 	} catch (cause) {

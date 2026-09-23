@@ -18,7 +18,7 @@ repository bound to a tenant it has not identified yet.
 """
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -109,6 +109,7 @@ class Storefront:
     locations: list[Any]
     services: list[Any]
     providers: list[Any]
+    photos: list[Any] = field(default_factory=list)
 
 
 class DiscoveryService:
@@ -292,7 +293,15 @@ class DiscoveryService:
             locations=locations,
             services=await self.catalog.list_services(location_ids),
             providers=await self.catalog.list_providers(location_ids),
+            photos=await self.catalog.photos_for(business.id),
         )
+
+    async def covers_for(self, business_ids: list[UUID]) -> dict[UUID, Any]:
+        """Search cards' cover photos, one query for the whole page."""
+        return await self.catalog.covers_for(business_ids)
+
+    async def read_public_photo(self, photo_id: UUID, variant: str) -> bytes | None:
+        return await self.catalog.read_public_photo(photo_id, variant)
 
     async def get_bookable_service(self, slug: str, service_id: UUID) -> tuple[Any, Any]:
         """Resolves a service *through* its storefront. Returns `(business, service)`.

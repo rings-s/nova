@@ -1,4 +1,6 @@
-from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainError
+from uuid import UUID
+
+from app.core.exceptions import ConflictError, DomainError, NotFoundError, ValidationDomainError
 
 
 class BusinessNotFoundError(NotFoundError):
@@ -52,3 +54,25 @@ class CrossLocationAssignmentError(ValidationDomainError):
 
     def __init__(self) -> None:
         super().__init__("A provider can only be assigned to services at their own location.")
+
+
+class PhotoNotFoundError(NotFoundError):
+    code = "photo_not_found"
+
+    def __init__(self, photo_id: UUID) -> None:
+        super().__init__(f"Photo {photo_id} not found.")
+
+
+class GalleryFullError(ConflictError):
+    code = "gallery_full"
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"A gallery holds at most {limit} photos. Remove one first.")
+
+
+class PhotoTooLargeError(DomainError):
+    status_code = 413
+    code = "photo_too_large"
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"Photos can be at most {limit // (1024 * 1024)} MB.")

@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.rate_limit import (
     DEFAULT_POLICY,
     DISCOVERY_AVAILABILITY_POLICY,
+    DISCOVERY_PHOTO_POLICY,
     DISCOVERY_POLICY,
     DISCOVERY_REFERRAL_POLICY,
     LOGIN_POLICY,
@@ -97,3 +98,4 @@ discovery_availability_rate_limit = rate_limit(
     DISCOVERY_AVAILABILITY_POLICY, scope="discovery-availability"
 )
 discovery_referral_rate_limit = rate_limit(DISCOVERY_REFERRAL_POLICY, scope="discovery-referral")
+discovery_photo_rate_limit = rate_limit(DISCOVERY_PHOTO_POLICY, scope="discovery-photo")

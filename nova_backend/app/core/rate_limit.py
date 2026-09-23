@@ -79,6 +79,12 @@ WRITE_POLICY = RateLimitPolicy(limit=40, window_seconds=60)
 #: and refines a query several times in a minute.
 DISCOVERY_POLICY = RateLimitPolicy(limit=60, window_seconds=60)
 
+#: Photo bytes. A search page shows a dozen covers and a storefront a gallery,
+#: so this is looser than a search, and a bucket of its own so browsing photos
+#: never spends a customer's search allowance. Photos are immutable and cached
+#: by the browser, so repeat views don't count against it at all.
+DISCOVERY_PHOTO_POLICY = RateLimitPolicy(limit=600, window_seconds=60)
+
 #: Tighter, and deliberately the tightest read on the platform. Free slots are
 #: the inverse of a provider's calendar, so this endpoint answers "when is
 #: Sara busy" to anyone patient enough to sweep a date range. A customer

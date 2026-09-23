@@ -96,6 +96,53 @@ export function createBusiness(
 	});
 }
 
+/**
+ * @typedef {Object} BusinessPhoto
+ * @property {string} id
+ * @property {string} business_id
+ * @property {'cover'|'gallery'} kind
+ * @property {number} position
+ * @property {number} width
+ * @property {number} height
+ * @property {string} created_at
+ * @property {{ large: string, thumb: string }} urls Short-lived signed links
+ *   (paths — pass through `apiAssetUrl`), valid before the business is listed.
+ */
+
+/**
+ * The cover and gallery, cover first. Staff only.
+ * @param {string} tenantId @param {string} businessId @returns {Promise<BusinessPhoto[]>}
+ */
+export function listBusinessPhotos(tenantId, businessId) {
+	return http.get(tenantPath(tenantId, `/catalog/businesses/${businessId}/photos`));
+}
+
+/**
+ * Uploads a photo (JPEG, PNG or WebP, the file itself as the body). A new
+ * cover replaces the old one. Owners and managers only.
+ * @param {string} tenantId @param {string} businessId @param {File|Blob} file
+ * @param {'cover'|'gallery'} kind @returns {Promise<BusinessPhoto>}
+ */
+export function uploadBusinessPhoto(tenantId, businessId, file, kind) {
+	return http.post(tenantPath(tenantId, `/catalog/businesses/${businessId}/photos`), file, {
+		query: { kind }
+	});
+}
+
+/** @param {string} tenantId @param {string} photoId @returns {Promise<null>} */
+export function deleteBusinessPhoto(tenantId, photoId) {
+	return http.delete(tenantPath(tenantId, `/catalog/photos/${photoId}`));
+}
+
+/**
+ * This salon's storefronts, oldest first. Staff only. How the dashboard finds
+ * its business on a device that never saw it being created.
+ * @param {string} tenantId @returns {Promise<{ items: Business[] }>}
+ */
+export function listBusinesses(tenantId) {
+	return http.get(tenantPath(tenantId, '/catalog/businesses'));
+}
+
 /** @param {string} tenantId @param {string} businessId @returns {Promise<Business>} */
 export function getBusiness(tenantId, businessId) {
 	return http.get(tenantPath(tenantId, `/catalog/businesses/${businessId}`));

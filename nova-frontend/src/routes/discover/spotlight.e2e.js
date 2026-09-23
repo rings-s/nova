@@ -162,3 +162,21 @@ test.describe('with location blocked', () => {
 		await expect(page.getByLabel('Sort by')).toHaveValue('recommended');
 	});
 });
+
+test('one failure is told once, not once per request', async ({ page }) => {
+	// The list, the map and both spotlight rows all fail together here.
+	await page.route('**/api/v1/discovery/**', (route) =>
+		route.fulfill({
+			status: 500,
+			headers: cors,
+			json: { error: { code: 'internal_error', message: 'Something went wrong on our side.' } }
+		})
+	);
+	await page.goto('/discover');
+
+	const toasts = page.getByRole('status').filter({ hasText: 'Something went wrong on our side.' });
+	await expect(toasts.first()).toBeVisible();
+	// Give every request time to fail before counting.
+	await page.waitForLoadState('networkidle');
+	await expect(toasts).toHaveCount(1);
+});

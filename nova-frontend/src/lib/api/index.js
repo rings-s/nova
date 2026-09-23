@@ -15,7 +15,6 @@ export * as queue from './queue.js';
 export * as payment from './payment.js';
 export * as billing from './billing.js';
 export * as analytics from './analytics.js';
-export * as media from './media.js';
 export * as notification from './notification.js';
 export * as review from './review.js';
 export * as ai from './ai.js';

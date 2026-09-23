@@ -17,6 +17,8 @@
 	import { tenantStore } from '$lib/stores/tenant.svelte.js';
 	import { accessStore } from '$lib/stores/access.svelte.js';
 	import { listMyTenants } from '$lib/api/identity.js';
+	import { listBusinesses } from '$lib/api/catalog.js';
+	import { businessStore } from '$lib/stores/business.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -29,6 +31,35 @@
 	let { children } = $props();
 
 	let resolvingTenant = $state(true);
+	let resolvingBusiness = $state(true);
+
+	// Which business this dashboard manages. Only registration and the catalog
+	// form ever learn the id first-hand, so on any other device ask the API —
+	// otherwise a salon that exists looks like one that doesn't, and every page
+	// offers to "set up your storefront" again.
+	$effect(() => {
+		const tenantId = tenantStore.activeTenantId;
+		if (!authStore.isStaff || !tenantId) return;
+		if (businessStore.activeBusinessId) {
+			resolvingBusiness = false;
+			return;
+		}
+		let cancelled = false;
+		resolvingBusiness = true;
+		listBusinesses(tenantId)
+			.then((page) => {
+				if (!cancelled && page.items[0]) businessStore.set(tenantId, page.items[0].id);
+			})
+			// No business yet (or the lookup failed): the pages show their own
+			// "set up your storefront" state, which is then the truth.
+			.catch(() => {})
+			.finally(() => {
+				if (!cancelled) resolvingBusiness = false;
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 	let drawerOpen = $state(false);
 
 	// This business's role, from its membership row — not the token's `roles`,
@@ -157,7 +188,7 @@
 	</div>
 {/snippet}
 
-{#if !authStore.isAuthenticated || !authStore.isStaff || resolvingTenant || !accessStore.loaded}
+{#if !authStore.isAuthenticated || !authStore.isStaff || resolvingTenant || resolvingBusiness || !accessStore.loaded}
 	<div class="flex min-h-dvh items-center justify-center"><Spinner size="lg" /></div>
 {:else}
 	<div class="min-h-dvh lg:ps-64">

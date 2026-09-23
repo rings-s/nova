@@ -8,6 +8,15 @@
 import { http } from './client.js';
 
 /**
+ * @typedef {Object} PublicPhoto
+ * @property {string} id
+ * @property {'cover'|'gallery'} kind
+ * @property {number} width
+ * @property {number} height
+ * @property {{ large: string, thumb: string }} urls Paths — pass through `apiAssetUrl`.
+ */
+
+/**
  * @typedef {Object} ListingCard
  * @property {string} business_id
  * @property {string} tenant_id
@@ -30,6 +39,7 @@ import { http } from './client.js';
  * @property {number|null} distance_km
  * @property {number} rating_count Verified ratings received.
  * @property {number|null} rating_average Plain average, 1–5; null when unrated.
+ * @property {string|null} cover_url Card-sized cover photo path (`apiAssetUrl`), if any.
  */
 
 /**
@@ -100,6 +110,7 @@ import { http } from './client.js';
  * @property {string|null} cover_asset_id
  * @property {number} rating_count
  * @property {number|null} rating_average
+ * @property {PublicPhoto[]} photos Cover first, then the gallery.
  * @property {StorefrontLocation[]} locations
  * @property {StorefrontService[]} services
  * @property {StorefrontProvider[]} providers
@@ -167,6 +178,7 @@ export function searchBusinesses({
 	offset = 0
 } = {}) {
 	return http.get('/discovery/businesses', {
+		skipAuth: true,
 		query: {
 			q,
 			city,
@@ -191,12 +203,12 @@ export function searchBusinesses({
  * @returns {Promise<ListingFeatureCollection>}
  */
 export function mapBusinesses({ q = null, city = null, category = null, bbox = null, limit } = {}) {
-	return http.get('/discovery/map', { query: { q, city, category, bbox, limit } });
+	return http.get('/discovery/map', { skipAuth: true, query: { q, city, category, bbox, limit } });
 }
 
 /** @param {string} slug @returns {Promise<Storefront>} */
 export function getStorefront(slug) {
-	return http.get(`/discovery/businesses/${slug}`);
+	return http.get(`/discovery/businesses/${slug}`, { skipAuth: true });
 }
 
 /**
@@ -207,6 +219,7 @@ export function getStorefront(slug) {
  */
 export function getPublicAvailability(slug, serviceId, { dateFrom, dateTo }) {
 	return http.get(`/discovery/businesses/${slug}/services/${serviceId}/availability`, {
+		skipAuth: true,
 		query: { date_from: dateFrom, date_to: dateTo }
 	});
 }
@@ -217,5 +230,5 @@ export function getPublicAvailability(slug, serviceId, { dateFrom, dateTo }) {
  * @param {string} slug @returns {Promise<Referral>}
  */
 export function recordReferral(slug) {
-	return http.post(`/discovery/businesses/${slug}/referrals`);
+	return http.post(`/discovery/businesses/${slug}/referrals`, undefined, { skipAuth: true });
 }

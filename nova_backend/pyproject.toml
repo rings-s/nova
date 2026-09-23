@@ -19,6 +19,10 @@ dependencies = [
     "redis>=5.0",
     # Outbound HTTP for the Moyasar / WhatsApp adapters.
     "httpx>=0.28",
+    # Business photos: every upload is decoded and re-encoded (metadata such as
+    # GPS stripped, decompression bombs refused, sized for the web) rather than
+    # stored as the bytes a client sent. See app/integrations/images.py.
+    "pillow>=11.0",
     "numpy>=2.5",
     "pandas>=3.0",
     "plotly>=7.0",

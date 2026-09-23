@@ -33,6 +33,7 @@
 	import Container from '$lib/components/marketing/Container.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
 	import RatingStars from '$lib/components/review/RatingStars.svelte';
+	import PhotoGallery from '$lib/components/discover/PhotoGallery.svelte';
 
 	let slug = $derived(/** @type {string} */ (page.params.slug));
 	let loading = $state(true);
@@ -174,6 +175,11 @@
 				<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
 				All salons
 			</a>
+			{#if storefront.photos?.length}
+				<div class="mb-8">
+					<PhotoGallery photos={storefront.photos} name={pickBilingual(storefront, 'name', 'en')} />
+				</div>
+			{/if}
 			<div class="flex flex-wrap items-end justify-between gap-8">
 				<div class="max-w-2xl min-w-0">
 					<h1 class="text-display-lg font-semibold tracking-tight text-fg">

@@ -41,6 +41,7 @@
 	import LocationCard from '$lib/components/catalog/LocationCard.svelte';
 	import LocationPicker from '$lib/components/map/LocationPicker.svelte';
 	import ServiceCard from '$lib/components/catalog/ServiceCard.svelte';
+	import PhotoManager from '$lib/components/catalog/PhotoManager.svelte';
 	import ProviderCard from '$lib/components/catalog/ProviderCard.svelte';
 
 	// This page only ever renders inside `/app`'s layout, which does not render
@@ -501,7 +502,8 @@
 		tabs={[
 			{ id: 'locations', label: 'Locations', count: loadingLocations ? null : locations.length },
 			{ id: 'services', label: 'Services' },
-			{ id: 'providers', label: 'Providers' }
+			{ id: 'providers', label: 'Providers' },
+			{ id: 'photos', label: 'Photos' }
 		]}
 		bind:active={activeTab}
 	/>
@@ -651,6 +653,8 @@
 					{/if}
 				</div>
 			{/if}
+		{:else if activeTab === 'photos'}
+			<PhotoManager {tenantId} businessId={businessId ?? ''} {canEdit} />
 		{/if}
 	</div>
 {/if}

@@ -8,6 +8,7 @@ from app.db.repository import BaseRepository, TenantScopedRepository
 from app.modules.catalog.domain import RATING_PRIOR_MEAN, RATING_PRIOR_WEIGHT
 from app.modules.catalog.models import (
     Business,
+    BusinessPhoto,
     Location,
     Provider,
     ProviderService,
@@ -48,6 +49,18 @@ class _SoftDeleteAwareRepository[ModelT](TenantScopedRepository[ModelT]):
 class BusinessRepository(_SoftDeleteAwareRepository[Business]):
     model = Business
 
+    async def list_ordered(self, *, limit: int = 20, offset: int = 0) -> list[Business]:
+        """This tenant's live businesses, oldest first — so "the first one" is
+        stable across calls (the tenant's original storefront)."""
+        stmt = (
+            self._active(self._scope(self._base_select()))
+            .order_by(Business.created_at.asc(), Business.id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def add_rating(self, business_id: UUID, rating: int) -> bool:
         """Adds one rating to the running totals, atomically.
 
@@ -73,6 +86,46 @@ class BusinessRepository(_SoftDeleteAwareRepository[Business]):
         stmt = self._active(self._scope(self._base_select().where(Business.slug == slug)))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+class BusinessPhotoRepository(TenantScopedRepository[BusinessPhoto]):
+    model = BusinessPhoto
+
+    async def list_for_business(self, business_id: UUID) -> list[BusinessPhoto]:
+        """Cover first, then the gallery in its order."""
+        stmt = self._scope(
+            self._base_select().where(BusinessPhoto.business_id == business_id)
+        ).order_by(
+            (BusinessPhoto.kind != "cover"),
+            BusinessPhoto.position.asc(),
+            BusinessPhoto.created_at.asc(),
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_cover(self, business_id: UUID) -> BusinessPhoto | None:
+        stmt = self._scope(
+            self._base_select().where(
+                BusinessPhoto.business_id == business_id, BusinessPhoto.kind == "cover"
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def gallery_stats(self, business_id: UUID) -> tuple[int, int]:
+        """How many gallery photos, and the highest position in use (-1 if none)."""
+        stmt = self._scope(
+            select(
+                func.count(BusinessPhoto.id), func.coalesce(func.max(BusinessPhoto.position), -1)
+            )
+            .select_from(BusinessPhoto)
+            .where(BusinessPhoto.business_id == business_id, BusinessPhoto.kind == "gallery")
+        )
+        count, top = (await self.session.execute(stmt)).one()
+        return int(count), int(top)
+
+    async def delete(self, photo: BusinessPhoto) -> None:
+        await self.session.delete(photo)
 
 
 class LocationRepository(_SoftDeleteAwareRepository[Location]):
@@ -368,5 +421,44 @@ class PublicCatalogRepository(BaseRepository[Business]):
 
     async def get_public_service(self, service_id: UUID) -> Service | None:
         stmt = select(Service).where(Service.id == service_id, *_public_service())
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    # --- photos (published businesses only; RLS `public_discovery` agrees) ---
+
+    async def covers_for(self, business_ids: list[UUID]) -> dict[UUID, BusinessPhoto]:
+        """Each listed business's cover, for search cards. One query, not N."""
+        if not business_ids:
+            return {}
+        stmt = select(BusinessPhoto).where(
+            BusinessPhoto.business_id.in_(business_ids),
+            BusinessPhoto.kind == "cover",
+            BusinessPhoto.business_id.in_(select(Business.id).where(*_public_business())),
+        )
+        result = await self.session.execute(stmt)
+        return {photo.business_id: photo for photo in result.scalars().all()}
+
+    async def photos_for(self, business_id: UUID) -> list[BusinessPhoto]:
+        """A listed business's photos, cover first, for its storefront."""
+        stmt = (
+            select(BusinessPhoto)
+            .where(
+                BusinessPhoto.business_id == business_id,
+                BusinessPhoto.business_id.in_(select(Business.id).where(*_public_business())),
+            )
+            .order_by(
+                (BusinessPhoto.kind != "cover"),
+                BusinessPhoto.position.asc(),
+                BusinessPhoto.created_at.asc(),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_public_photo(self, photo_id: UUID) -> BusinessPhoto | None:
+        stmt = select(BusinessPhoto).where(
+            BusinessPhoto.id == photo_id,
+            BusinessPhoto.business_id.in_(select(Business.id).where(*_public_business())),
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

@@ -1,20 +1,14 @@
 /**
  * Which `catalog.Business` the dashboard is managing for the active tenant.
  *
- * A real gap in the backend's catalog module: there is no `GET` that lists
- * the businesses under a tenant (`catalog/router.py` only has create-by-POST
- * and get-by-id) — see nova_backend/app/modules/catalog/router.py. The
- * business id is only ever handed to a client once, in the create response,
- * so this is the one place the frontend remembers it. `createBusiness`
- * (identity/register flow) and the catalog "set up your storefront" fallback
- * both call `set()` the moment they get an id back.
+ * A cache, not the source of truth: `routes/app/+layout.svelte` fills it from
+ * `GET /tenants/{id}/catalog/businesses` whenever this browser doesn't know
+ * the tenant's business yet — a new device, a cleared browser, or staff
+ * invited to an existing salon. Registration and the catalog's "create your
+ * storefront" form also `set()` it the moment they get an id back.
  *
  * Keyed by tenant, since a browser can hold sessions for staff at more than
- * one business. This has no recovery path for staff who were invited to an
- * existing tenant on a browser that never cached its business id — the
- * proper fix is a `GET /tenants/{id}/catalog/businesses` endpoint; until
- * then the catalog page's empty state can only offer to create a new one,
- * which is wrong for that case. Flagged rather than silently worked around.
+ * one business.
  */
 import { browser } from '$app/environment';
 import { tenantStore } from './tenant.svelte.js';

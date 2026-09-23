@@ -30,3 +30,6 @@ Thumbs.db
 
 
 .claude
+
+# Business photos stored by the dev stack (MEDIA_ROOT, infra/docker-compose.yml)
+nova_backend/.media/

@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     #: and the only origin a payment's `return_url` may point at.
     public_app_url: str = "http://localhost:5173"
 
+    # --- Business photos ---
+    #: Where uploaded photos are kept (`integrations/storage`). A directory on a
+    #: named volume in compose; any path the process may write to elsewhere.
+    media_root: str = "/var/lib/nova/media"
+    #: The largest upload accepted, before decoding. Phone photos run 3-6 MB.
+    media_max_upload_bytes: int = 10 * 1024 * 1024
+
     #: Serve `/docs`, `/redoc` and `/openapi.json`. Unset, they are served only in
     #: local and test: published, the schema maps every route and parameter for
     #: whoever finds the host.

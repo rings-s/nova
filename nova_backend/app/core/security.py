@@ -213,8 +213,10 @@ def decode_token(token: str, *, secret: str, leeway_seconds: int = 0) -> dict:
         raise AuthenticationError("Token expiry is invalid.")
 
     issued_at = claims.get("iat")
-    if isinstance(issued_at, bool) or not isinstance(issued_at, int | float) or not math.isfinite(
-        issued_at
+    if (
+        isinstance(issued_at, bool)
+        or not isinstance(issued_at, int | float)
+        or not math.isfinite(issued_at)
     ):
         raise AuthenticationError("Token has no valid issue time.")
     # However far out `exp` claims to be, it did not get there from anything

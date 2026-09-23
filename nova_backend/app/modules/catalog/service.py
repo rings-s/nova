@@ -3,17 +3,25 @@
 Services flush, never commit — the router owns the transaction boundary.
 """
 
+import asyncio
+import uuid as uuid_module
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
 from app.core.events import publish_event
+from app.integrations.images import process_upload
+from app.integrations.storage import ImageStore
 from app.modules.catalog.domain import (
+    MAX_GALLERY_PHOTOS,
+    PHOTO_VARIANTS,
     generate_slug,
+    photo_storage_key,
     require_bilingual_text,
     validate_coordinates,
     validate_gcc_phone,
+    validate_photo_kind,
     validate_service_duration,
     validate_service_price,
     validate_timezone,
@@ -23,12 +31,22 @@ from app.modules.catalog.exceptions import (
     BusinessNotFoundError,
     CrossLocationAssignmentError,
     DuplicateSlugError,
+    GalleryFullError,
     LocationNotFoundError,
+    PhotoNotFoundError,
     ProviderNotFoundError,
     ServiceNotFoundError,
 )
-from app.modules.catalog.models import Business, Location, Provider, ProviderService, Service
+from app.modules.catalog.models import (
+    Business,
+    BusinessPhoto,
+    Location,
+    Provider,
+    ProviderService,
+    Service,
+)
 from app.modules.catalog.repository import (
+    BusinessPhotoRepository,
     BusinessRepository,
     LocationRepository,
     ProviderRepository,
@@ -47,7 +65,11 @@ class CatalogService:
         providers: ProviderRepository,
         tenant_id: UUID,
         allowed_phone_country_codes: list[str],
+        photos: BusinessPhotoRepository | None = None,
+        images: ImageStore | None = None,
     ) -> None:
+        self.photos = photos
+        self.images = images
         self.businesses = businesses
         self.locations = locations
         self.services = services
@@ -97,11 +119,100 @@ class CatalogService:
         )
         return business
 
+    async def list_businesses(self, *, limit: int = 20, offset: int = 0) -> list[Business]:
+        return await self.businesses.list_ordered(limit=limit, offset=offset)
+
     async def get_business(self, business_id: UUID) -> Business:
         business = await self.businesses.get(business_id)
         if business is None:
             raise BusinessNotFoundError(business_id)
         return business
+
+    # --- Photos ---------------------------------------------------------------
+
+    def _photo_parts(self) -> tuple[BusinessPhotoRepository, ImageStore]:
+        if self.photos is None or self.images is None:
+            raise RuntimeError("CatalogService was built without photo storage.")
+        return self.photos, self.images
+
+    async def list_photos(self, business_id: UUID) -> list[BusinessPhoto]:
+        photos, _ = self._photo_parts()
+        await self.get_business(business_id)
+        return await photos.list_for_business(business_id)
+
+    async def add_photo(self, business_id: UUID, *, kind: str, data: bytes) -> BusinessPhoto:
+        """Stores a new cover (replacing any old one) or gallery photo.
+
+        The upload is decoded and re-encoded before anything is written
+        (`integrations.images`), off the event loop because it is CPU work.
+        Files go down before the row, so a row never points at nothing; a
+        failure after that leaves at worst an unreferenced file.
+        """
+        photos, images = self._photo_parts()
+        kind = validate_photo_kind(kind)
+        await self.get_business(business_id)
+
+        position = 0
+        replaced: BusinessPhoto | None = None
+        if kind == "gallery":
+            count, top = await photos.gallery_stats(business_id)
+            if count >= MAX_GALLERY_PHOTOS:
+                raise GalleryFullError(MAX_GALLERY_PHOTOS)
+            position = top + 1
+        else:
+            replaced = await photos.get_cover(business_id)
+
+        processed = await asyncio.to_thread(process_upload, data)
+        photo_id = uuid_module.uuid4()
+        prefix = f"{self.tenant_id}/{photo_id}"
+        for variant, image in processed.variants.items():
+            await asyncio.to_thread(images.save, photo_storage_key(prefix, variant), image.data)
+
+        if replaced is not None:
+            await self._remove_photo(replaced)
+
+        photo = photos.add(
+            BusinessPhoto(
+                id=photo_id,
+                tenant_id=self.tenant_id,
+                business_id=business_id,
+                kind=kind,
+                position=position,
+                storage_prefix=prefix,
+                width=processed.width,
+                height=processed.height,
+            )
+        )
+        await self.session.flush()
+        return photo
+
+    async def delete_photo(self, photo_id: UUID) -> None:
+        photos, _ = self._photo_parts()
+        photo = await photos.get(photo_id)
+        if photo is None:
+            raise PhotoNotFoundError(photo_id)
+        await self._remove_photo(photo)
+
+    async def read_photo(self, photo_id: UUID, variant: str) -> bytes:
+        """The stored bytes of a photo in this tenant (dashboard previews)."""
+        photos, images = self._photo_parts()
+        photo = await photos.get(photo_id)
+        if photo is None:
+            raise PhotoNotFoundError(photo_id)
+        data = await asyncio.to_thread(
+            images.read, photo_storage_key(photo.storage_prefix, variant)
+        )
+        if data is None:
+            raise PhotoNotFoundError(photo_id)
+        return data
+
+    async def _remove_photo(self, photo: BusinessPhoto) -> None:
+        photos, images = self._photo_parts()
+        prefix = photo.storage_prefix
+        await photos.delete(photo)
+        await self.session.flush()
+        for variant in PHOTO_VARIANTS:
+            await asyncio.to_thread(images.delete, photo_storage_key(prefix, variant))
 
     async def record_rating(self, business_id: UUID, rating: int) -> None:
         """Counts one verified rating toward this business's listing score.
@@ -353,8 +464,28 @@ class PublicCatalogService:
     that happens. Without it every method here correctly returns nothing.
     """
 
-    def __init__(self, *, listings: PublicCatalogRepository) -> None:
+    def __init__(
+        self, *, listings: PublicCatalogRepository, images: ImageStore | None = None
+    ) -> None:
         self.listings = listings
+        self.images = images
+
+    async def covers_for(self, business_ids: list[UUID]) -> dict[UUID, BusinessPhoto]:
+        return await self.listings.covers_for(business_ids)
+
+    async def photos_for(self, business_id: UUID) -> list[BusinessPhoto]:
+        return await self.listings.photos_for(business_id)
+
+    async def read_public_photo(self, photo_id: UUID, variant: str) -> bytes | None:
+        """A listed business's photo bytes, or None if there is no such photo
+        to show the public (unknown, removed, or its business isn't listed)."""
+        if self.images is None:
+            raise RuntimeError("PublicCatalogService was built without photo storage.")
+        photo = await self.listings.get_public_photo(photo_id)
+        if photo is None:
+            return None
+        key = photo_storage_key(photo.storage_prefix, variant)
+        return await asyncio.to_thread(self.images.read, key)
 
     async def search(
         self,

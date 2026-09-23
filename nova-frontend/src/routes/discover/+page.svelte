@@ -16,6 +16,7 @@
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import { fieldBase, fieldBorder } from '$lib/components/ui/styles.js';
 	import RatingStars from '$lib/components/review/RatingStars.svelte';
+	import { apiAssetUrl } from '$lib/api/client.js';
 	import { locate, LocateError } from '$lib/map/geolocate.js';
 
 	let q = $state('');
@@ -343,7 +344,7 @@
 						offset = 0;
 					}}
 					class={[
-						'duration-fast inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium focus-ring transition-colors',
+						'inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium focus-ring transition-colors duration-fast',
 						selectedCategory === cat.id
 							? 'border-transparent bg-slate-900 text-white dark:bg-white dark:text-slate-900'
 							: 'border-line bg-surface text-fg-secondary hover:border-line-strong hover:text-fg'
@@ -357,35 +358,61 @@
 	</Container>
 </section>
 
+{#snippet cover(
+	/** @type {import('$lib/api/discovery.js').ListingCard} */ listing,
+	/** @type {string} */ shape
+)}
+	{#if listing.cover_url}
+		<img
+			src={apiAssetUrl(listing.cover_url)}
+			alt=""
+			loading="lazy"
+			class={`w-full object-cover ${shape}`}
+		/>
+	{:else}
+		<!-- No photo yet: the name's initial on the brand gradient, so every card keeps one shape. -->
+		<div
+			class={`flex w-full items-center justify-center text-3xl font-semibold text-white/90 ${shape}`}
+			style="background-image: var(--gradient-hero)"
+			aria-hidden="true"
+		>
+			{pickBilingual(listing, 'name', 'en').trim().charAt(0).toUpperCase()}
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet spotlightCard(/** @type {import('$lib/api/discovery.js').ListingCard} */ listing)}
 	<a
 		href={resolve('/discover/[slug]', { slug: listing.slug })}
-		class="group duration-base flex h-full flex-col rounded-card border border-line bg-surface p-4 shadow-card focus-ring transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
+		class="group flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-card focus-ring transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
 	>
-		<p class="truncate font-semibold text-fg group-hover:text-accent">
-			{pickBilingual(listing, 'name', 'en')}
-		</p>
-		<p class="mt-0.5 flex items-center gap-1 truncate text-xs text-fg-muted">
-			<Icon name="map-pin" class="size-3" />
-			{listing.location_name_en || listing.city}
-			{#if listing.distance_km != null}
-				<span aria-hidden="true">·</span>
-				<span class="shrink-0 font-medium text-fg-secondary">{listing.distance_km} km</span>
-			{/if}
-		</p>
-		<div class="mt-auto flex items-center justify-between gap-2 pt-4">
-			<RatingStars
-				average={listing.rating_average}
-				count={listing.rating_count}
-				size="sm"
-				compact
-			/>
-			<span class="text-xs text-fg-muted">
-				from
-				<span class="font-semibold text-fg tabular-nums">
-					{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
+		{@render cover(listing, 'aspect-[16/10]')}
+		<div class="flex flex-1 flex-col p-4">
+			<p class="truncate font-semibold text-fg group-hover:text-accent">
+				{pickBilingual(listing, 'name', 'en')}
+			</p>
+			<p class="mt-0.5 flex items-center gap-1 truncate text-xs text-fg-muted">
+				<Icon name="map-pin" class="size-3" />
+				{listing.location_name_en || listing.city}
+				{#if listing.distance_km != null}
+					<span aria-hidden="true">·</span>
+					<span class="shrink-0 font-medium text-fg-secondary">{listing.distance_km} km</span>
+				{/if}
+			</p>
+			<div class="mt-auto flex items-center justify-between gap-2 pt-4">
+				<RatingStars
+					average={listing.rating_average}
+					count={listing.rating_count}
+					size="sm"
+					compact
+				/>
+				<span class="text-xs text-fg-muted">
+					from
+					<span class="font-semibold text-fg tabular-nums">
+						{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
+					</span>
 				</span>
-			</span>
+			</div>
 		</div>
 	</a>
 {/snippet}
@@ -560,8 +587,9 @@
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					{#each listings as listing (listing.business_id + listing.location_id)}
 						<article
-							class="group duration-base flex flex-col rounded-card border border-line bg-surface shadow-card transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
+							class="group flex flex-col rounded-card border border-line bg-surface shadow-card transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
 						>
+							{@render cover(listing, 'aspect-[16/9] rounded-t-card')}
 							<div class="flex-1 p-5">
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
@@ -666,6 +694,13 @@
 	onclose={() => (quickViewSalon = null)}
 >
 	{#if quickViewSalon}
+		{#if quickViewSalon.cover_url}
+			<img
+				src={apiAssetUrl(quickViewSalon.cover_url)}
+				alt=""
+				class="mb-4 aspect-[16/9] w-full rounded-card object-cover"
+			/>
+		{/if}
 		<div class="mb-4">
 			<RatingStars average={quickViewSalon.rating_average} count={quickViewSalon.rating_count} />
 		</div>

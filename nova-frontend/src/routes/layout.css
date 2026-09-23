@@ -204,6 +204,22 @@
 	--nv-shadow-overlay: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 24px 64px -12px rgb(0 0 0 / 0.75);
 }
 
+/*
+ * Transition speeds by role. Tailwind v4 has no theme namespace for
+ * durations, so `--duration-*` in @theme above only defines the variables —
+ * these utilities are what make `duration-fast` & co. exist as classes
+ * (without them every one of those classes silently generated nothing).
+ */
+@utility duration-fast {
+	transition-duration: var(--duration-fast);
+}
+@utility duration-base {
+	transition-duration: var(--duration-base);
+}
+@utility duration-slow {
+	transition-duration: var(--duration-slow);
+}
+
 /* One focus treatment for every interactive element. */
 @utility focus-ring {
 	outline: 2px solid transparent;

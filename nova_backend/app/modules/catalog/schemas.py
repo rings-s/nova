@@ -39,6 +39,21 @@ class BusinessOut(ApiSchema):
         return rating_average(self.rating_sum, self.rating_count)
 
 
+class BusinessPhotoOut(ApiSchema):
+    """A photo as the dashboard sees it. `urls` are short-lived signed links
+    (an <img> cannot send a login token), valid whether or not the business is
+    listed on the marketplace yet."""
+
+    id: UUID
+    business_id: UUID
+    kind: str
+    position: int
+    width: int
+    height: int
+    created_at: datetime
+    urls: dict[str, str]
+
+
 class SetListingVisibilityRequest(ApiSchema):
     is_listed: bool
 

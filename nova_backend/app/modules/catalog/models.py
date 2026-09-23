@@ -178,3 +178,37 @@ class ProviderService(Base, TenantOwnedMixin):
     service_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("services.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class BusinessPhoto(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
+    """A photo of a business: its cover (at most one) or one of its gallery.
+
+    The row is the index; the pixels live in `integrations.storage`, one file
+    per variant under `storage_prefix`. Stored images are always ones NOVA
+    re-encoded itself (`integrations.images`), never the bytes uploaded.
+    """
+
+    __tablename__ = "business_photos"
+    __table_args__ = (
+        Index("ix_business_photos_business", "tenant_id", "business_id", "position"),
+        # One cover per business, enforced where two concurrent uploads can't
+        # both slip past a check.
+        Index(
+            "uq_business_photos_one_cover",
+            "business_id",
+            unique=True,
+            postgresql_where=text("kind = 'cover'"),
+        ),
+        CheckConstraint("kind IN ('cover', 'gallery')", name="kind_valid"),
+    )
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: Gallery order; lower first. Covers ignore it.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: `tenant_id/photo_id` — each variant is `<prefix>/<variant>.webp`.
+    storage_prefix: Mapped[str] = mapped_column(String(80), nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)

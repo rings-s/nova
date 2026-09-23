@@ -17,6 +17,11 @@ x-backend-environment: &backend-environment
   # password among them. Blanked here, so an API or worker that is compromised
   # cannot read it out of its own environment.
   POSTGRES_PASSWORD: ""
+  # Business photos (integrations/storage). In development they live in the
+  # bind-mounted source tree, git-ignored, so they survive container rebuilds
+  # without a root-owned named volume the non-root app user couldn't write.
+  # Production points this at a persistent volume.
+  MEDIA_ROOT: /app/.media
 
 # The schema owner, for the two containers that create tables: the one-shot
 # `migrate` job and the on-demand `tools` container. Never `backend` or

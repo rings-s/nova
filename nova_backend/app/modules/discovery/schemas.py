@@ -20,6 +20,16 @@ from pydantic import Field
 from app.core.schemas import ApiSchema
 
 
+class PublicPhotoOut(ApiSchema):
+    """A photo of a listed business. `urls` maps each size to its image."""
+
+    id: UUID
+    kind: Literal["cover", "gallery"]
+    width: int
+    height: int
+    urls: dict[str, str]
+
+
 class ListingCardOut(ApiSchema):
     """One search result: a bookable branch, priced from."""
 
@@ -50,6 +60,8 @@ class ListingCardOut(ApiSchema):
     #: so one 5-star visit does not outrank hundreds averaging 4.8.
     rating_count: int = 0
     rating_average: float | None = None
+    #: The business's cover photo, sized for a card. None without one.
+    cover_url: str | None = None
 
 
 class ListingGeometry(ApiSchema):
@@ -134,6 +146,8 @@ class StorefrontOut(ApiSchema):
     #: so one 5-star visit does not outrank hundreds averaging 4.8.
     rating_count: int = 0
     rating_average: float | None = None
+    #: Cover first, then the gallery in the business's order.
+    photos: list[PublicPhotoOut] = []
 
     locations: list[StorefrontLocationOut]
     services: list[StorefrontServiceOut]

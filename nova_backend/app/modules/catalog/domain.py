@@ -6,6 +6,8 @@ recorded in ADR-0002 and confirmed for this module). Contrast `booking.domain`,
 which owns a real lifecycle and therefore defines its own entity.
 """
 
+import hashlib
+import hmac
 from decimal import Decimal
 
 from app.core.exceptions import ValidationDomainError
@@ -17,8 +19,13 @@ from app.core.validators import (
 )
 
 __all__ = [
+    "MAX_GALLERY_PHOTOS",
     "MAX_SERVICE_DURATION_MINUTES",
     "MIN_SERVICE_DURATION_MINUTES",
+    "PHOTO_KINDS",
+    "PHOTO_LINK_PURPOSE",
+    "PHOTO_LINK_TTL_SECONDS",
+    "PHOTO_VARIANTS",
     "RATING_PRIOR_MEAN",
     "RATING_PRIOR_WEIGHT",
     "generate_slug",
@@ -31,6 +38,49 @@ __all__ = [
     "validate_service_price",
     "validate_timezone",
 ]
+
+#: A cover plus this many gallery photos per business. Enough to show the
+#: place; few enough that a storefront loads quickly on a phone.
+MAX_GALLERY_PHOTOS = 12
+PHOTO_KINDS = frozenset({"cover", "gallery"})
+#: Stored sizes, matching `integrations.images.VARIANT_SIZES`.
+PHOTO_VARIANTS = frozenset({"large", "thumb"})
+
+
+def validate_photo_kind(kind: str) -> str:
+    if kind not in PHOTO_KINDS:
+        raise ValidationDomainError("A photo is either the cover or part of the gallery.")
+    return kind
+
+
+def photo_storage_key(storage_prefix: str, variant: str) -> str:
+    if variant not in PHOTO_VARIANTS:
+        raise ValidationDomainError("Unknown photo size.")
+    return f"{storage_prefix}/{variant}.webp"
+
+
+#: How long a signed photo link works. Long enough for a dashboard session to
+#: keep showing its previews, short enough that a copied link goes stale.
+PHOTO_LINK_TTL_SECONDS = 60 * 60
+#: `security.purpose_key` purpose for photo links: a signature minted for this
+#: can't be mistaken for any other kind of token, nor forge one.
+PHOTO_LINK_PURPOSE = "photo_link"
+
+
+def sign_photo_link(*, photo_id: str, tenant_id: str, expires: int, key: str) -> str:
+    """HMAC over what the link grants: this photo, in this tenant, until then."""
+    message = f"{photo_id}:{tenant_id}:{expires}".encode()
+    return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
+
+
+def photo_link_valid(
+    *, photo_id: str, tenant_id: str, expires: int, signature: str, key: str, now: int
+) -> bool:
+    if expires < now:
+        return False
+    expected = sign_photo_link(photo_id=photo_id, tenant_id=tenant_id, expires=expires, key=key)
+    return hmac.compare_digest(expected, signature)
+
 
 #: Ranking by raw average would put a salon with one 5-star visit above one
 #: with two hundred visits averaging 4.8. Instead a business is ranked as if it

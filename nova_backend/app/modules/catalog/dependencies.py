@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_db_session, get_tenant_context
+from app.integrations.storage import ImageStore, LocalImageStore
 from app.modules.catalog.repository import (
+    BusinessPhotoRepository,
     BusinessRepository,
     LocationRepository,
     ProviderRepository,
@@ -13,6 +15,11 @@ from app.modules.catalog.repository import (
     ServiceRepository,
 )
 from app.modules.catalog.service import CatalogService, PublicCatalogService
+
+
+def get_image_store() -> ImageStore:
+    """Where business photos live. Local disk today; see `integrations.storage`."""
+    return LocalImageStore(get_settings().media_root)
 
 
 def build_catalog_service(session: AsyncSession, tenant_id: UUID) -> CatalogService:
@@ -32,6 +39,8 @@ def build_catalog_service(session: AsyncSession, tenant_id: UUID) -> CatalogServ
         providers=ProviderRepository(session, tenant_id),
         tenant_id=tenant_id,
         allowed_phone_country_codes=settings.allowed_phone_country_codes,
+        photos=BusinessPhotoRepository(session, tenant_id),
+        images=get_image_store(),
     )
 
 
@@ -60,4 +69,4 @@ def build_public_catalog_service(session: AsyncSession) -> PublicCatalogService:
     The caller must open the RLS window first (`set_discovery_scope`), or every
     method on the returned service correctly finds nothing.
     """
-    return PublicCatalogService(listings=PublicCatalogRepository(session))
+    return PublicCatalogService(listings=PublicCatalogRepository(session), images=get_image_store())

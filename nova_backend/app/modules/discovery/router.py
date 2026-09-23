@@ -19,24 +19,36 @@ is not a marketplace. The exception is paid for in four ways:
     size a competitor's business.
 """
 
+import time
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import get_db_session
 from app.core.pagination import PageParams
 from app.core.schemas import Page
+from app.core.security import purpose_key
 from app.core.throttling import (
     discovery_availability_rate_limit,
+    discovery_photo_rate_limit,
     discovery_read_rate_limit,
     discovery_referral_rate_limit,
 )
 from app.db.session import set_tenant_scope
 from app.modules.booking.dependencies import build_booking_service
 from app.modules.booking.service import BookingService
-from app.modules.catalog.domain import rating_average
+from app.modules.catalog.dependencies import build_catalog_service
+from app.modules.catalog.domain import (
+    PHOTO_LINK_PURPOSE,
+    PHOTO_VARIANTS,
+    photo_link_valid,
+    rating_average,
+)
+from app.modules.catalog.exceptions import PhotoNotFoundError
 from app.modules.catalog.service import ListingCard
 from app.modules.discovery.dependencies import get_discovery_service
 from app.modules.discovery.domain import SearchSort
@@ -46,6 +58,7 @@ from app.modules.discovery.schemas import (
     ListingFeatureCollection,
     ListingGeometry,
     PublicAvailabilityOut,
+    PublicPhotoOut,
     PublicSlotOut,
     ReferralOut,
     StorefrontLocationOut,
@@ -80,7 +93,14 @@ async def _availability_reader(session: AsyncSession, tenant_id: UUID) -> Bookin
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 
-def _listing_card(card: ListingCard) -> ListingCardOut:
+def _photo_urls(photo_id: UUID) -> dict[str, str]:
+    return {
+        variant: f"/api/v1/discovery/photos/{photo_id}/{variant}"
+        for variant in sorted(PHOTO_VARIANTS)
+    }
+
+
+def _listing_card(card: ListingCard, covers: dict[UUID, Any] | None = None) -> ListingCardOut:
     """The public projection of a search hit, shared by the list and the map.
 
     One function so the two cannot drift: whatever the search result leaves out
@@ -106,6 +126,11 @@ def _listing_card(card: ListingCard) -> ListingCardOut:
         distance_km=card.distance_km,
         rating_count=card.business.rating_count,
         rating_average=rating_average(card.business.rating_sum, card.business.rating_count),
+        cover_url=(
+            _photo_urls(covers[card.business.id].id)["thumb"]
+            if covers and card.business.id in covers
+            else None
+        ),
     )
 
 
@@ -153,8 +178,9 @@ async def search_businesses(
         limit=params.limit,
         offset=params.offset,
     )
+    covers = await service.covers_for(list({card.business.id for card in cards}))
     return Page(
-        items=[_listing_card(card) for card in cards],
+        items=[_listing_card(card, covers) for card in cards],
         # No `total`: this result is paged, and reporting the size of the page
         # as the size of the result set is worse than reporting nothing. A real
         # count means a second aggregate over the same predicates, which is a
@@ -200,6 +226,7 @@ async def map_businesses(
     found = await service.search_on_map(
         term=q, city=city, category=category, bbox=bbox, limit=limit
     )
+    covers = await service.covers_for(list({card.business.id for card in found.cards}))
     return ListingFeatureCollection(
         features=[
             ListingFeature(
@@ -208,7 +235,7 @@ async def map_businesses(
                 geometry=ListingGeometry(
                     coordinates=(card.location.longitude, card.location.latitude)
                 ),
-                properties=_listing_card(card),
+                properties=_listing_card(card, covers),
             )
             for card in found.cards
             # The search already leaves out branches with no coordinates; this
@@ -247,6 +274,16 @@ async def get_storefront(
         description_ar=business.description_ar,
         rating_count=business.rating_count,
         rating_average=rating_average(business.rating_sum, business.rating_count),
+        photos=[
+            PublicPhotoOut(
+                id=photo.id,
+                kind=photo.kind,
+                width=photo.width,
+                height=photo.height,
+                urls=_photo_urls(photo.id),
+            )
+            for photo in storefront.photos
+        ],
         locations=[StorefrontLocationOut.model_validate(row) for row in storefront.locations],
         services=[StorefrontServiceOut.model_validate(row) for row in storefront.services],
         providers=[StorefrontProviderOut.model_validate(row) for row in storefront.providers],
@@ -344,4 +381,65 @@ async def record_referral(
         business_id=issued.business_id,
         tenant_id=issued.tenant_id,
         expires_at=issued.expires_at,
+    )
+
+
+@router.get(
+    "/photos/{photo_id}/{variant}",
+    response_class=Response,
+    dependencies=[Depends(discovery_photo_rate_limit)],
+    responses={200: {"content": {"image/webp": {}}}},
+)
+async def get_photo(
+    photo_id: UUID,
+    variant: str,
+    t: UUID | None = Query(default=None, description="Signed links only: the tenant."),
+    exp: int | None = Query(default=None, description="Signed links only: expiry (epoch s)."),
+    sig: str | None = Query(default=None, max_length=128),
+    session: AsyncSession = Depends(get_db_session),
+    service: DiscoveryService = Depends(get_discovery_service),
+) -> Response:
+    """A business photo, as WebP.
+
+    Two ways in. Without a signature, only a photo of a *listed* business is
+    served — the same rule as the rest of the marketplace. With a signature
+    minted by the catalog dashboard (`t`, `exp`, `sig`), the photo of that
+    tenant is served even before its business is listed, so an owner can
+    preview their own storefront; the link expires, and names one photo.
+    """
+    if variant not in PHOTO_VARIANTS:
+        raise PhotoNotFoundError(photo_id)
+
+    if sig is not None:
+        if t is None or exp is None:
+            raise PhotoNotFoundError(photo_id)
+        key = purpose_key(get_settings().secret_key, PHOTO_LINK_PURPOSE)
+        if not photo_link_valid(
+            photo_id=str(photo_id),
+            tenant_id=str(t),
+            expires=exp,
+            signature=sig,
+            key=key,
+            now=int(time.time()),
+        ):
+            raise PhotoNotFoundError(photo_id)
+        # The signature is the authorization: it names this tenant. Widen the
+        # connection from "published listings" to that one tenant, as the
+        # availability route does, and read through its ordinary scoped path.
+        await set_tenant_scope(session, t)
+        data = await build_catalog_service(session, t).read_photo(photo_id, variant)
+        cache = "private, max-age=3600"
+    else:
+        found = await service.read_public_photo(photo_id, variant)
+        if found is None:
+            raise PhotoNotFoundError(photo_id)
+        data = found
+        # A photo id is never reused (replacing a cover makes a new one), so the
+        # bytes behind a URL never change.
+        cache = "public, max-age=86400, immutable"
+
+    return Response(
+        content=data,
+        media_type="image/webp",
+        headers={"Cache-Control": cache, "X-Content-Type-Options": "nosniff"},
     )
