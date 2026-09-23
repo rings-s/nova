@@ -6,7 +6,7 @@
 	import { pickBilingual } from '$lib/utils/bilingual.js';
 	import { toBBox } from '$lib/map/bbox.js';
 	import { DEFAULT_CENTER, DEFAULT_ZOOM, FIT_MAX_ZOOM } from '$lib/map/config.js';
-	import { addBaseLayer, loadLeaflet, pinIcon } from '$lib/map/leaflet.js';
+	import { addBaseLayer, hereIcon, loadLeaflet, pinIcon } from '$lib/map/leaflet.js';
 	import Icon from '$lib/components/ui/Icon.svelte';
 
 	/**
@@ -23,6 +23,8 @@
 	 *   onselect?: (listing: import('$lib/api/discovery.js').ListingCard) => void,
 	 *   onsearcharea?: (bbox: string) => void,
 	 *   onclear?: () => void,
+	 *   here?: { latitude: number, longitude: number, accuracy: number } | null,
+	 *   onmovehere?: (position: { latitude: number, longitude: number }) => void,
 	 *   class?: string
 	 * }}
 	 */
@@ -35,6 +37,8 @@
 		onselect,
 		onsearcharea,
 		onclear,
+		here = null,
+		onmovehere,
 		class: className = ''
 	} = $props();
 
@@ -50,6 +54,12 @@
 	let map;
 	/** @type {import('leaflet').LayerGroup | undefined} */
 	let pins;
+	/** The customer's position and its accuracy circle. */
+	/** @type {import('leaflet').LayerGroup | undefined} */
+	let hereLayer;
+	/** Where the map last centred on `here`, so it recentres only when that moves. */
+	/** @type {{ latitude: number, longitude: number } | null} */
+	let centredOn = null;
 	/**
 	 * A fit asked for while the map had no size (its tab was hidden), to be done
 	 * the moment it has one. Fitting a zero-sized map picks a meaningless zoom.
@@ -77,6 +87,7 @@
 				});
 				addBaseLayer(L, map);
 				pins = L.layerGroup().addTo(map);
+				hereLayer = L.layerGroup().addTo(map);
 
 				map.on('click', () => map?.scrollWheelZoom.enable());
 				map.on('mouseout', () => map?.scrollWheelZoom.disable());
@@ -106,6 +117,8 @@
 			map?.remove();
 			map = undefined;
 			pins = undefined;
+			hereLayer = undefined;
+			centredOn = null;
 			ready = false;
 		};
 	});
@@ -135,7 +148,9 @@
 				.addTo(pins);
 		}
 
-		if (shouldFit && points.length > 0) {
+		// Fitting to every pin would zoom out past the customer; when we know
+		// where they are, the map stays on them (see the effect below).
+		if (shouldFit && points.length > 0 && !untrack(() => here)) {
 			const bounds = L.latLngBounds(points);
 			if (container && container.clientWidth > 0) {
 				map.fitBounds(bounds, { padding: [40, 40], maxZoom: FIT_MAX_ZOOM });
@@ -143,6 +158,56 @@
 				pendingFit = bounds;
 			}
 		}
+	});
+
+	// The customer's position: an accuracy circle (how sure the browser is) and
+	// a dot they can drag to where they really are.
+	$effect(() => {
+		if (!ready || !map || !hereLayer || !L) return;
+		const position = here;
+		hereLayer.clearLayers();
+		if (!position) {
+			centredOn = null;
+			return;
+		}
+		const point = /** @type {import('leaflet').LatLngTuple} */ ([
+			position.latitude,
+			position.longitude
+		]);
+		if (position.accuracy > 0) {
+			L.circle(point, {
+				radius: position.accuracy,
+				color: '#0ea5e9',
+				weight: 1,
+				fillColor: '#0ea5e9',
+				fillOpacity: 0.1,
+				interactive: false
+			}).addTo(hereLayer);
+		}
+		const marker = L.marker(point, {
+			icon: hereIcon(L),
+			draggable: Boolean(onmovehere),
+			keyboard: true,
+			title: 'You are here — drag to correct',
+			zIndexOffset: 1000
+		}).addTo(hereLayer);
+		marker.on('dragend', () => {
+			const moved = marker.getLatLng();
+			onmovehere?.({ latitude: moved.lat, longitude: moved.lng });
+		});
+
+		// Recentre when the position itself moves, not when only its accuracy
+		// improves, and never after the customer placed it by hand (they are
+		// looking at the map already).
+		const moved =
+			!centredOn ||
+			Math.abs(centredOn.latitude - position.latitude) > 1e-4 ||
+			Math.abs(centredOn.longitude - position.longitude) > 1e-4;
+		if (moved && position.accuracy > 0) {
+			if (position.accuracy <= 2000) map.setView(point, Math.max(map.getZoom(), 14));
+			else map.fitBounds(L.latLng(point).toBounds(position.accuracy * 2), { maxZoom: 14 });
+		}
+		centredOn = { latitude: position.latitude, longitude: position.longitude };
 	});
 
 	function searchThisArea() {

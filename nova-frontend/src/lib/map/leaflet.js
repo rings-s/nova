@@ -26,6 +26,18 @@ export function addBaseLayer(L, map) {
 }
 
 /**
+ * The customer's own position: a blue dot, so it can't be mistaken for a
+ * salon's pin, that can be dragged to correct a poor fix.
+ * @param {typeof import('leaflet')} L
+ */
+export function hereIcon(L) {
+	const dot = document.createElement('div');
+	dot.className =
+		'size-5 cursor-grab rounded-full border-[3px] border-white bg-sky-500 shadow-lg ring-4 ring-sky-500/25 active:cursor-grabbing';
+	return L.divIcon({ html: dot, className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
+}
+
+/**
  * One pin, as a DOM node rather than an HTML string: a business names its own
  * listing, and the listings map is public, so nothing a tenant typed is ever
  * parsed as markup. A fresh node per marker, because Leaflet moves the node it

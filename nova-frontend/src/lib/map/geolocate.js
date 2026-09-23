@@ -101,10 +101,10 @@ function currentPosition(geolocation, options, signal) {
  * @param {(position: GeolocationPosition) => Fix} consider Returns the best fix so far.
  * @param {(error: unknown) => LocateError} remember
  * @param {() => boolean} haveFix
- * @param {{ windowMs: number, signal: AbortSignal | undefined }} options
+ * @param {{ windowMs: number, signal: AbortSignal | undefined, preciseEnoughM: number }} options
  * @returns {Promise<void>}
  */
-function refine(geolocation, consider, remember, haveFix, { windowMs, signal }) {
+function refine(geolocation, consider, remember, haveFix, { windowMs, signal, preciseEnoughM }) {
 	return new Promise((resolve) => {
 		let done = false;
 		/** @type {number | null} */
@@ -122,7 +122,7 @@ function refine(geolocation, consider, remember, haveFix, { windowMs, signal }) 
 
 		watchId = geolocation.watchPosition(
 			(position) => {
-				if (consider(position).accuracy <= PRECISE_ENOUGH_M) finish();
+				if (consider(position).accuracy <= preciseEnoughM) finish();
 			},
 			(error) => {
 				const failure = remember(error);
@@ -151,15 +151,24 @@ function refine(geolocation, consider, remember, haveFix, { windowMs, signal }) 
  *   geolocation?: Geolocation,
  *   secure?: boolean,
  *   quickTimeoutMs?: number,
- *   refineMs?: number
- * }} options `geolocation` and `secure` default to the browser's own; they are
+ *   refineMs?: number,
+ *   preciseEnoughM?: number
+ * }} options `preciseEnoughM` ends the search early once a fix is this
+ *   good (default `PRECISE_ENOUGH_M`); a caller that needs less than a door's
+ *   precision — "which salons are near" — can stop sooner. `geolocation` and `secure` default to the browser's own; they are
  *   parameters so a test can supply a scripted provider.
  * @returns {Promise<Fix>}
  */
 export async function locate(options) {
 	// 15 s to answer, then 12 s to sharpen it: 27 s at worst, inside the "half a
 	// minute" the owner is told to expect.
-	const { onfix, signal, quickTimeoutMs = 15_000, refineMs = 12_000 } = options;
+	const {
+		onfix,
+		signal,
+		quickTimeoutMs = 15_000,
+		refineMs = 12_000,
+		preciseEnoughM = PRECISE_ENOUGH_M
+	} = options;
 	const geolocation = options.geolocation ?? globalThis.navigator?.geolocation;
 	const secure = options.secure ?? globalThis.window?.isSecureContext ?? true;
 
@@ -205,12 +214,13 @@ export async function locate(options) {
 		const failure = remember(error);
 		if (failure.kind === 'denied' || failure.kind === 'cancelled') throw failure;
 	}
-	if (best && /** @type {Fix} */ (best).accuracy <= PRECISE_ENOUGH_M) return best;
+	if (best && /** @type {Fix} */ (best).accuracy <= preciseEnoughM) return best;
 
 	// Precise: where there is a GPS, this is where it answers.
 	await refine(geolocation, consider, remember, () => best !== null, {
 		windowMs: refineMs,
-		signal
+		signal,
+		preciseEnoughM
 	});
 
 	if (best) return best;
@@ -282,4 +292,21 @@ export function explainLocateError(error, { origin = '', linux = false } = {}) {
 					: ''
 			} ${instead}`;
 	}
+}
+
+/**
+ * Great-circle distance in metres between two points (haversine). Accurate
+ * to well under a metre at city scale, which is all it is asked for here.
+ * @param {{ latitude: number, longitude: number }} a
+ * @param {{ latitude: number, longitude: number }} b
+ */
+export function metresBetween(a, b) {
+	const R = 6_371_000;
+	const rad = Math.PI / 180;
+	const dLat = (b.latitude - a.latitude) * rad;
+	const dLng = (b.longitude - a.longitude) * rad;
+	const h =
+		Math.sin(dLat / 2) ** 2 +
+		Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLng / 2) ** 2;
+	return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }

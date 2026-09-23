@@ -131,7 +131,7 @@
 			of becoming another collection of disconnected tools.
 		</p>
 		<div class="mt-9 flex flex-wrap justify-center gap-3">
-			<Button size="lg" href={resolve('/register')}>Start free trial</Button>
+			<Button size="lg" href={`${resolve('/register')}?as=business`}>Start free trial</Button>
 			<Button size="lg" variant="outline" href={resolve('/pricing')}>
 				See pricing
 				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
@@ -346,7 +346,7 @@
 			Give them a faster way to discover your business, book a service and stay connected.
 		</p>
 		<div class="mt-8 flex justify-center">
-			<Button size="lg" variant="inverse" href={resolve('/register')}>
+			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
 				Start with NOVA
 				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 			</Button>

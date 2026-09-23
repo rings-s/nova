@@ -84,6 +84,12 @@
 							>
 								My bookings
 							</a>
+							<a
+								href={resolve('/business/new')}
+								class="hidden text-sm font-semibold text-accent transition-colors hover:underline lg:block"
+							>
+								List your business
+							</a>
 						{/if}
 					{/if}
 				</div>
@@ -147,6 +153,13 @@
 								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
 							>
 								My bookings
+								<Icon name="arrow-right" class="size-4 opacity-40" />
+							</a>
+							<a
+								href={resolve('/business/new')}
+								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-accent hover:bg-surface-muted"
+							>
+								List your business
 								<Icon name="arrow-right" class="size-4 opacity-40" />
 							</a>
 						{/if}

@@ -176,7 +176,7 @@
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
 				{:else}
-					<Button size="lg" href={resolve('/register')}>
+					<Button size="lg" href={`${resolve('/register')}?as=business`}>
 						Start free trial
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
@@ -295,7 +295,9 @@
 					<div class="mt-8 pt-2">
 						<Button
 							variant={side.href === '/register' ? 'primary' : 'outline'}
-							href={resolve(side.href)}
+							href={side.href === '/register'
+								? `${resolve('/register')}?as=business`
+								: resolve(side.href)}
 						>
 							{side.cta}
 							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
@@ -378,7 +380,9 @@
 			Give them a faster way to find you, book and stay connected.
 		</p>
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
-			<Button size="lg" variant="inverse" href={resolve('/register')}>Start free trial</Button>
+			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}
+				>Start free trial</Button
+			>
 			<Button size="lg" variant="outline-inverse" href={resolve('/pricing')}>See pricing</Button>
 		</div>
 	</Container>

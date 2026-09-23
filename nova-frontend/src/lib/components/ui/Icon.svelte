@@ -1,6 +1,6 @@
 <script module>
 	/**
-	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'|'log-out'|'home'|'inbox'|'plus'|'chevron-down'|'receipt'|'settings'|'layers'|'arrow-up-right'|'user'|'panel-left'|'info'} IconName
+	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'|'log-out'|'home'|'inbox'|'plus'|'chevron-down'|'receipt'|'settings'|'layers'|'arrow-up-right'|'user'|'panel-left'|'info'|'lock'|'table'|'arrow-up'|'arrow-down'|'minus'} IconName
 	 */
 
 	/**
@@ -53,6 +53,11 @@
 		inbox:
 			'<path d="M3.5 13.5h4.3l1.4 2.5h5.6l1.4-2.5h4.3M5.2 6.2 3.5 13.5v4A2.5 2.5 0 0 0 6 20h12a2.5 2.5 0 0 0 2.5-2.5v-4l-1.7-7.3A2.5 2.5 0 0 0 16.4 4H7.6a2.5 2.5 0 0 0-2.4 2.2z"/>',
 		plus: '<path d="M12 5v14M5 12h14"/>',
+		lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+		table: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M10 9.5v10"/>',
+		'arrow-up': '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>',
+		'arrow-down': '<path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/>',
+		minus: '<path d="M5 12h14"/>',
 		'chevron-down': '<path d="M6 9.5l6 6 6-6"/>',
 		receipt:
 			'<path d="M6 3.5h12v17l-2.5-1.5-2 1.5-1.5-1.5-1.5 1.5-2-1.5L6 20.5z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>',

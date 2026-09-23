@@ -85,8 +85,11 @@
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
 			goto(`${resolve('/login')}?next=${next}`, { replaceState: true });
 		} else if (!authStore.isStaff) {
-			toastStore.info('That area is for business staff.');
-			goto(resolve('/'));
+			// A signed-in account without a business: most often an owner who
+			// signed up as a customer. Offer to set one up rather than bouncing
+			// them to the home page with no way forward.
+			toastStore.info('Set up your business to use the dashboard.');
+			goto(resolve('/business/new'), { replaceState: true });
 		}
 	});
 

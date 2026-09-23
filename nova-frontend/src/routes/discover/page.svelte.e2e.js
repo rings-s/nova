@@ -143,6 +143,9 @@ test.describe('on a phone', () => {
 		await page.goto('/discover');
 
 		await expect(page.getByRole('region', { name: 'Map of salons and spas' })).toBeHidden();
+		// The pins exist (hidden) only once the page's script runs; a toggle
+		// clicked before that lands on server-rendered HTML and does nothing.
+		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
 		await page.getByRole('button', { name: 'map', exact: true }).click();
 
 		const region = page.getByRole('region', { name: 'Map of salons and spas' });
@@ -169,6 +172,7 @@ test.describe('on a phone', () => {
 	test('the map does not paint over the Quick View modal', async ({ page }) => {
 		await stubApi(page);
 		await page.goto('/discover');
+		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
 		await page.getByRole('button', { name: 'map', exact: true }).click();
 		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
 		await page.getByTitle('Red Sea Salon — Main Branch').click();

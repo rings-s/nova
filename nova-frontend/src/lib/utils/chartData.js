@@ -1,14 +1,14 @@
 /**
  * Turns the Plotly figure JSON that `analytics.getChart` returns
  * (nova_backend/app/modules/analytics/charts.py — `data` traces plus `layout`)
- * into plain arrays layerchart's components can draw directly, so the
+ * into small chart models the analytics chart kit draws directly, so the
  * frontend never depends on plotly.js. Detection reads trace *structure*
  * (`type`, `orientation`, `fill`, `line.dash`) rather than trace names, since
  * names are localised (English or Arabic) and structure isn't.
  *
- * The categorical order and the sequential ramp both come from the design
- * system's validated palette (see layout.css) — never reassign the order or
- * generate a new hue here.
+ * Colours come from the design system's validated chart tokens (layout.css).
+ * The categorical order is fixed: never reorder it, cycle it or generate a
+ * ninth hue here.
  */
 
 /** Fixed categorical order — do not reorder or cycle past 8; fold a 9th series into "Other". */
@@ -23,262 +23,389 @@ export const CATEGORICAL_COLORS = [
 	'var(--chart-series-8)'
 ];
 
-/** One hue, light to dark, for magnitude (heatmap cells). */
-export const SEQUENTIAL_BLUE = [
-	'var(--chart-sequential-100)',
-	'var(--chart-sequential-200)',
-	'var(--chart-sequential-300)',
-	'var(--chart-sequential-400)',
-	'var(--chart-sequential-500)',
-	'var(--chart-sequential-600)',
-	'var(--chart-sequential-700)'
+/** One hue for magnitude, near-surface to strong, stepped separately per theme (layout.css). */
+export const HEAT_RAMP = [
+	'var(--chart-heat-1)',
+	'var(--chart-heat-2)',
+	'var(--chart-heat-3)',
+	'var(--chart-heat-4)',
+	'var(--chart-heat-5)',
+	'var(--chart-heat-6)',
+	'var(--chart-heat-7)'
 ];
 
-/** Booking outcomes are a state, not an identity — status colors, matching the backend's own semantics. */
-export const OUTCOME_COLORS = {
-	completed: 'var(--chart-status-good)',
-	cancelled: 'var(--chart-muted)',
-	no_show: 'var(--chart-status-critical)',
-	upcoming: 'var(--chart-series-1)'
+/**
+ * The backend pins booking outcomes to fixed hex colours (`charts.py`,
+ * `_OUTCOME_COLORS`). An outcome is a state, not an identity, so each maps to
+ * the reserved status token (themed) rather than being drawn as the raw hex.
+ */
+const BACKEND_COLORS = {
+	'#16a34a': 'var(--chart-status-good)',
+	'#9ca3af': 'var(--chart-muted)',
+	'#dc2626': 'var(--chart-status-critical)',
+	'#2563eb': 'var(--chart-series-1)'
 };
 
 /**
+ * What each chart's values are, keyed by `chart_id` (backend `ChartId`).
+ * `money` values arrive in major units (`charts.py::_major`); `percent` in
+ * 0–100. A combo's second entry is its line's unit.
+ * @type {Record<string, Unit | [Unit, Unit]>}
+ */
+const CHART_UNITS = {
+	bookings_trend: 'count',
+	revenue_trend: ['money', 'money'],
+	booking_outcomes: 'count',
+	revenue_by_service: 'money',
+	revenue_by_provider: 'money',
+	revenue_by_location: 'money',
+	source_mix: 'count',
+	new_vs_returning: 'count',
+	retention_cohorts: 'percent',
+	peak_hours: 'count',
+	provider_utilization: 'percent',
+	bookings_forecast: 'count',
+	queue_wait_times: ['count', 'minutes'],
+	payouts_breakdown: 'money',
+	nova_charges: 'money',
+	commission_by_class: 'money'
+};
+
+/**
+ * @typedef {'count'|'money'|'percent'|'minutes'} Unit
+ *
  * @typedef {Object} PlotlyTrace
  * @property {string} [type]
  * @property {string} [name]
  * @property {'h'|'v'} [orientation]
  * @property {string} [fill]
  * @property {(string|number)[]} [x]
- * @property {number[]} [y]
+ * @property {(number|string|null)[]} [y]
  * @property {string[]} [labels]
  * @property {number[]} [values]
- * @property {number[][]} [z]
- * @property {number} [hole]
+ * @property {(number|null)[][]} [z]
  * @property {{ color?: string, colors?: string[] }} [marker]
  * @property {{ color?: string, dash?: string }} [line]
- */
-/**
+ *
  * @typedef {Object} PlotlyFigure
  * @property {PlotlyTrace[]} data
  * @property {Record<string, unknown>} [layout]
- */
-
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/;
-
-/**
- * A Plotly-serialised category value, as a Date when it looks like one, else as-is.
- * @param {string|number} value
- */
-function parseCategory(value) {
-	if (typeof value === 'string' && ISO_DATE_RE.test(value)) {
-		const date = new Date(value);
-		if (!Number.isNaN(date.getTime())) return date;
-	}
-	return value;
-}
-
-/** @param {PlotlyTrace} trace @param {number} index */
-function resolveColor(trace, index) {
-	const explicit = trace.marker?.color ?? trace.line?.color;
-	if (typeof explicit === 'string') return explicit;
-	return CATEGORICAL_COLORS[index % CATEGORICAL_COLORS.length];
-}
-
-/**
- * @typedef {Object} BarPoint
- * @property {unknown} category
- * @property {number|null} value
- */
-
-/**
- * @typedef {Object} BarSeries
+ *
+ * @typedef {Object} Series
  * @property {string} key
- * @property {string|undefined} label
+ * @property {string} label
  * @property {string} color
- * @property {BarPoint[]} data
+ * @property {(number|null)[]} values One per category, null where there is no value.
+ *
+ * @typedef {{ type: 'columns', categories: string[], series: Series[], stacked: boolean, unit: Unit }} ColumnsModel
+ * @typedef {{ type: 'ranked', rows: { label: string, value: number }[], unit: Unit }} RankedModel
+ * @typedef {{ type: 'parts', parts: { label: string, value: number, color: string }[], unit: Unit }} PartsModel
+ * @typedef {{ type: 'combo', columns: ColumnsModel, line: LineModel }} ComboModel
+ * @typedef {{ type: 'line', categories: string[], series: Series[], band: { lower: number, upper: number }[]|null, forecastFrom: number|null, unit: Unit }} LineModel
+ * @typedef {{ type: 'heatmap', columns: string[], rows: string[], values: (number|null)[][], max: number, unit: Unit, rowTitle: string, columnTitle: string }} HeatmapModel
+ * @typedef {ColumnsModel|RankedModel|PartsModel|ComboModel|LineModel|HeatmapModel} ChartModel
  */
+
+/** @param {unknown} value */
+function toNumber(value) {
+	if (value === null || value === undefined || value === '') return null;
+	const number = Number(value);
+	return Number.isFinite(number) ? number : null;
+}
+
+/** @param {PlotlyTrace} trace @param {number} index @param {number} count */
+function seriesColor(trace, index, count) {
+	const explicit = trace.marker?.color ?? trace.line?.color;
+	if (typeof explicit === 'string' && explicit.toLowerCase() in BACKEND_COLORS) {
+		return BACKEND_COLORS[/** @type {keyof typeof BACKEND_COLORS} */ (explicit.toLowerCase())];
+	}
+	// One series compares magnitude, not identity: it takes the first slot.
+	return count > 1 ? CATEGORICAL_COLORS[index % CATEGORICAL_COLORS.length] : CATEGORICAL_COLORS[0];
+}
+
+/** @param {string} chartId @param {0|1} [which] @returns {Unit} */
+function unitOf(chartId, which = 0) {
+	const unit = CHART_UNITS[chartId] ?? 'count';
+	return Array.isArray(unit) ? unit[which] : unit;
+}
 
 /**
- * BAR and STACKED_BAR kinds: one or more `bar` traces sharing a category axis.
- * @param {PlotlyFigure} figure
- * @returns {{ orientation: 'horizontal'|'vertical', series: BarSeries[] }}
+ * @param {PlotlyTrace[]} traces bar or scatter traces sharing an x axis
+ * @param {Unit} unit
+ * @returns {{ categories: string[], series: Series[] }}
  */
-export function barSeriesFromFigure(figure) {
-	const traces = (figure.data ?? []).filter((trace) => trace.type === 'bar');
-	const orientation = traces.some((trace) => trace.orientation === 'h') ? 'horizontal' : 'vertical';
-
+function alignedSeries(traces, unit) {
+	/** @type {string[]} */ const categories = [];
+	const seen = new Map();
+	for (const trace of traces) {
+		for (const x of trace.x ?? []) {
+			const key = String(x);
+			if (!seen.has(key)) {
+				seen.set(key, categories.length);
+				categories.push(key);
+			}
+		}
+	}
 	const series = traces.map((trace, index) => {
-		const categories = orientation === 'horizontal' ? trace.y : trace.x;
-		// Plotly's `x`/`y` swap meaning with orientation, so whichever one is the
-		// value axis here is numeric even though its declared type spans both.
-		const values = /** @type {number[]|undefined} */ (
-			orientation === 'horizontal' ? trace.x : trace.y
-		);
+		/** @type {(number|null)[]} */
+		const values = categories.map(() => null);
+		(trace.x ?? []).forEach((x, i) => {
+			values[seen.get(String(x))] = toNumber(trace.y?.[i]);
+		});
 		return {
-			key: trace.name || `series_${index}`,
-			label: trace.name || undefined,
-			// A single-series bar compares magnitude across categories, not identity —
-			// the sequential default, not a categorical hue (choosing-a-form.md).
-			color:
-				traces.length > 1
-					? resolveColor(trace, index)
-					: (trace.marker?.color ?? 'var(--chart-sequential-500)'),
-			data: (categories ?? []).map((category, i) => ({
-				category: parseCategory(category),
-				value: values?.[i] ?? null
-			}))
+			key: `${index}`,
+			label: trace.name || (unit === 'money' ? 'Revenue' : 'Value'),
+			color: seriesColor(trace, index, traces.length),
+			values
 		};
 	});
-
-	return { orientation, series };
+	return { categories, series };
 }
 
-/**
- * @typedef {Object} DonutSlice
- * @property {string} key
- * @property {string} label
- * @property {number} value
- * @property {string} color
- */
-
-/**
- * DONUT kind: a single `pie` trace.
- * @param {PlotlyFigure} figure
- * @returns {{ slices: DonutSlice[], hole: number }}
- */
-export function donutDataFromFigure(figure) {
-	const trace = (figure.data ?? []).find((candidate) => candidate.type === 'pie');
-	if (!trace) return { slices: [], hole: 0.55 };
-
-	const labels = trace.labels ?? [];
-	const values = trace.values ?? [];
-	const explicitColors = trace.marker?.colors;
-
-	const slices = labels.map((label, index) => ({
-		key: String(label),
-		label: String(label),
-		value: values[index] ?? 0,
-		color: explicitColors?.[index] ?? CATEGORICAL_COLORS[index % CATEGORICAL_COLORS.length]
-	}));
-
-	return { slices, hole: typeof trace.hole === 'number' ? trace.hole : 0.55 };
-}
-
-/**
- * @typedef {Object} ComboSeries
- * @property {string} label
- * @property {BarPoint[]} data
- */
-
-/**
- * COMBO kind: one `bar` trace plus one `scatter` trace sharing an x axis.
- * Rendered as two single-axis panels rather than a dual-axis chart — a
- * second y-scale on one plot reads two different stories as one (see the
- * dataviz skill's anti-patterns: "One axis").
- * @param {PlotlyFigure} figure
- * @returns {{ bar: ComboSeries|null, line: ComboSeries|null }}
- */
-export function comboSeriesFromFigure(figure) {
-	const traces = figure.data ?? [];
-	const barTrace = traces.find((trace) => trace.type === 'bar');
-	const lineTrace = traces.find((trace) => trace.type === 'scatter');
-
-	/** @param {PlotlyTrace|undefined} trace @returns {ComboSeries|null} */
-	function toSeries(trace) {
-		if (!trace) return null;
-		const xValues = trace.x ?? [];
-		const yValues = trace.y ?? [];
-		return {
-			label: trace.name ?? '',
-			data: xValues.map((x, i) => ({ category: parseCategory(x), value: yValues[i] ?? null }))
-		};
+/** @param {string} chartId @param {PlotlyFigure} figure @returns {ChartModel} */
+function fromBars(chartId, figure) {
+	const traces = (figure.data ?? []).filter((trace) => trace.type === 'bar');
+	const unit = unitOf(chartId);
+	if (traces.some((trace) => trace.orientation === 'h')) {
+		const trace = traces[0];
+		const rows = (trace.y ?? [])
+			.map((label, i) => ({ label: String(label), value: toNumber(trace.x?.[i]) ?? 0 }))
+			.sort((a, b) => b.value - a.value);
+		return { type: 'ranked', rows, unit };
 	}
-
-	return { bar: toSeries(barTrace), line: toSeries(lineTrace) };
+	const { categories, series } = alignedSeries(traces, unit);
+	return { type: 'columns', categories, series, stacked: series.length > 1, unit };
 }
 
 /**
- * @typedef {Object} ForecastPoint
- * @property {unknown} date
- * @property {number|null} value
+ * Donuts become a part-to-whole bar: lengths along one line compare more
+ * accurately than angles, and the parts stay readable when one dominates.
+ * @param {string} chartId @param {PlotlyFigure} figure @returns {PartsModel}
  */
-/**
- * @typedef {Object} ForecastBandPoint
- * @property {unknown} date
- * @property {number} lower
- * @property {number} upper
- */
+function fromPie(chartId, figure) {
+	const trace = (figure.data ?? []).find((candidate) => candidate.type === 'pie');
+	const labels = trace?.labels ?? [];
+	const colors = trace?.marker?.colors;
+	return {
+		type: 'parts',
+		unit: unitOf(chartId),
+		parts: labels.map((label, i) => {
+			const explicit = colors?.[i]?.toLowerCase();
+			return {
+				label: String(label),
+				value: toNumber(trace?.values?.[i]) ?? 0,
+				color:
+					explicit && explicit in BACKEND_COLORS
+						? BACKEND_COLORS[/** @type {keyof typeof BACKEND_COLORS} */ (explicit)]
+						: CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]
+			};
+		})
+	};
+}
 
 /**
- * FORECAST kind: a solid history line, an optional filled confidence band
- * (`fill: 'toself'`, a mirrored polygon Plotly draws it as), and an optional
- * dashed trend line continuing from the last history point.
- * @param {PlotlyFigure} figure
- * @returns {{ history: ForecastPoint[], band: ForecastBandPoint[], trend: ForecastPoint[] }}
+ * A bar and a line of different measures. Never one plot with two y-axes:
+ * the panel draws two charts on one shared x axis.
+ * @param {string} chartId @param {PlotlyFigure} figure @returns {ComboModel}
  */
-export function forecastFromFigure(figure) {
+function fromCombo(chartId, figure) {
+	const traces = figure.data ?? [];
+	const bar = traces.filter((trace) => trace.type === 'bar');
+	const line = traces.filter((trace) => trace.type === 'scatter');
+	const columns = alignedSeries(bar, unitOf(chartId, 0));
+	const lineSeries = alignedSeries(line, unitOf(chartId, 1));
+	// The line is a second measure, not a second identity: it takes the next slot.
+	lineSeries.series.forEach((series) => (series.color = CATEGORICAL_COLORS[1]));
+	return {
+		type: 'combo',
+		columns: { type: 'columns', ...columns, stacked: false, unit: unitOf(chartId, 0) },
+		line: {
+			type: 'line',
+			...lineSeries,
+			band: null,
+			forecastFrom: null,
+			unit: unitOf(chartId, 1)
+		}
+	};
+}
+
+/**
+ * History, then a dashed trend with its band. Plotly draws the band as one
+ * closed polygon (`fill: 'toself'`): upper edge forward, lower edge back.
+ * @param {string} chartId @param {PlotlyFigure} figure @returns {LineModel}
+ */
+function fromForecast(chartId, figure) {
 	const traces = figure.data ?? [];
 	const bandTrace = traces.find((trace) => trace.fill === 'toself');
 	const trendTrace = traces.find((trace) => trace.line?.dash === 'dash');
 	const historyTrace = traces.find((trace) => trace !== bandTrace && trace !== trendTrace);
 
-	const historyX = historyTrace?.x ?? [];
-	const historyY = historyTrace?.y ?? [];
-	const history = historyX.map((x, i) => ({ date: parseCategory(x), value: historyY[i] ?? null }));
+	const history = (historyTrace?.x ?? []).map(String);
+	const trendX = (trendTrace?.x ?? []).map(String);
+	// The trend starts on the last history week, so the two lines meet.
+	const categories = [...history, ...trendX.filter((x) => !history.includes(x))];
+	const forecastFrom = trendX.length ? history.length - 1 : null;
 
-	/** @type {ForecastBandPoint[]} */
-	let band = [];
+	/** @type {(number|null)[]} */
+	const values = categories.map((category, i) => {
+		if (i < history.length) return toNumber(historyTrace?.y?.[i]);
+		return toNumber(trendTrace?.y?.[trendX.indexOf(category)]);
+	});
+
+	/** @type {{ lower: number, upper: number }[]|null} */
+	let band = null;
 	const bandX = bandTrace?.x ?? [];
-	const bandY = bandTrace?.y ?? [];
-	if (bandX.length > 0) {
+	if (bandX.length && forecastFrom !== null) {
 		const half = Math.floor(bandX.length / 2);
-		const weeks = bandX.slice(0, half);
-		const upper = bandY.slice(0, half);
-		const lower = bandY.slice(half).slice().reverse();
-		band = weeks.map((x, i) => ({ date: parseCategory(x), lower: lower[i], upper: upper[i] }));
+		const upper = (bandTrace?.y ?? []).slice(0, half);
+		const lower = (bandTrace?.y ?? []).slice(half).reverse();
+		const last = values[forecastFrom] ?? 0;
+		band = categories.map((category, i) => {
+			const at = bandX.slice(0, half).map(String).indexOf(category);
+			if (at === -1) return { lower: i === forecastFrom ? last : NaN, upper: i === forecastFrom ? last : NaN };
+			return { lower: toNumber(lower[at]) ?? 0, upper: toNumber(upper[at]) ?? 0 };
+		});
 	}
 
-	const trendX = trendTrace?.x ?? [];
-	const trendY = trendTrace?.y ?? [];
-	const trend = trendX.map((x, i) => ({ date: parseCategory(x), value: trendY[i] ?? null }));
+	return {
+		type: 'line',
+		categories,
+		series: [
+			{ key: '0', label: historyTrace?.name || 'Bookings', color: CATEGORICAL_COLORS[0], values }
+		],
+		band,
+		forecastFrom,
+		unit: unitOf(chartId)
+	};
+}
 
-	return { history, band, trend };
+/** @param {string} chartId @param {PlotlyFigure} figure @returns {HeatmapModel} */
+function fromHeatmap(chartId, figure) {
+	const trace = (figure.data ?? []).find((candidate) => candidate.type === 'heatmap');
+	const columns = (trace?.x ?? []).map(String);
+	const rows = (trace?.y ?? []).map(String);
+	let max = 0;
+	const values = rows.map((_, r) =>
+		columns.map((_, c) => {
+			const value = toNumber(trace?.z?.[r]?.[c]);
+			if (value !== null && value > max) max = value;
+			return value;
+		})
+	);
+	const cohorts = chartId === 'retention_cohorts';
+	return {
+		type: 'heatmap',
+		columns,
+		rows,
+		values,
+		max,
+		unit: unitOf(chartId),
+		rowTitle: cohorts ? 'First visit' : 'Day',
+		columnTitle: cohorts ? 'Months since' : 'Hour'
+	};
 }
 
 /**
- * @typedef {Object} HeatmapCell
- * @property {string} column
- * @property {string} row
- * @property {number} value
+ * The model for one chart, from its backend `kind` (`ChartKind`: bar,
+ * stacked_bar, combo, donut, heatmap, forecast).
+ * @param {{ chart_id: string, kind: string, figure: PlotlyFigure }} chart
+ * @returns {ChartModel|null}
  */
+export function chartModel(chart) {
+	switch (chart.kind) {
+		case 'bar':
+		case 'stacked_bar':
+			return fromBars(chart.chart_id, chart.figure);
+		case 'donut':
+			return fromPie(chart.chart_id, chart.figure);
+		case 'combo':
+			return fromCombo(chart.chart_id, chart.figure);
+		case 'forecast':
+			return fromForecast(chart.chart_id, chart.figure);
+		case 'heatmap':
+			return fromHeatmap(chart.chart_id, chart.figure);
+		default:
+			return null;
+	}
+}
 
 /**
- * HEATMAP kind: a single `heatmap` trace (`x` columns, `y` rows, `z` matrix).
- * @param {PlotlyFigure} figure
- * @returns {{ columns: string[], rows: string[], cells: HeatmapCell[], min: number, max: number }}
+ * Whether there is anything to draw: a window with no bookings comes back as
+ * a full axis of zeros, which would otherwise render as an empty frame.
+ * @param {ChartModel} model
  */
-export function heatmapDataFromFigure(figure) {
-	const trace = (figure.data ?? []).find((candidate) => candidate.type === 'heatmap');
-	if (!trace) return { columns: [], rows: [], cells: [], min: 0, max: 0 };
+export function hasData(model) {
+	/** @param {(number|null)[]} values */
+	const any = (values) => values.some((value) => value !== null && value !== 0);
+	switch (model.type) {
+		case 'columns':
+		case 'line':
+			return model.series.some((series) => any(series.values));
+		case 'combo':
+			return hasData(model.columns) || hasData(model.line);
+		case 'ranked':
+			return any(model.rows.map((row) => row.value));
+		case 'parts':
+			return any(model.parts.map((part) => part.value));
+		case 'heatmap':
+			return model.values.some(any);
+	}
+}
 
-	const columns = (trace.x ?? []).map(String);
-	const rows = (trace.y ?? []).map(String);
-	const matrix = trace.z ?? [];
-
-	/** @type {HeatmapCell[]} */
-	const cells = [];
-	let min = Infinity;
-	let max = -Infinity;
-	rows.forEach((row, rowIndex) => {
-		columns.forEach((column, columnIndex) => {
-			const value = matrix[rowIndex]?.[columnIndex] ?? 0;
-			cells.push({ column, row, value });
-			if (value < min) min = value;
-			if (value > max) max = value;
-		});
-	});
-	if (!Number.isFinite(min)) min = 0;
-	if (!Number.isFinite(max)) max = 0;
-
-	return { columns, rows, cells, min, max };
+/**
+ * The same numbers as a table, for the chart's table view.
+ * @param {ChartModel} model
+ * @param {(value: number|null, unit: Unit) => string} format
+ * @param {(category: string) => string} formatCategory
+ * @returns {{ head: string[], rows: string[][] }}
+ */
+export function tableOf(model, format, formatCategory) {
+	switch (model.type) {
+		case 'columns':
+		case 'line':
+			return {
+				head: ['', ...model.series.map((series) => series.label)],
+				rows: model.categories.map((category, i) => [
+					formatCategory(category) + (model.type === 'line' && model.forecastFrom !== null && i > model.forecastFrom ? ' (trend)' : ''),
+					...model.series.map((series) => format(series.values[i], model.unit))
+				])
+			};
+		case 'combo':
+			return {
+				head: [
+					'',
+					...model.columns.series.map((series) => series.label),
+					...model.line.series.map((series) => series.label)
+				],
+				rows: model.columns.categories.map((category, i) => [
+					formatCategory(category),
+					...model.columns.series.map((series) => format(series.values[i], model.columns.unit)),
+					...model.line.series.map((series) => format(series.values[i] ?? null, model.line.unit))
+				])
+			};
+		case 'ranked':
+			return {
+				head: ['', 'Value'],
+				rows: model.rows.map((row) => [row.label, format(row.value, model.unit)])
+			};
+		case 'parts': {
+			const total = model.parts.reduce((sum, part) => sum + part.value, 0);
+			return {
+				head: ['', 'Value', 'Share'],
+				rows: model.parts.map((part) => [
+					part.label,
+					format(part.value, model.unit),
+					total ? `${Math.round((part.value / total) * 100)}%` : '—'
+				])
+			};
+		}
+		case 'heatmap':
+			return {
+				head: [model.rowTitle, ...model.columns],
+				rows: model.rows.map((row, r) => [
+					formatCategory(row),
+					...model.values[r].map((value) => format(value, model.unit))
+				])
+			};
+	}
 }

@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { landingPath } from '$lib/utils/landing.js';
 	import { authStore } from '$lib/stores/auth.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
@@ -31,6 +32,12 @@
 			goto(resolve('/'));
 		}
 	}
+
+	// `?as=business` from business sign-up links, `?as=customer` from booking
+	// ones; anything else leaves the choice to the person.
+	const as = page.url.searchParams.get('as');
+	const initialIntent =
+		as === 'business' ? 'business_owner' : as === 'customer' ? 'customer' : null;
 </script>
 
 <svelte:head>
@@ -60,7 +67,7 @@
 
 	<!-- Form -->
 	<div class="mt-7">
-		<RegisterForm onsuccess={handleSuccess} />
+		<RegisterForm onsuccess={handleSuccess} {initialIntent} />
 	</div>
 
 	<!-- Login -->

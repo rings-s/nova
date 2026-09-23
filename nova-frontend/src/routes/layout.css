@@ -336,6 +336,15 @@
 	--chart-sequential-600: #184f95;
 	--chart-sequential-700: #0d366b;
 
+	/* Heatmap magnitude: near the surface at the low end, strong at the high end. */
+	--chart-heat-1: #cde2fb;
+	--chart-heat-2: #9ec5f4;
+	--chart-heat-3: #6da7ec;
+	--chart-heat-4: #3987e5;
+	--chart-heat-5: #256abf;
+	--chart-heat-6: #184f95;
+	--chart-heat-7: #0d366b;
+
 	--chart-status-good: #0ca30c;
 	--chart-status-warning: #fab219;
 	--chart-status-serious: #ec835a;
@@ -355,6 +364,15 @@
 	--chart-series-6: #008300;
 	--chart-series-7: #9085e9;
 	--chart-series-8: #e66767;
+
+	/* Stepped for the dark surface, not flipped: low values recede into it. */
+	--chart-heat-1: #104281;
+	--chart-heat-2: #1c5cab;
+	--chart-heat-3: #2a78d6;
+	--chart-heat-4: #5598e7;
+	--chart-heat-5: #86b6ef;
+	--chart-heat-6: #b7d3f6;
+	--chart-heat-7: #cde2fb;
 
 	--chart-status-good: #0ca30c;
 	--chart-status-warning: #fab219;

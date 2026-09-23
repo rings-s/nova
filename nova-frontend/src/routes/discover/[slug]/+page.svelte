@@ -343,7 +343,8 @@
 												Sign in to book — we'll send your confirmation on WhatsApp.
 											</p>
 											<div class="grid grid-cols-2 gap-2">
-												<Button variant="outline" href={resolve('/register')}>Create account</Button
+												<Button variant="outline" href={`${resolve('/register')}?as=customer`}
+													>Create account</Button
 												>
 												<Button href={resolve('/login')}>Sign in</Button>
 											</div>

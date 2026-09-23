@@ -17,7 +17,7 @@
 	import { fieldBase, fieldBorder } from '$lib/components/ui/styles.js';
 	import RatingStars from '$lib/components/review/RatingStars.svelte';
 	import { apiAssetUrl } from '$lib/api/client.js';
-	import { locate, LocateError } from '$lib/map/geolocate.js';
+	import { describeAccuracy, locate, LocateError, metresBetween } from '$lib/map/geolocate.js';
 
 	let q = $state('');
 	let selectedCity = $state('');
@@ -68,11 +68,63 @@
 	/**
 	 * Where the customer is, once they have shared it. Held in memory only —
 	 * never stored or sent anywhere but the search that measures distance.
-	 * @type {{ latitude: number, longitude: number } | null}
+	 * `accuracy` is the browser's own radius in metres (0 once the customer
+	 * placed it by hand); `source` says which of the two it came from.
+	 * @type {{ latitude: number, longitude: number, accuracy: number, source: 'device'|'map' } | null}
 	 */
 	let origin = $state(null);
+	/**
+	 * The point the searches measure from. Separate from `origin` so that a
+	 * fix which only makes the accuracy circle tighter — same place, surer —
+	 * redraws the circle without re-running every search.
+	 * @type {{ latitude: number, longitude: number } | null}
+	 */
+	let searchAt = $state(null);
 	let locating = $state(false);
 	let locateMessage = $state(/** @type {string | null} */ (null));
+	/** @type {AbortController | null} */
+	let locateAbort = null;
+
+	/** Past this, "near you" is a guess: say so, and invite a correction. */
+	const ROUGH_FIX_M = 1000;
+	/** The search's own precision need: salons within walking distance. */
+	const GOOD_ENOUGH_M = 50;
+
+	/**
+	 * Takes a (better) fix from the device. The search re-runs only when the
+	 * position really moves — by more than half the new accuracy, and at least
+	 * 50 m — so a stream of near-identical fixes doesn't re-query each time.
+	 * A position the customer placed by hand is never overridden.
+	 * @param {import('$lib/map/geolocate.js').Fix} fix
+	 */
+	function takeFix(fix) {
+		if (origin?.source === 'map') return;
+		const next = /** @type {const} */ ({ ...fix, source: 'device' });
+		if (!origin || metresBetween(origin, fix) > Math.max(GOOD_ENOUGH_M, fix.accuracy / 2)) {
+			origin = next;
+			searchAt = { latitude: fix.latitude, longitude: fix.longitude };
+		} else if (fix.accuracy < origin.accuracy) {
+			// Same place, surer: update the circle without moving the search.
+			origin = { ...origin, accuracy: fix.accuracy };
+		}
+	}
+
+	/** The customer dragged the dot to where they really are. */
+	/** @param {{ latitude: number, longitude: number }} position */
+	function moveHere(position) {
+		locateAbort?.abort();
+		origin = { ...position, accuracy: 0, source: 'map' };
+		searchAt = { latitude: position.latitude, longitude: position.longitude };
+	}
+
+	let originNote = $derived.by(() => {
+		if (!origin) return null;
+		if (origin.source === 'map') return 'Showing salons near the spot you placed on the map.';
+		const within = describeAccuracy(origin.accuracy);
+		return origin.accuracy > ROUGH_FIX_M
+			? `Your device could only place you within about ${within}, so "near you" may be off. Drag the blue dot on the map to where you are.`
+			: `Showing salons near you — located to within about ${within}.`;
+	});
 
 	/** How far "near you" reaches, in km. The API allows up to 100. */
 	const NEAR_RADIUS_KM = 50;
@@ -80,14 +132,33 @@
 	async function useMyLocation() {
 		locating = true;
 		locateMessage = null;
+		locateAbort?.abort();
+		const controller = new AbortController();
+		locateAbort = controller;
+		// A new request starts over, even from a position placed by hand.
+		if (origin?.source === 'map') {
+			origin = null;
+			searchAt = null;
+		}
 		try {
-			// A rough, quick fix is plenty to rank salons by distance: skip the
-			// refinement step the branch-pin picker needs.
-			const fix = await locate({ onfix: () => {}, quickTimeoutMs: 10_000, refineMs: 0 });
-			origin = { latitude: fix.latitude, longitude: fix.longitude };
+			// The first answer a browser gives is often its fastest, not its best:
+			// a Wi-Fi or IP guess that can be kilometres out. Show results from it
+			// at once (`onfix`), then keep listening for a precise fix — the search
+			// follows as it arrives, and stops early once it is good enough.
+			const fix = await locate({
+				onfix: takeFix,
+				quickTimeoutMs: 10_000,
+				refineMs: 10_000,
+				preciseEnoughM: GOOD_ENOUGH_M,
+				signal: controller.signal
+			});
+			takeFix(fix);
 			return true;
 		} catch (err) {
 			const kind = err instanceof LocateError ? err.kind : 'unavailable';
+			// Cancelled because the customer placed the dot themselves: that's
+			// a result, not a failure.
+			if (kind === 'cancelled') return origin !== null;
 			locateMessage =
 				kind === 'denied'
 					? 'Location is blocked for this site. Allow it from the address bar to see salons near you.'
@@ -96,7 +167,10 @@
 						: "We couldn't find your location. Pick a city instead.";
 			return false;
 		} finally {
-			locating = false;
+			if (locateAbort === controller) {
+				locating = false;
+				locateAbort = null;
+			}
 		}
 	}
 
@@ -131,8 +205,8 @@
 	});
 
 	$effect(() => {
-		if (!origin) return;
-		const { latitude, longitude } = origin;
+		if (!searchAt) return;
+		const { latitude, longitude } = searchAt;
 		nearby = null;
 		searchBusinesses({ latitude, longitude, radiusKm: NEAR_RADIUS_KM, sort: 'distance', limit: 4 })
 			.then((page) => (nearby = page.items))
@@ -143,7 +217,7 @@
 		loading = true;
 		try {
 			const combinedQ = [q, selectedCategory].filter(Boolean).join(' ');
-			const near = sortBy === 'nearest' ? origin : null;
+			const near = sortBy === 'nearest' ? searchAt : null;
 			const page = await searchBusinesses({
 				q: combinedQ || null,
 				city: selectedCity || null,
@@ -206,7 +280,7 @@
 		selectedCategory;
 		sortBy;
 		area;
-		origin;
+		searchAt;
 		search();
 	});
 
@@ -316,16 +390,27 @@
 				variant="ghost"
 				size="sm"
 				loading={locating}
-				onclick={() => changeSort('nearest')}
+				onclick={async () => {
+					if (origin) await useMyLocation();
+					await changeSort('nearest');
+				}}
 				aria-pressed={sortBy === 'nearest'}
 			>
 				{#if !locating}<Icon name="map-pin" class="size-4" />{/if}
-				{origin ? 'Showing salons near you' : 'Use my location'}
+				{locating ? 'Finding your location…' : origin ? 'Update my location' : 'Use my location'}
 			</Button>
 		</div>
-		{#if locateMessage}
-			<p class="mx-auto mt-2 max-w-md text-center text-xs text-fg-muted" role="status">
-				{locateMessage}
+		{#if locateMessage || originNote}
+			<p
+				class={[
+					'mx-auto mt-2 max-w-lg text-center text-xs',
+					origin && origin.source === 'device' && origin.accuracy > ROUGH_FIX_M
+						? 'text-amber-700 dark:text-amber-400'
+						: 'text-fg-muted'
+				].join(' ')}
+				role="status"
+			>
+				{locateMessage ?? originNote}
 			</p>
 		{/if}
 
@@ -681,6 +766,8 @@
 				onselect={(listing) => (quickViewSalon = listing)}
 				onsearcharea={searchArea}
 				onclear={() => searchArea(null)}
+				here={origin}
+				onmovehere={moveHere}
 				class="h-[65vh] min-h-96 lg:h-[calc(100vh-8rem)]"
 			/>
 		</div>

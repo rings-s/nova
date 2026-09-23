@@ -235,7 +235,7 @@
 						<Button
 							size="lg"
 							variant={tier.featured ? 'primary' : 'outline'}
-							href={resolve('/register')}
+							href={`${resolve('/register')}?as=business`}
 							class="w-full"
 						>
 							Start with {tier.name}
@@ -355,7 +355,7 @@
 		</p>
 
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
-			<Button size="lg" variant="inverse" href={resolve('/register')}>
+			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
 				Start 14-day free trial
 			</Button>
 

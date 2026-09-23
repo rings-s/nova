@@ -1,4 +1,5 @@
 <script>
+	import { untrack } from 'svelte';
 	/**
 	 * Registration has no "role" of its own at the backend — `POST /auth/register`
 	 * (identity/schemas.py::RegisterRequest) takes only email/password/full_name/phone.
@@ -44,13 +45,20 @@
 	 *       tenant?: import('../../api/identity.js').Tenant,
 	 *       business?: import('../../api/catalog.js').Business
 	 *     }
-	 *   ) => void
+	 *   ) => void,
+	 *   initialIntent?: 'customer'|'business_owner'|null
 	 * }}
 	 */
-	let { onsuccess } = $props();
+	let { onsuccess, initialIntent = null } = $props();
 
-	/** @type {'customer'|'business_owner'} */
-	let intent = $state('customer');
+	/**
+	 * Which kind of account. Deliberately no default when the page gives none:
+	 * a silent "customer" default is how owners ended up with customer accounts
+	 * and no way into the dashboard. Business sign-up links pass
+	 * `?as=business`, customer ones `?as=customer`.
+	 * @type {'customer'|'business_owner'|null}
+	 */
+	let intent = $state(untrack(() => initialIntent));
 
 	/**
 	 * The business-owner path alone has enough fields to earn a second,
@@ -94,6 +102,10 @@
 		event.preventDefault();
 		error = null;
 
+		if (intent === null) {
+			error = 'Choose whether this is a customer or a business account.';
+			return;
+		}
 		if (intent === 'business_owner') {
 			if (!isAccountStepValid()) {
 				businessSubTab = 'account';
@@ -130,7 +142,7 @@
 				businessStore.set(tenant.id, business.id);
 				onsuccess?.(user, { intent, tenant, business });
 			} else {
-				onsuccess?.(user, { intent });
+				onsuccess?.(user, { intent: 'customer' });
 			}
 		} catch (err) {
 			error = formatApiError(err);
@@ -203,7 +215,7 @@
 		/>
 
 		<Button type="submit" {loading} fullWidth>Create account</Button>
-	{:else}
+	{:else if intent === 'business_owner'}
 		<div class="flex flex-col gap-4">
 			<ol class="flex items-center gap-2 text-xs font-medium" aria-label="Sign-up steps">
 				{#each [{ id: 'account', label: 'Your account' }, { id: 'business', label: 'Your business' }] as stepItem, index (stepItem.id)}
@@ -276,5 +288,7 @@
 		</div>
 
 		<Button type="submit" {loading} fullWidth>Create account and business</Button>
+	{:else}
+		<p class="text-center text-sm text-fg-muted">Choose the kind of account to continue.</p>
 	{/if}
 </form>

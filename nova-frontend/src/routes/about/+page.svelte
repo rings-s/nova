@@ -170,7 +170,9 @@ POST /v1/payments
 				its day.
 			</p>
 			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-				<Button size="lg" href={resolve('/register')}>Start 14-day free trial</Button>
+				<Button size="lg" href={`${resolve('/register')}?as=business`}
+					>Start 14-day free trial</Button
+				>
 				<Button size="lg" variant="outline" href={resolve('/features')}>Explore features</Button>
 			</div>
 		</div>
@@ -420,7 +422,7 @@ POST /v1/payments
 			Set up your storefront, services and providers in minutes.
 		</p>
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
-			<Button size="lg" variant="inverse" href={resolve('/register')}>
+			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
 				Start 14-day free trial
 			</Button>
 			<Button size="lg" variant="outline-inverse" href={resolve('/discover')}>
