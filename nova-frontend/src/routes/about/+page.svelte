@@ -308,7 +308,7 @@ POST /v1/payments
 		<div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
 			{#each pillars as pillar (pillar.title)}
 				<div
-					class="duration-base relative flex flex-col rounded-card border border-line bg-surface p-6 shadow-card transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
+					class="relative flex flex-col rounded-card border border-line bg-surface p-6 shadow-card transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
 				>
 					<div>
 						<div

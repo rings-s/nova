@@ -26,7 +26,7 @@
 <button
 	type="button"
 	onclick={() => onviewlines?.(invoice)}
-	class="group duration-fast flex w-full items-center justify-between gap-4 px-5 py-3.5 text-start focus-ring transition-colors hover:bg-surface-sunken"
+	class="group flex w-full items-center justify-between gap-4 px-5 py-3.5 text-start focus-ring transition-colors duration-fast hover:bg-surface-sunken"
 >
 	<div class="flex min-w-0 items-center gap-3">
 		<span

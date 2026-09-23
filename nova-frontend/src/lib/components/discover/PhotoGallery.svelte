@@ -86,7 +86,7 @@
 					src={apiAssetUrl(i === 0 ? photo.urls.large : photo.urls.thumb)}
 					alt={i === 0 ? `${name}` : ''}
 					loading={i === 0 ? 'eager' : 'lazy'}
-					class="duration-slow size-full object-cover transition-transform ease-out-premium group-hover:scale-[1.03]"
+					class="size-full object-cover transition-transform duration-slow ease-out-premium group-hover:scale-[1.03]"
 				/>
 			</button>
 		{/each}

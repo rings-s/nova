@@ -21,12 +21,12 @@
 		<div class="flex" role="presentation" onmouseleave={() => (hover = 0)}>
 			{#each [1, 2, 3, 4, 5] as star (star)}
 				<label
-					class="duration-fast cursor-pointer rounded-control p-1 transition-transform hover:scale-110 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-500"
+					class="cursor-pointer rounded-control p-1 transition-transform duration-fast hover:scale-110 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-500"
 					onmouseenter={() => (hover = star)}
 				>
 					<input type="radio" {name} value={star} bind:group={value} class="sr-only" />
 					<svg
-						class={`duration-fast size-8 transition-colors ${star <= shown ? 'text-amber-400' : 'text-line-strong'}`}
+						class={`size-8 transition-colors duration-fast ${star <= shown ? 'text-amber-400' : 'text-line-strong'}`}
 						viewBox="0 0 20 20"
 						fill="currentColor"
 						aria-hidden="true"

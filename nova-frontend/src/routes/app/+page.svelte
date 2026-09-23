@@ -314,7 +314,7 @@
 						<li class="border-b border-line-subtle last:border-b-0">
 							<a
 								href={resolve(item.href)}
-								class="group duration-fast flex items-center gap-3 px-4 py-3 focus-ring transition-colors hover:bg-surface-sunken"
+								class="group flex items-center gap-3 px-4 py-3 focus-ring transition-colors duration-fast hover:bg-surface-sunken"
 							>
 								<span
 									class="flex size-9 shrink-0 items-center justify-center rounded-control bg-accent-soft text-accent"
@@ -327,7 +327,7 @@
 								</span>
 								<Icon
 									name="chevron-right"
-									class="duration-fast size-4 text-fg-subtle transition-transform group-hover:translate-x-0.5 rtl:rotate-180"
+									class="size-4 text-fg-subtle transition-transform duration-fast group-hover:translate-x-0.5 rtl:rotate-180"
 								/>
 							</a>
 						</li>

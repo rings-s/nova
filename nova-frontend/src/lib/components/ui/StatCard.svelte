@@ -23,7 +23,7 @@
 	class={[
 		'group relative flex flex-col rounded-card border border-line bg-surface p-5 shadow-card',
 		href
-			? 'duration-base focus-ring transition-[border-color,box-shadow] ease-out-premium hover:border-line-strong hover:shadow-raised'
+			? 'focus-ring transition-[border-color,box-shadow] duration-base ease-out-premium hover:border-line-strong hover:shadow-raised'
 			: ''
 	].join(' ')}
 >

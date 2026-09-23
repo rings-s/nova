@@ -13,7 +13,7 @@
 
 <div
 	class={[
-		'duration-base rounded-card border border-line bg-surface p-6 shadow-card transition-[border-color,box-shadow,transform] ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised',
+		'rounded-card border border-line bg-surface p-6 shadow-card transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised',
 		span === 2 ? 'sm:col-span-2' : '',
 		className
 	].join(' ')}

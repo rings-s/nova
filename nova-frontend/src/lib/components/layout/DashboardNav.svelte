@@ -74,7 +74,7 @@
 							aria-current={active ? 'page' : undefined}
 							class={[
 								'group relative flex h-9 items-center gap-3 rounded-control px-3 text-sm font-medium',
-								'duration-fast focus-ring transition-colors',
+								'focus-ring transition-colors duration-fast',
 								active
 									? 'bg-surface text-fg shadow-card ring-1 ring-line dark:bg-surface-muted/70 dark:ring-white/5'
 									: 'text-fg-muted hover:bg-surface-muted/70 hover:text-fg'

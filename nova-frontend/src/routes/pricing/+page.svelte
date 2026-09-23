@@ -144,7 +144,7 @@
 			{#each tiers as tier, i (tier.name)}
 				<div
 					class={[
-						'duration-base relative flex flex-col rounded-panel border bg-surface p-6 transition-[border-color,box-shadow] ease-out-premium sm:p-8',
+						'relative flex flex-col rounded-panel border bg-surface p-6 transition-[border-color,box-shadow] duration-base ease-out-premium sm:p-8',
 						tier.featured
 							? 'border-brand-300 shadow-raised ring-4 ring-brand-500/10 dark:border-brand-500/40'
 							: 'border-line shadow-card hover:border-line-strong hover:shadow-raised'

@@ -48,7 +48,7 @@
 			onkeydown={(event) => onkeydown(event, index)}
 			class={[
 				'inline-flex h-8 shrink-0 items-center gap-2 rounded-[calc(var(--radius-control)-2px)] px-3.5 text-sm font-medium whitespace-nowrap',
-				'duration-fast focus-ring transition-[background-color,color,box-shadow] ease-out-premium',
+				'focus-ring transition-[background-color,color,box-shadow] duration-fast ease-out-premium',
 				active === tab.id
 					? 'bg-surface text-fg shadow-card ring-1 ring-line dark:bg-slate-700/60 dark:ring-white/5'
 					: 'text-fg-muted hover:text-fg'

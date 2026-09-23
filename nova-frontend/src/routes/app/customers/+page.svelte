@@ -143,7 +143,7 @@
 				<li>
 					<a
 						href={resolve('/app/customers/[id]', { id: customer.id })}
-						class="group duration-fast flex items-center gap-3 px-5 py-3.5 focus-ring transition-colors first:rounded-t-card last:rounded-b-card hover:bg-surface-sunken"
+						class="group flex items-center gap-3 px-5 py-3.5 focus-ring transition-colors duration-fast first:rounded-t-card last:rounded-b-card hover:bg-surface-sunken"
 					>
 						<Avatar name={customer.full_name} />
 						<div class="min-w-0 flex-1">
@@ -154,7 +154,7 @@
 						</div>
 						<Icon
 							name="chevron-right"
-							class="duration-fast size-4 text-fg-subtle transition-transform group-hover:translate-x-0.5 rtl:rotate-180"
+							class="size-4 text-fg-subtle transition-transform duration-fast group-hover:translate-x-0.5 rtl:rotate-180"
 						/>
 					</a>
 				</li>

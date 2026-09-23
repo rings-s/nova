@@ -157,7 +157,7 @@
 			{#each intentOptions as option (option.id)}
 				<label
 					class={[
-						'duration-fast relative flex cursor-pointer flex-col gap-1 rounded-card border p-3 transition-[border-color,box-shadow] has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-brand-500/20',
+						'relative flex cursor-pointer flex-col gap-1 rounded-card border p-3 transition-[border-color,box-shadow] duration-fast has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-brand-500/20',
 						intent === option.id
 							? 'border-brand-500 bg-accent-soft/60 ring-4 ring-brand-500/10'
 							: 'border-line-strong hover:border-fg-subtle'

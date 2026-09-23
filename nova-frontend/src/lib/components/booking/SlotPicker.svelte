@@ -270,7 +270,7 @@
 							aria-pressed={cell.key === selectedDayKey}
 							onclick={() => (selectedDayKey = cell.key)}
 							class={[
-								'duration-fast relative flex aspect-square flex-col items-center justify-center rounded-control text-sm tabular-nums focus-ring transition-colors disabled:cursor-not-allowed',
+								'relative flex aspect-square flex-col items-center justify-center rounded-control text-sm tabular-nums focus-ring transition-colors duration-fast disabled:cursor-not-allowed',
 								cell.key === selectedDayKey
 									? 'bg-brand-600 font-semibold text-white shadow-glow'
 									: cell.hasSlots
@@ -310,7 +310,7 @@
 										type="button"
 										onclick={() => onselect(slot)}
 										class={[
-											'duration-fast inline-flex h-9 items-center rounded-control border px-3.5 text-sm font-medium tabular-nums focus-ring transition-[border-color,background-color,color]',
+											'inline-flex h-9 items-center rounded-control border px-3.5 text-sm font-medium tabular-nums focus-ring transition-[border-color,background-color,color] duration-fast',
 											slot.slot_id === selectedSlotId
 												? 'border-brand-600 bg-brand-600 text-white shadow-glow'
 												: 'border-line-strong bg-surface text-fg hover:border-brand-400 hover:bg-accent-soft hover:text-accent'
