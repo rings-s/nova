@@ -1,4 +1,5 @@
 <script>
+	import { t, tp } from '$lib/i18n/index.svelte.js';
 	/**
 	 * A read-only rating: five stars filled to the average (partial stars
 	 * included), the number, and how many ratings it rests on. An unrated
@@ -35,8 +36,15 @@
 
 	let label = $derived(
 		average == null
-			? 'Not rated yet'
-			: `Rated ${average.toFixed(1)} out of 5 from ${count} ${count === 1 ? 'rating' : 'ratings'}`
+			? t('Not rated yet')
+			: tp(
+					count,
+					'Rated {average} out of 5 from {count} rating',
+					'Rated {average} out of 5 from {count} ratings',
+					{
+						average: average.toFixed(1)
+					}
+				)
 	);
 </script>
 
@@ -52,7 +60,7 @@
 		>
 			<path d={STAR} stroke-linejoin="round" />
 		</svg>
-		New
+		{t('New')}
 	</span>
 {:else}
 	<span

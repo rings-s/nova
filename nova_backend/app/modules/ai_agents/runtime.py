@@ -18,6 +18,11 @@ reply with `requires_human_handoff=True` rather than raising.
 Conversation memory is encoded here as well, as PydanticAI's own message JSON,
 so `history.py` stores bytes and never imports the library either.
 
+Two local servers are supported (`AI_PROVIDER`): Ollama and LM Studio. Both
+speak the OpenAI chat protocol at /v1, so one `OpenAIChatModel` serves either;
+`_chat_model` only picks the provider and where a reasoning model's thinking
+arrives. Nothing outside this file knows which one is running.
+
 PydanticAI 2.x is the target: `OpenAIChatModel` with `OllamaProvider`. Until
 ADR-0011 this file imported `OpenAIModel`, which 2.x no longer has; the
 ImportError happened inside the turn, read as an ordinary inference failure,
@@ -27,7 +32,10 @@ through `model_override`, so the next rename fails a build instead.
 
 import asyncio
 import importlib.util
+import json
 import logging
+import re
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -36,9 +44,56 @@ logger = logging.getLogger(__name__)
 
 PYDANTIC_AI_AVAILABLE = importlib.util.find_spec("pydantic_ai") is not None
 
+#: How long a reachability answer is reused. A client asks on every page that
+#: shows a chat; the model server should not see a request for each one.
+_PROBE_TTL_SECONDS = 15.0
+_probe_cache: dict[str, tuple[float, bool]] = {}
+
+#: Model families that take Qwen3's `/no_think` soft switch in the prompt. It
+#: is the one way to turn thinking off that both Ollama and LM Studio honour;
+#: the OpenAI `reasoning_effort` parameter did not finish a turn in LM Studio.
+_NO_THINK_FAMILIES = ("qwen3",)
+
+#: Small models sometimes repeat a structured field in the reply text as markup
+#: (`<chart_ids>nova_charges</chart_ids>`). The field itself is what counts
+#: (the service keeps only ids a tool produced), so the echo is removed.
+_ECHOED_FIELDS = re.compile(
+    r"<(chart_ids|metrics_used|proposed_action_ids|suggested_actions)>.*?</\1>", re.DOTALL
+)
+
+
+def reply_from_json(text: str) -> str | None:
+    """The reply inside a JSON answer: `{"reply": …}`, or an output-tool call
+    written out as text, `{"name": "final_result", "arguments": {"reply": …}}`."""
+    body = text.strip()
+    if body.startswith("```"):
+        body = body.strip("`").removeprefix("json").strip()
+    if not body.startswith("{"):
+        return None
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    if isinstance(data, dict) and isinstance(data.get("arguments"), dict):
+        data = data["arguments"]
+    if isinstance(data, dict) and isinstance(data.get("reply"), str) and data["reply"].strip():
+        return str(data["reply"])
+    return None
+
+
+def clean_reply(reply: str) -> str:
+    text = _ECHOED_FIELDS.sub("", reply)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return re.sub(r"[ \t]+\n", "\n", text).strip()
+
+
 #: A looping model must not be able to hold the GPU (ADR-0011).
 REQUEST_LIMIT = 8
 TOOL_CALLS_LIMIT = 12
+#: Tokens one model call may generate. A tool call needs under a hundred and a
+#: reply a few hundred; a small model left unbounded wrote 500-token preambles
+#: before its tool calls, over a minute each on a CPU.
+MAX_TOKENS_PER_CALL = 600
 
 #: What a customer sees when inference is unavailable. Deliberately not an
 #: error message: the customer did nothing wrong, and a salon's chat saying
@@ -91,6 +146,9 @@ class InferenceEngine:
         *,
         base_url: str,
         routing_model: str,
+        provider: str = "ollama",
+        api_key: str | None = None,
+        thinking: bool = False,
         reasoning_model: str,
         request_timeout_seconds: float = 30.0,
         tool_timeout_seconds: float = 5.0,
@@ -98,6 +156,9 @@ class InferenceEngine:
         model_override: Any | None = None,
     ) -> None:
         self.base_url = base_url
+        self.provider = provider
+        self.api_key = api_key
+        self.thinking = thinking
         self.routing_model = routing_model
         self.reasoning_model = reasoning_model
         self.request_timeout_seconds = request_timeout_seconds
@@ -111,6 +172,56 @@ class InferenceEngine:
     def available(self) -> bool:
         """Whether a turn can even be attempted."""
         return self.enabled and PYDANTIC_AI_AVAILABLE
+
+    async def reachable(self) -> bool:
+        """Whether the model server answers at all, so a client can hide a chat
+        that would only hand off. A short, cached `GET /models`; never raises.
+        A test engine with `model_override` needs no server."""
+        if not self.available:
+            return False
+        if self.model_override is not None:
+            return True
+        now = time.monotonic()
+        cached = _probe_cache.get(self.base_url)
+        if cached is not None and now - cached[0] < _PROBE_TTL_SECONDS:
+            return cached[1]
+
+        import httpx
+
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{self.base_url.rstrip('/')}/models", headers=headers)
+            ok = response.status_code == 200
+        except httpx.HTTPError:
+            ok = False
+        _probe_cache[self.base_url] = (now, ok)
+        return ok
+
+    def _chat_model(self, model: str) -> Any:
+        """The PydanticAI model for this engine's server."""
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.ollama import OllamaProvider
+
+        if self.provider == "ollama":
+            return OpenAIChatModel(
+                model, provider=OllamaProvider(base_url=self.base_url, api_key=self.api_key)
+            )
+
+        from pydantic_ai.profiles import merge_profile
+        from pydantic_ai.profiles.openai import OpenAIModelProfile
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        # LM Studio names models `publisher/family-size` (`qwen/qwen3-8b`). The
+        # family decides the profile, so reuse Ollama's table on the bare name,
+        # then read a reasoning model's thinking where LM Studio puts it.
+        family = OllamaProvider.model_profile(model.rsplit("/", 1)[-1])
+        profile = merge_profile(
+            family, OpenAIModelProfile(openai_chat_thinking_field="reasoning_content")
+        )
+        # The OpenAI client insists on a key; LM Studio ignores it.
+        provider = OpenAIProvider(base_url=self.base_url, api_key=self.api_key or "lm-studio")
+        return OpenAIChatModel(model, provider=provider, profile=profile)
 
     async def run_turn(
         self,
@@ -182,7 +293,10 @@ class InferenceEngine:
                 exc_info=True,
             )
 
-        if not prefer_reasoning_model:
+        if not prefer_reasoning_model or self.routing_model == self.reasoning_model:
+            # Retrying on the same model repeats the failure and doubles the
+            # wait: on a laptop running one small model for both roles, a turn
+            # took two full timeouts before handing off.
             return fallback_result(locale=locale, reason="inference_failed")
         if retry_is_safe is not None and not retry_is_safe():
             logger.warning("ai_retry_skipped_after_write", extra={"agent": agent_name})
@@ -227,8 +341,6 @@ class InferenceEngine:
         """The one place PydanticAI is actually called."""
         from pydantic_ai import Agent, ModelRetry, RunContext
         from pydantic_ai.messages import ModelMessagesTypeAdapter, ToolReturnPart
-        from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.ollama import OllamaProvider
         from pydantic_ai.usage import UsageLimits
 
         from app.modules.ai_agents.guardrails import (
@@ -254,15 +366,17 @@ class InferenceEngine:
                     if isinstance(part, ToolReturnPart):
                         deps.artifacts.grounded_values |= grounded_values_in_result(part.content)
 
-        # Ollama speaks the OpenAI chat protocol at /v1.
-        chat_model = self.model_override or OpenAIChatModel(
-            model, provider=OllamaProvider(base_url=self.base_url)
-        )
+        chat_model = self.model_override or self._chat_model(model)
+        if not self.thinking and any(f in model.lower() for f in _NO_THINK_FAMILIES):
+            system_prompt = f"{system_prompt}\n\n/no_think"
         agent: Agent[Any, Any] = Agent(
             chat_model,
             name=agent_name,
             deps_type=type(deps),
-            output_type=output_type or AgentOutput,
+            # Plain text is accepted as the reply too. A small model often
+            # answers in prose instead of calling the output tool, and prose is
+            # a fine reply; refusing it turned good answers into handoffs.
+            output_type=[output_type or AgentOutput, str],
             instructions=system_prompt,
             tools=tools,
             # docs/10 section 11: output that fails validation is retried once,
@@ -270,14 +384,26 @@ class InferenceEngine:
             retries=1,
         )
 
+        @agent.output_validator
+        async def readable(ctx: RunContext[Any], output: Any) -> Any:
+            """Prose for the customer, never JSON. Live, qwen3-1.7b answered with
+            its output-tool call written out as text, or with a tool's raw result."""
+            if not isinstance(output, str):
+                return output
+            reply = reply_from_json(output)
+            if reply is not None:
+                return reply
+            if output.strip().lstrip("`").startswith(("{", "[", "json")):
+                raise ModelRetry("Answer the customer in plain sentences, not JSON.")
+            return output
+
         if grounded:
 
             @agent.output_validator
             async def only_grounded_numbers(ctx: RunContext[Any], output: Any) -> Any:
                 """docs/13 section 5.2: every figure in the reply came from a tool."""
-                ungrounded = find_ungrounded_numbers(
-                    output.reply, ctx.deps.artifacts.grounded_values
-                )
+                text = output if isinstance(output, str) else output.reply
+                ungrounded = find_ungrounded_numbers(text, ctx.deps.artifacts.grounded_values)
                 if ungrounded:
                     raise ModelRetry(
                         "These figures did not come from any tool in this conversation: "
@@ -292,11 +418,22 @@ class InferenceEngine:
             usage_limits=UsageLimits(
                 request_limit=REQUEST_LIMIT, tool_calls_limit=TOOL_CALLS_LIMIT
             ),
+            model_settings={"max_tokens": MAX_TOKENS_PER_CALL},
         )
         output = run.output
+        if isinstance(output, str):
+            return InferenceResult(
+                reply=clean_reply(output),
+                suggested_actions=[],
+                requires_human_handoff=False,
+                # Unstructured, so it carries no confidence of its own.
+                confidence=0.5,
+                model_used=model if self.model_override is None else chat_model.model_name,
+                new_turn=run.new_messages_json(),
+            )
 
         return InferenceResult(
-            reply=output.reply,
+            reply=clean_reply(output.reply),
             suggested_actions=list(output.suggested_actions),
             requires_human_handoff=output.requires_human_handoff,
             confidence=output.confidence,
@@ -311,7 +448,10 @@ class InferenceEngine:
 
 def build_inference_engine(settings) -> InferenceEngine:
     return InferenceEngine(
-        base_url=settings.ollama_base_url,
+        base_url=settings.ai_base_url or settings.ollama_base_url,
+        provider=settings.ai_provider,
+        api_key=settings.ai_api_key,
+        thinking=settings.ai_thinking,
         routing_model=settings.ai_routing_model,
         reasoning_model=settings.ai_reasoning_model,
         request_timeout_seconds=settings.ai_request_timeout_seconds,

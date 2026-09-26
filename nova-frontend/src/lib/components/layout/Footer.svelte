@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
 	import { authStore } from '$lib/stores/auth.svelte.js';
 	import Logo from './Logo.svelte';
@@ -9,28 +10,28 @@
 
 	/** @type {FooterLink[]} */
 	const productLinks = [
-		{ label: 'Features', href: '/features' },
-		{ label: 'Pricing', href: '/pricing' },
-		{ label: 'Find a salon', href: '/discover' },
-		{ label: 'About', href: '/about' }
+		{ label: m('Features'), href: '/features' },
+		{ label: m('Pricing'), href: '/pricing' },
+		{ label: m('Find a salon'), href: '/discover' },
+		{ label: m('About'), href: '/about' }
 	];
 
 	/** @type {FooterLink[]} */
 	let accountLinks = $derived(
 		authStore.isAuthenticated
 			? authStore.isStaff
-				? [{ label: 'Dashboard', href: '/app' }]
-				: [{ label: 'My bookings', href: '/bookings' }]
+				? [{ label: m('Dashboard'), href: '/app' }]
+				: [{ label: m('My bookings'), href: '/bookings' }]
 			: [
-					{ label: 'Sign in', href: '/login' },
-					{ label: 'Sign up', href: '/register' }
+					{ label: m('Sign in'), href: '/login' },
+					{ label: m('Sign up'), href: '/register' }
 				]
 	);
 
 	/** @type {{ title: string, links: FooterLink[] }[]} */
 	let columns = $derived([
-		{ title: 'Product', links: productLinks },
-		{ title: 'Account', links: accountLinks }
+		{ title: m('Product'), links: productLinks },
+		{ title: m('Account'), links: accountLinks }
 	]);
 </script>
 
@@ -40,14 +41,16 @@
 			<div class="max-w-xs">
 				<Logo />
 				<p class="mt-4 text-sm leading-6 text-fg-muted">
-					Bookings, walk-ins and payments for salons and spas in the GCC.
+					{t('Bookings, walk-ins and payments for salons and spas in the GCC.')}
 				</p>
 			</div>
 
 			<div class="grid grid-cols-2 gap-10 sm:gap-16">
 				{#each columns as column (column.title)}
-					<nav aria-label={column.title}>
-						<h3 class="text-xs font-semibold tracking-wider text-fg uppercase">{column.title}</h3>
+					<nav aria-label={t(column.title)}>
+						<h3 class="text-xs font-semibold tracking-wider text-fg uppercase">
+							{t(column.title)}
+						</h3>
 						<ul class="mt-4 space-y-2.5">
 							{#each column.links as link (link.href)}
 								<li>
@@ -55,7 +58,7 @@
 										href={resolve(link.href)}
 										class="text-sm text-fg-muted transition-colors hover:text-fg"
 									>
-										{link.label}
+										{t(link.label)}
 									</a>
 								</li>
 							{/each}
@@ -66,7 +69,7 @@
 		</div>
 
 		<p class="border-t border-line py-6 text-xs text-fg-subtle">
-			© {year} NOVA. All rights reserved.
+			{t('© {year} NOVA. All rights reserved.', { year })}
 		</p>
 	</div>
 </footer>

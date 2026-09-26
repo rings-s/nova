@@ -8,7 +8,7 @@ Services flush, never commit. The router owns the transaction boundary.
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,12 +17,19 @@ from app.core.events import publish_event
 from app.core.security import Principal
 from app.core.values import Money, TimeRange
 from app.integrations.base import IntegrationNotConfiguredError
-from app.integrations.payments.moyasar import PaymentGateway
+from app.integrations.payments.moyasar import (
+    MIN_INVOICE_AMOUNT_MINOR,
+    PaymentGateway,
+    PaymentGatewayError,
+)
 from app.modules.booking.domain import BookingStatus
 from app.modules.booking.service import BookingService
 from app.modules.payment.domain import (
+    SETTLED_STATUSES,
+    CheckoutAmountTooSmallError,
     Payment,
     PaymentAmountMismatchError,
+    PaymentCheckoutMismatchError,
     PaymentFact,
     PaymentStatus,
     Refund,
@@ -31,6 +38,7 @@ from app.modules.payment.domain import (
     deposit_for,
     paid_amount_matches,
     to_minor_units,
+    with_query,
 )
 from app.modules.payment.events import (
     PaymentCaptured,
@@ -47,9 +55,15 @@ from app.modules.payment.repository import PaymentRepository, WebhookEventReposi
 
 logger = logging.getLogger(__name__)
 
-#: Gateway statuses that mean the money actually arrived.
+#: Moyasar payment statuses that mean the money actually arrived.
 _CAPTURED_GATEWAY_STATUSES = frozenset({"paid", "captured"})
-_FAILED_GATEWAY_STATUSES = frozenset({"failed", "voided", "expired"})
+#: Moyasar payment statuses that end an attempt without money.
+_FAILED_GATEWAY_STATUSES = frozenset({"failed", "voided"})
+#: Moyasar invoice statuses after which the checkout can no longer be paid.
+#: Anything else (`initiated`, `on_hold`) is still open.
+_CLOSED_INVOICE_STATUSES = frozenset({"expired", "canceled", "voided", "failed"})
+#: Our statuses a payment never leaves by reconciling with the gateway.
+_FINAL_STATUSES = frozenset({PaymentStatus.FAILED, PaymentStatus.REFUNDED} | SETTLED_STATUSES)
 
 
 @dataclass(frozen=True)
@@ -70,6 +84,7 @@ class PaymentService:
         tenant_id: UUID,
         public_app_url: str,
         default_deposit_percent: int = 0,
+        checkout_ttl_minutes: int = 30,
     ) -> None:
         self.repository = repository
         self.gateway = gateway
@@ -78,6 +93,7 @@ class PaymentService:
         #: The customer app. A payment's `return_url` must be on its origin.
         self.public_app_url = public_app_url
         self.default_deposit_percent = default_deposit_percent
+        self.checkout_ttl_minutes = checkout_ttl_minutes
 
     @property
     def session(self):
@@ -113,6 +129,10 @@ class PaymentService:
         else:
             due = Money(amount=amount, currency=currency or booking.price.currency)
 
+        amount_minor = to_minor_units(due)
+        if amount_minor < MIN_INVOICE_AMOUNT_MINOR:
+            raise CheckoutAmountTooSmallError(due)
+
         payment = await self.repository.add_payment(
             Payment(
                 id=uuid4(),
@@ -123,37 +143,38 @@ class PaymentService:
             )
         )
 
-        redirect_url: str | None = None
-        gateway_payment_id: str | None = None
+        # Moyasar sends the payer back to exactly this URL, so it carries the
+        # payment's id: the page they land on asks `reconcile` what happened.
+        landing = with_query(return_url, payment=str(payment.id))
         try:
-            created = await self.gateway.create_payment(
-                amount_minor=to_minor_units(due),
+            invoice = await self.gateway.create_invoice(
+                amount_minor=amount_minor,
                 currency=due.currency,
-                description=f"NOVA booking {booking_id}",
-                callback_url=return_url,
+                # Shown to the payer on Moyasar's checkout page.
+                description=f"NOVA booking {booking_id.hex[:8].upper()}",
+                success_url=landing,
+                back_url=landing,
+                expired_at=datetime.now(UTC) + timedelta(minutes=self.checkout_ttl_minutes),
                 metadata={
                     **(metadata or {}),
-                    # Echoed back on the webhook, which is how a payment is
-                    # tied to its booking even if our own id lookup fails.
+                    # Echoed back on every payment and webhook, which ties a
+                    # payment to its booking even if our own lookup fails.
                     "booking_id": str(booking_id),
                     "tenant_id": str(self.tenant_id),
                     "payment_id": str(payment.id),
                 },
             )
-            gateway_payment_id = created.get("id")
-            redirect_url = (created.get("source") or {}).get("transaction_url")
-        except IntegrationNotConfiguredError:
-            # No gateway on this deployment: the caller gets a 503, and nothing
-            # failed that a traceback on every attempt would help anyone find.
+        except (IntegrationNotConfiguredError, PaymentGatewayError):
+            # No gateway here (503), or Moyasar said no (502): the adapter has
+            # logged the detail, and the PENDING row stays as the record.
             raise
         except Exception:
-            # The local record stays PENDING so the failure is visible and
-            # retryable, rather than vanishing with the exception.
-            logger.exception("moyasar_create_payment_failed", extra={"payment_id": str(payment.id)})
+            logger.exception("moyasar_create_invoice_failed", extra={"payment_id": str(payment.id)})
             raise
 
-        if gateway_payment_id:
-            payment.gateway_payment_id = gateway_payment_id
+        redirect_url = invoice.get("url")
+        if invoice.get("id"):
+            payment.gateway_invoice_id = str(invoice["id"])
             payment = await self.repository.save(payment)
 
         # The booking now waits on money. Deliberately not CONFIRMED: docs/06
@@ -313,6 +334,14 @@ class PaymentService:
         # amount exceeds what remains.
         payment.record_refund(refund_amount, now=now)
 
+        if payment.gateway_invoice_id and not payment.gateway_payment_id:
+            # Paid through a checkout whose payment id never reached us: there
+            # is nothing to refund against, and recording a refund that no
+            # money followed would be worse than refusing.
+            raise PaymentGatewayError(
+                "This payment's gateway record is incomplete; refund it from the Moyasar dashboard."
+            )
+
         gateway_refund_id: str | None = None
         if payment.gateway_payment_id:
             result = await self.gateway.refund(
@@ -345,23 +374,32 @@ class PaymentService:
         return saved
 
     async def apply_gateway_status(
-        self, *, gateway_payment_id: str, gateway_status: str, webhook_verified: bool
+        self,
+        *,
+        gateway_payment_id: str,
+        gateway_status: str,
+        webhook_verified: bool,
+        gateway_invoice_id: str | None = None,
     ) -> Payment:
         """Moves a payment to match Moyasar's own record of it.
 
         A webhook is a notification, not the truth: anyone holding the shared
-        secret can sign one. So a claimed capture or failure is checked against
+        secret can send one. So a claimed capture or failure is checked against
         the payment Moyasar's API returns, and that record decides:
 
-          - captured there: captured here, but only for exactly the amount and
-            currency this payment asked for (`PaymentAmountMismatchError`);
-          - failed there: failed here;
+          - paid there: captured here, but only for exactly the amount and
+            currency this payment asked for, and only if it paid this
+            payment's own checkout (`PaymentVerificationError`);
+          - failed there: failed here, unless the checkout it was an attempt
+            on is still open (the payer can try another card);
           - anything else: `PaymentNotConfirmedError`, which the gateway retries.
 
         A claim of nothing final (e.g. "initiated") needs no call and changes
         nothing; the final webhook will follow.
         """
-        payment = await self.repository.get_by_gateway_id(gateway_payment_id)
+        payment = await self.repository.find_for_gateway(
+            gateway_payment_id=gateway_payment_id, gateway_invoice_id=gateway_invoice_id
+        )
         if payment is None:
             raise UnknownWebhookPaymentError(gateway_payment_id)
 
@@ -372,7 +410,65 @@ class PaymentService:
 
         remote = await self.gateway.fetch_payment(gateway_payment_id)
         actual = str(remote.get("status") or "").lower()
+        if actual not in _CAPTURED_GATEWAY_STATUSES | _FAILED_GATEWAY_STATUSES:
+            raise PaymentNotConfirmedError(gateway_payment_id, claimed=claimed, actual=actual)
+        return await self._apply_remote_payment(payment, remote, webhook_verified=webhook_verified)
+
+    async def reconcile(self, payment_id: UUID) -> Payment:
+        """Brings a payment up to date with Moyasar, on the payer's return.
+
+        Moyasar's guidance is to fetch the payment and check its status, amount
+        and currency before fulfilling, whatever the redirect claimed. This is
+        that check, and it makes a payment confirm even where webhooks cannot
+        reach NOVA (a laptop, a firewall). Safe to call any number of times: a
+        payment already settled or failed is returned as it is.
+        """
+        payment = await self.get(payment_id)
+        if payment.status in _FINAL_STATUSES:
+            return payment
+
+        if payment.gateway_payment_id:
+            remote = await self.gateway.fetch_payment(payment.gateway_payment_id)
+            return await self._apply_remote_payment(payment, remote, webhook_verified=False)
+
+        if payment.gateway_invoice_id:
+            invoice = await self.gateway.fetch_invoice(payment.gateway_invoice_id)
+            paid = next(
+                (
+                    attempt
+                    for attempt in invoice.get("payments") or []
+                    if str(attempt.get("status") or "").lower() in _CAPTURED_GATEWAY_STATUSES
+                ),
+                None,
+            )
+            if paid is not None and paid.get("id"):
+                # Read the payment itself rather than trusting the summary on
+                # the invoice: it is the record the capture is checked against.
+                remote = await self.gateway.fetch_payment(str(paid["id"]))
+                return await self._apply_remote_payment(payment, remote, webhook_verified=False)
+            status = str(invoice.get("status") or "").lower()
+            if status in _CLOSED_INVOICE_STATUSES:
+                return await self.fail(payment.id, code=f"checkout_{status}")
+        return payment
+
+    async def _apply_remote_payment(
+        self, payment: Payment, remote: dict[str, Any], *, webhook_verified: bool
+    ) -> Payment:
+        """Applies Moyasar's record of one payment to ours. The single place a
+        gateway report becomes a capture or a failure."""
+        actual = str(remote.get("status") or "").lower()
+        remote_id = str(remote.get("id") or "")
+
         if actual in _CAPTURED_GATEWAY_STATUSES:
+            if (
+                payment.gateway_invoice_id
+                and remote_id != payment.gateway_payment_id
+                and str(remote.get("invoice_id") or "") != payment.gateway_invoice_id
+            ):
+                raise PaymentCheckoutMismatchError(
+                    expected_invoice_id=payment.gateway_invoice_id,
+                    invoice_id=remote.get("invoice_id"),
+                )
             amount_minor, currency = remote.get("amount"), remote.get("currency")
             if not paid_amount_matches(
                 payment.amount, amount_minor=amount_minor, currency=currency
@@ -380,10 +476,25 @@ class PaymentService:
                 raise PaymentAmountMismatchError(
                     expected=payment.amount, amount_minor=amount_minor, currency=currency
                 )
+            if remote_id and payment.gateway_payment_id != remote_id:
+                # Learnt only now, and needed for any refund.
+                payment.gateway_payment_id = remote_id
+                await self.repository.save(payment)
             return await self.capture(payment.id, webhook_verified=webhook_verified)
+
         if actual in _FAILED_GATEWAY_STATUSES:
+            if payment.gateway_invoice_id:
+                # One declined card is not a failed checkout: the payer is still
+                # on Moyasar's page and may pay with another. Only a checkout
+                # that can no longer be paid fails the payment.
+                invoice = await self.gateway.fetch_invoice(payment.gateway_invoice_id)
+                status = str(invoice.get("status") or "").lower()
+                if status not in _CLOSED_INVOICE_STATUSES:
+                    return payment
+                return await self.fail(payment.id, code=f"checkout_{status}")
             return await self.fail(payment.id, code=actual)
-        raise PaymentNotConfirmedError(gateway_payment_id, claimed=claimed, actual=actual)
+
+        return payment
 
 
 class PaymentWebhookProcessor:
@@ -412,11 +523,11 @@ class PaymentWebhookProcessor:
         self.gateway = gateway
         self.provider = provider
 
-    def verify(self, *, raw_body: bytes, signature: str | None, payload: dict[str, Any]) -> None:
-        if not self.gateway.verify_webhook(
-            payload=raw_body,
-            signature=signature,
-            secret_token=payload.get("secret_token"),
+    def verify(self, *, payload: dict[str, Any]) -> None:
+        """Moyasar authenticates a webhook by the `secret_token` in its body."""
+        secret_token = payload.get("secret_token")
+        if not isinstance(secret_token, str) or not self.gateway.verify_webhook(
+            secret_token=secret_token
         ):
             raise WebhookSignatureError()
 
@@ -433,7 +544,7 @@ class PaymentWebhookProcessor:
         in a table with no row-level security, anyone who could read the table
         could sign the next "paid" event.
         """
-        external_id = str(payload.get("id") or payload.get("event_id") or "")
+        external_id = str(payload.get("id") or "")
         existing = await self.events.find(provider=self.provider, external_event_id=external_id)
         if existing is not None:
             return existing, True
@@ -441,14 +552,16 @@ class PaymentWebhookProcessor:
         event = await self.events.record(
             provider=self.provider,
             external_event_id=external_id,
-            event_type=payload.get("type") or payload.get("event"),
+            event_type=payload.get("type"),
             payload={key: value for key, value in payload.items() if key != "secret_token"},
             signature_verified=signature_verified,
         )
         return event, False
 
-    async def resolve_tenant(self, gateway_payment_id: str) -> UUID:
-        tenant_id = await self.events.find_payment_tenant(gateway_payment_id)
+    async def resolve_tenant(
+        self, gateway_payment_id: str, gateway_invoice_id: str | None = None
+    ) -> UUID:
+        tenant_id = await self.events.find_payment_tenant(gateway_payment_id, gateway_invoice_id)
         if tenant_id is None:
             raise UnknownWebhookPaymentError(gateway_payment_id)
         return tenant_id

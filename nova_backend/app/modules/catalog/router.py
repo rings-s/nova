@@ -18,7 +18,9 @@ from app.core.pagination import PageParams
 from app.core.schemas import Page
 from app.core.security import purpose_key, require_staff
 from app.core.throttling import write_rate_limit
-from app.modules.catalog.dependencies import get_catalog_service
+from app.modules.booking.dependencies import get_booking_service
+from app.modules.booking.service import BookingService
+from app.modules.catalog.dependencies import get_catalog_service, get_category_service
 from app.modules.catalog.domain import (
     PHOTO_LINK_PURPOSE,
     PHOTO_LINK_TTL_SECONDS,
@@ -31,7 +33,9 @@ from app.modules.catalog.schemas import (
     AssignServiceRequest,
     BusinessOut,
     BusinessPhotoOut,
+    CategoryAdminOut,
     CreateBusinessRequest,
+    CreateCategoryRequest,
     CreateLocationRequest,
     CreateProviderRequest,
     CreateServiceRequest,
@@ -40,9 +44,14 @@ from app.modules.catalog.schemas import (
     ServiceOut,
     SetListingVisibilityRequest,
     SetLocationPositionRequest,
+    UpdateCategoryRequest,
+    UpdateLocationRequest,
+    UpdatePhotoRequest,
+    UpdateProviderRequest,
+    UpdateServiceRequest,
 )
-from app.modules.catalog.service import CatalogService
-from app.modules.identity.dependencies import RequirePermission
+from app.modules.catalog.service import CatalogService, CategoryService
+from app.modules.identity.dependencies import RequirePermission, require_superuser
 from app.modules.identity.domain import StaffPermission
 
 # Every catalog route is nested under a tenant, so `get_tenant_context` can
@@ -77,6 +86,11 @@ async def create_business(
     session: AsyncSession = Depends(get_db_session),
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
+    """Creates a business (a storefront) in this tenant. Owners and managers.
+
+    Its URL slug comes from the English name and must be unique on NOVA. It is
+    listed on the marketplace from the start; hide it with
+    `PATCH /catalog/businesses/{business_id}/listing`."""
     business = await service.create_business(**payload.model_dump())
     await session.commit()
     return business
@@ -105,6 +119,10 @@ async def get_business(
     business_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
+    """One business in this tenant, with its rating average and count.
+
+    The marketplace's public view of a business is
+    `GET /discovery/businesses/{slug}`."""
     return await service.get_business(business_id)
 
 
@@ -144,6 +162,9 @@ async def create_location(
     session: AsyncSession = Depends(get_db_session),
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
+    """Adds a branch to a business. Owners and managers.
+
+    Put it on the marketplace map with `PATCH /catalog/locations/{location_id}/position`."""
     location = await service.create_location(**payload.model_dump())
     await session.commit()
     return location
@@ -174,12 +195,52 @@ async def set_location_position(
     return location
 
 
+@router.patch(
+    "/locations/{location_id}",
+    response_model=LocationOut,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def update_location(
+    tenant_id: UUID,
+    location_id: UUID,
+    payload: UpdateLocationRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+) -> object:
+    """Renames a branch, or changes its city, timezone or whether it takes
+    bookings (`is_active`). Owners and managers. Only the fields sent change."""
+    location = await service.update_location(location_id, payload.changes())
+    await session.commit()
+    return location
+
+
+@router.delete(
+    "/locations/{location_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def delete_location(
+    tenant_id: UUID,
+    location_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+    bookings: BookingService = Depends(get_booking_service),
+) -> None:
+    """Deletes a branch, with its services and providers. Owners and managers.
+
+    Refused with 409 `catalog_item_in_use` while an appointment there is still
+    to come. Past bookings keep what they used."""
+    await service.delete_location(location_id, has_upcoming=bookings.has_upcoming_bookings)
+    await session.commit()
+
+
 @router.get("/businesses/{business_id}/locations", response_model=Page[LocationOut])
 async def list_locations(
     tenant_id: UUID,
     business_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> Page[LocationOut]:
+    """A business's branches."""
     rows = await service.list_locations(business_id)
     return Page(items=[LocationOut.model_validate(r) for r in rows])
 
@@ -196,9 +257,52 @@ async def create_service(
     session: AsyncSession = Depends(get_db_session),
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
+    """Adds a bookable service, with its duration and price, at one branch.
+    Owners and managers.
+
+    It has no availability until a provider is qualified for it
+    (`POST /catalog/providers/{provider_id}/services`)."""
     created = await service.create_service(**payload.model_dump())
     await session.commit()
     return created
+
+
+@router.patch(
+    "/services/{service_id}",
+    response_model=ServiceOut,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def update_service(
+    tenant_id: UUID,
+    service_id: UUID,
+    payload: UpdateServiceRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+) -> object:
+    """Changes a service's names, descriptions, category, duration, price, or
+    whether it can be booked. Owners and managers. Only the fields sent change;
+    bookings already made keep their price and times."""
+    updated = await service.update_service(service_id, payload.changes())
+    await session.commit()
+    return updated
+
+
+@router.delete(
+    "/services/{service_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def delete_service(
+    tenant_id: UUID,
+    service_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+    bookings: BookingService = Depends(get_booking_service),
+) -> None:
+    """Deletes a service. Owners and managers. Refused with 409
+    `catalog_item_in_use` while an appointment for it is still to come."""
+    await service.delete_service(service_id, has_upcoming=bookings.has_upcoming_bookings)
+    await session.commit()
 
 
 @router.get("/locations/{location_id}/services", response_model=Page[ServiceOut])
@@ -207,6 +311,7 @@ async def list_services(
     location_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> Page[ServiceOut]:
+    """The services offered at a branch."""
     rows = await service.list_services(location_id)
     return Page(items=[ServiceOut.model_validate(r) for r in rows])
 
@@ -223,9 +328,50 @@ async def create_provider(
     session: AsyncSession = Depends(get_db_session),
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
+    """Adds a provider, such as a stylist or therapist, at one branch. Owners and managers.
+
+    Then set their working hours (`PUT /schedules/providers/{provider_id}`) and the
+    services they perform (`POST /catalog/providers/{provider_id}/services`)."""
     provider = await service.create_provider(**payload.model_dump())
     await session.commit()
     return provider
+
+
+@router.patch(
+    "/providers/{provider_id}",
+    response_model=ProviderOut,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def update_provider(
+    tenant_id: UUID,
+    provider_id: UUID,
+    payload: UpdateProviderRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+) -> object:
+    """Renames a provider, changes their title, or takes them off the booking
+    list (`is_active`). Owners and managers. Only the fields sent change."""
+    provider = await service.update_provider(provider_id, payload.changes())
+    await session.commit()
+    return provider
+
+
+@router.delete(
+    "/providers/{provider_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def delete_provider(
+    tenant_id: UUID,
+    provider_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+    bookings: BookingService = Depends(get_booking_service),
+) -> None:
+    """Deletes a provider. Owners and managers. Refused with 409
+    `catalog_item_in_use` while they have an appointment still to come."""
+    await service.delete_provider(provider_id, has_upcoming=bookings.has_upcoming_bookings)
+    await session.commit()
 
 
 @router.get("/locations/{location_id}/providers", response_model=Page[ProviderOut])
@@ -234,6 +380,7 @@ async def list_providers(
     location_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> Page[ProviderOut]:
+    """The providers working at a branch."""
     rows = await service.list_providers(location_id)
     return Page(items=[ProviderOut.model_validate(r) for r in rows])
 
@@ -250,6 +397,11 @@ async def assign_service_to_provider(
     session: AsyncSession = Depends(get_db_session),
     service: CatalogService = Depends(get_catalog_service),
 ) -> None:
+    """Qualifies a provider to perform a service. Owners and managers.
+
+    The service must be at the provider's own branch (422
+    `cross_location_assignment` otherwise). Qualifying the same pair twice answers
+    409."""
     await service.assign_service_to_provider(provider_id, payload.service_id)
     await session.commit()
 
@@ -348,6 +500,26 @@ async def upload_business_photo(
     return _photo_out(photo)
 
 
+@router.patch(
+    "/photos/{photo_id}",
+    response_model=BusinessPhotoOut,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def update_business_photo(
+    tenant_id: UUID,
+    photo_id: UUID,
+    payload: UpdatePhotoRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CatalogService = Depends(get_catalog_service),
+) -> BusinessPhotoOut:
+    """Makes a photo the cover (the old cover joins the gallery), moves the
+    cover back into the gallery, or sets a gallery photo's `position`. Owners
+    and managers."""
+    photo = await service.update_photo(photo_id, kind=payload.kind, position=payload.position)
+    await session.commit()
+    return _photo_out(photo)
+
+
 @router.delete(
     "/photos/{photo_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -359,5 +531,68 @@ async def delete_business_photo(
     session: AsyncSession = Depends(get_db_session),
     service: CatalogService = Depends(get_catalog_service),
 ) -> None:
+    """Deletes a photo and its stored files. Owners and managers."""
     await service.delete_photo(photo_id)
     await session.commit()
+
+
+# --- Categories (platform-wide, superuser only) -------------------------------
+
+#: Not under a tenant: the category list is shared by every salon, so no salon
+#: role may change it. Tenants read it at `GET /discovery/categories`.
+admin_router = APIRouter(
+    prefix="/admin/catalog/categories",
+    tags=["admin"],
+    dependencies=[Depends(require_superuser)],
+)
+
+
+@admin_router.get("", response_model=list[CategoryAdminOut])
+async def admin_list_categories(
+    service: CategoryService = Depends(get_category_service),
+) -> list[CategoryAdminOut]:
+    """Every service category, retired ones included. NOVA administrators only."""
+    rows = await service.list_categories(include_inactive=True)
+    return [CategoryAdminOut.model_validate(row) for row in rows]
+
+
+@admin_router.post(
+    "",
+    response_model=CategoryAdminOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def admin_create_category(
+    payload: CreateCategoryRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CategoryService = Depends(get_category_service),
+) -> object:
+    """Adds a service category that every salon can file services under.
+    NOVA administrators only.
+
+    Its slug comes from the English name and never changes (409
+    `duplicate_slug` if taken)."""
+    category = await service.create(**payload.model_dump())
+    await session.commit()
+    return category
+
+
+@admin_router.patch(
+    "/{category_id}",
+    response_model=CategoryAdminOut,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def admin_update_category(
+    category_id: UUID,
+    payload: UpdateCategoryRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CategoryService = Depends(get_category_service),
+) -> object:
+    """Renames a category, or retires (`is_active: false`) or restores it.
+    NOVA administrators only.
+
+    A retired category can't be chosen for a new service and leaves the
+    marketplace filter; services already filed under it keep it."""
+    category = await service.update(category_id, **payload.model_dump(exclude_unset=True))
+    await session.commit()
+    return category

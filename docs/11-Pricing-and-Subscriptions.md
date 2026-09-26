@@ -3,6 +3,7 @@ title: Pricing and Subscriptions
 created: 2026-08-14
 project: NOVA
 type: billing
+status: design
 tags: [pricing, subscriptions, commission, billing, marketplace]
 related_code:
   - app/modules/billing/domain.py
@@ -281,6 +282,15 @@ class InvoiceOut(ApiSchema):
 > listing, but nothing charges the stored payment method — the payment module has no
 > merchant-initiated Moyasar flow, only the customer-present one. Until it does, an invoice is
 > marked paid by whatever settles it out of band.
+>
+> **A paid plan is paid for up front.** Choosing Studio or Chain (without a trial, or moving up
+> from Solo) leaves the subscription `pending_payment`, billed and gated as Solo, until the owner
+> pays the first month (a year if annual) plus VAT on Moyasar's hosted page:
+> `POST .../billing/subscriptions/{business_id}/checkout`, confirmed by
+> `POST .../billing/checkouts/{id}/sync` on return or by the Moyasar webhook, both against
+> Moyasar's own record of the payment. These rows live in `subscription_checkouts`, never in
+> `payments` (the salon's takings, which are paid out to it), and the monthly close does not
+> charge the subscription again for a month a checkout already covered.
 >
 > **Step 5 publishes but does not deliver.** `advance_dunning` emits `InvoiceOverdue` on every
 > retry; no handler turns it into the WhatsApp and email notice. `NotificationRecord.customer_id`

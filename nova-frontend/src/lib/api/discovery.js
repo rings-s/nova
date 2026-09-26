@@ -66,7 +66,6 @@ import { http } from './client.js';
  * @property {string} name_en
  * @property {string} name_ar
  * @property {string|null} city
- * @property {string} phone
  * @property {string} timezone
  * @property {number|null} latitude
  * @property {number|null} longitude
@@ -80,7 +79,7 @@ import { http } from './client.js';
  * @property {string} name_ar
  * @property {string|null} description_en
  * @property {string|null} description_ar
- * @property {string|null} category
+ * @property {import('./catalog.js').Category|null} category
  * @property {number} duration_minutes
  * @property {string} price
  * @property {string} currency
@@ -150,6 +149,15 @@ import { http } from './client.js';
  */
 
 /**
+ * The platform's service categories, by English name. Only a NOVA
+ * administrator adds or changes them (see admin.js); salons pick from them.
+ * @returns {Promise<import('./catalog.js').Category[]>}
+ */
+export function listCategories() {
+	return http.get('/discovery/categories', { skipAuth: true });
+}
+
+/**
  * Finds bookable branches. The marketplace's front door.
  *
  * `bbox` keeps only branches inside a map viewport, `west,south,east,north`;
@@ -160,6 +168,7 @@ import { http } from './client.js';
  * first by a confidence-weighted score, so one 5-star visit does not outrank
  * hundreds averaging 4.8. Coordinates also limit results to `radiusKm`
  * (default 25).
+ * `category` is a category's `slug` (see `listCategories`).
  * @param {{ q?: string|null, city?: string|null, category?: string|null, latitude?: number|null,
  *   longitude?: number|null, radiusKm?: number|null, bbox?: string|null,
  *   sort?: 'default'|'distance'|'rating', limit?: number, offset?: number }} [params]

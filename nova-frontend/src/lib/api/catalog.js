@@ -8,6 +8,15 @@
 import { http, tenantPath } from './client.js';
 
 /**
+ * The body of a partial update: `undefined` means "not sent", so the field is
+ * left out; `null` is kept, and clears a field that may be empty.
+ * @param {Record<string, unknown>} fields
+ */
+function defined(fields) {
+	return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+}
+
+/**
  * @typedef {Object} Business
  * @property {string} id
  * @property {string} tenant_id
@@ -34,7 +43,6 @@ import { http, tenantPath } from './client.js';
  * @property {string} name_en
  * @property {string} name_ar
  * @property {string} slug
- * @property {string} phone
  * @property {string} timezone
  * @property {string|null} city
  * @property {number|null} latitude
@@ -42,6 +50,16 @@ import { http, tenantPath } from './client.js';
  * @property {boolean} is_active
  * @property {string} created_at
  * @property {string} updated_at
+ */
+
+/**
+ * A service category from the platform's list, which only a NOVA administrator
+ * edits. Salons choose from it (`listCategories` in discovery.js).
+ * @typedef {Object} Category
+ * @property {string} id
+ * @property {string} slug
+ * @property {string} name_en
+ * @property {string} name_ar
  */
 
 /**
@@ -53,7 +71,8 @@ import { http, tenantPath } from './client.js';
  * @property {string} name_ar
  * @property {string|null} description_en
  * @property {string|null} description_ar
- * @property {string|null} category
+ * @property {string|null} category_id
+ * @property {Category|null} category
  * @property {number} duration_minutes
  * @property {string} price Decimal, serialised as a string or number.
  * @property {string} currency
@@ -118,6 +137,20 @@ export function listBusinessPhotos(tenantId, businessId) {
 }
 
 /**
+ * Makes a photo the cover (the old cover joins the gallery), or sets a gallery
+ * photo's place in the order. Owners and managers.
+ * @param {string} tenantId @param {string} photoId
+ * @param {{ kind?: 'cover'|'gallery', position?: number }} changes
+ * @returns {Promise<BusinessPhoto>}
+ */
+export function updateBusinessPhoto(tenantId, photoId, { kind, position }) {
+	return http.patch(
+		tenantPath(tenantId, `/catalog/photos/${photoId}`),
+		defined({ kind, position })
+	);
+}
+
+/**
  * Uploads a photo (JPEG, PNG or WebP, the file itself as the body). A new
  * cover replaces the old one. Owners and managers only.
  * @param {string} tenantId @param {string} businessId @param {File|Blob} file
@@ -163,7 +196,7 @@ export function setListingVisibility(tenantId, businessId, isListed) {
 
 /**
  * @param {string} tenantId
- * @param {{ businessId: string, nameEn: string, nameAr: string, phone: string, timezone?: string,
+ * @param {{ businessId: string, nameEn: string, nameAr: string, timezone?: string,
  *   city?: string|null, latitude?: number|null, longitude?: number|null }} params
  * @returns {Promise<Location>}
  */
@@ -173,7 +206,6 @@ export function createLocation(
 		businessId,
 		nameEn,
 		nameAr,
-		phone,
 		timezone = 'Asia/Riyadh',
 		city = null,
 		latitude = null,
@@ -184,7 +216,6 @@ export function createLocation(
 		business_id: businessId,
 		name_en: nameEn,
 		name_ar: nameAr,
-		phone,
 		timezone,
 		city,
 		latitude,
@@ -207,6 +238,29 @@ export function setLocationPosition(tenantId, locationId, { latitude, longitude 
 	});
 }
 
+/**
+ * Renames a branch, or changes its city, timezone or whether it takes bookings.
+ * Only the fields given change; `city: null` clears it. Owners and managers.
+ * @param {string} tenantId @param {string} locationId
+ * @param {{ nameEn?: string, nameAr?: string, city?: string|null, timezone?: string, isActive?: boolean }} changes
+ * @returns {Promise<Location>}
+ */
+export function updateLocation(tenantId, locationId, { nameEn, nameAr, city, timezone, isActive }) {
+	return http.patch(
+		tenantPath(tenantId, `/catalog/locations/${locationId}`),
+		defined({ name_en: nameEn, name_ar: nameAr, city, timezone, is_active: isActive })
+	);
+}
+
+/**
+ * Deletes a branch with its services and providers. Refused with 409
+ * `catalog_item_in_use` while it has an upcoming booking.
+ * @param {string} tenantId @param {string} locationId @returns {Promise<null>}
+ */
+export function deleteLocation(tenantId, locationId) {
+	return http.delete(tenantPath(tenantId, `/catalog/locations/${locationId}`));
+}
+
 /** @param {string} tenantId @param {string} businessId @returns {Promise<{ items: Location[], total: number|null }>} */
 export function listLocations(tenantId, businessId) {
 	return http.get(tenantPath(tenantId, `/catalog/businesses/${businessId}/locations`));
@@ -217,7 +271,7 @@ export function listLocations(tenantId, businessId) {
 /**
  * @param {string} tenantId
  * @param {{ locationId: string, nameEn: string, nameAr: string, descriptionEn?: string|null,
- *   descriptionAr?: string|null, category?: string|null, durationMinutes: number,
+ *   descriptionAr?: string|null, categoryId?: string|null, durationMinutes: number,
  *   price: string|number, currency?: string }} params
  * @returns {Promise<Service>}
  */
@@ -229,7 +283,7 @@ export function createService(
 		nameAr,
 		descriptionEn = null,
 		descriptionAr = null,
-		category = null,
+		categoryId = null,
 		durationMinutes,
 		price,
 		currency = 'SAR'
@@ -241,11 +295,47 @@ export function createService(
 		name_ar: nameAr,
 		description_en: descriptionEn,
 		description_ar: descriptionAr,
-		category,
+		category_id: categoryId,
 		duration_minutes: durationMinutes,
 		price,
 		currency
 	});
+}
+
+/**
+ * Only the fields given change; `categoryId: null` clears the category.
+ * Bookings already made keep their price and times. Owners and managers.
+ * @param {string} tenantId @param {string} serviceId
+ * @param {{ nameEn?: string, nameAr?: string, descriptionEn?: string|null, descriptionAr?: string|null,
+ *   categoryId?: string|null, durationMinutes?: number, price?: string|number, isActive?: boolean }} changes
+ * @returns {Promise<Service>}
+ */
+export function updateService(
+	tenantId,
+	serviceId,
+	{ nameEn, nameAr, descriptionEn, descriptionAr, categoryId, durationMinutes, price, isActive }
+) {
+	return http.patch(
+		tenantPath(tenantId, `/catalog/services/${serviceId}`),
+		defined({
+			name_en: nameEn,
+			name_ar: nameAr,
+			description_en: descriptionEn,
+			description_ar: descriptionAr,
+			category_id: categoryId,
+			duration_minutes: durationMinutes,
+			price,
+			is_active: isActive
+		})
+	);
+}
+
+/**
+ * Refused with 409 `catalog_item_in_use` while it has an upcoming booking.
+ * @param {string} tenantId @param {string} serviceId @returns {Promise<null>}
+ */
+export function deleteService(tenantId, serviceId) {
+	return http.delete(tenantPath(tenantId, `/catalog/services/${serviceId}`));
 }
 
 /** @param {string} tenantId @param {string} locationId @returns {Promise<{ items: Service[], total: number|null }>} */
@@ -271,6 +361,38 @@ export function createProvider(
 		title_en: titleEn,
 		title_ar: titleAr
 	});
+}
+
+/**
+ * Renames a provider, changes their title, or takes them off the booking list
+ * (`isActive`). Only the fields given change; `null` clears a title.
+ * @param {string} tenantId @param {string} providerId
+ * @param {{ nameEn?: string, nameAr?: string, titleEn?: string|null, titleAr?: string|null, isActive?: boolean }} changes
+ * @returns {Promise<Provider>}
+ */
+export function updateProvider(
+	tenantId,
+	providerId,
+	{ nameEn, nameAr, titleEn, titleAr, isActive }
+) {
+	return http.patch(
+		tenantPath(tenantId, `/catalog/providers/${providerId}`),
+		defined({
+			name_en: nameEn,
+			name_ar: nameAr,
+			title_en: titleEn,
+			title_ar: titleAr,
+			is_active: isActive
+		})
+	);
+}
+
+/**
+ * Refused with 409 `catalog_item_in_use` while they have an upcoming booking.
+ * @param {string} tenantId @param {string} providerId @returns {Promise<null>}
+ */
+export function deleteProvider(tenantId, providerId) {
+	return http.delete(tenantPath(tenantId, `/catalog/providers/${providerId}`));
 }
 
 /** @param {string} tenantId @param {string} locationId @returns {Promise<{ items: Provider[], total: number|null }>} */

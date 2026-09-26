@@ -4,17 +4,19 @@ BACKEND = cd nova_backend && uv run
 # one-off `tools` container. `backend` and `worker` never hold those credentials.
 TOOLS = $(COMPOSE) run --rm tools
 
-.PHONY: help dev down logs tunnel migrate revision db-app-role test test-local lint fmt typecheck check worker image
+.PHONY: help dev down logs tunnel migrate revision db-app-role superuser test test-local lint fmt typecheck check worker image
 
 help:
 	@echo "Docker (full stack):"
-	@echo "  make dev        start postgres, redis, backend, worker"
+	@echo "  make dev        start postgres, redis, backend, worker, frontend"
 	@echo "                  (migrations run first, in a one-shot container)"
 	@echo "  make down       stop everything"
 	@echo "  make logs       tail backend logs"
 	@echo "  make tunnel     start with the Cloudflare tunnel profile"
 	@echo "  make migrate    re-apply migrations in a one-off tools container"
 	@echo "  make db-app-role  give nova_app its login on a volume older than that role"
+	@echo "  make superuser email=you@example.com  make an account a NOVA administrator"
+	@echo "                  (add revoke=1 to take it away); it edits service categories"
 	@echo "  make test       run the suite in a one-off tools container"
 	@echo "  make image      build the production image (the runtime target)"
 	@echo ""
@@ -62,6 +64,14 @@ revision:
 db-app-role:
 	$(COMPOSE) exec postgres /docker-entrypoint-initdb.d/20-create-app-role.sh
 
+# The only way to grant `users.is_superuser`: there is deliberately no API for
+# it. Run as the schema owner inside the postgres container; the email is
+# passed as a psql variable, never spliced into the SQL.
+superuser:
+	@test -n "$(email)" || { echo 'usage: make superuser email=you@example.com [revoke=1]'; exit 1; }
+	@echo "UPDATE users SET is_superuser = $(if $(revoke),false,true) WHERE lower(email) = lower(:'email') RETURNING email, is_superuser;" \
+	  | $(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v email="$$1"' sh '$(email)'
+
 worker:
 	$(COMPOSE) exec backend uv run arq app.worker.arq_worker.WorkerSettings
 
@@ -92,6 +102,13 @@ fmt:
 typecheck:
 	$(BACKEND) mypy app
 
-# What CI runs, minus the database jobs.
+# What CI runs, minus the database jobs. Settings needs these three to load,
+# and assembling the app connects to nothing, so placeholders do (as in CI);
+# values already in the environment win.
 check: lint typecheck
-	$(BACKEND) python -c "from app.main import create_app; create_app()"
+	cd nova_backend && \
+	DATABASE_URL=$${DATABASE_URL:-postgresql+asyncpg://check:check@localhost/check} \
+	REDIS_URL=$${REDIS_URL:-redis://localhost:6379/0} \
+	SECRET_KEY=$${SECRET_KEY:-make-check-not-a-real-secret} \
+	ENV=$${ENV:-test} \
+	uv run python -c "from app.main import create_app; create_app()"

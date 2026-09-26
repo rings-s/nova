@@ -3,6 +3,7 @@ title: Final Definition of Project Completion
 created: 2026-08-11
 project: NOVA
 type: process
+status: design
 tags: [completion, acceptance-criteria, scope]
 ---
 
@@ -12,7 +13,7 @@ tags: [completion, acceptance-criteria, scope]
 > The project is complete when all of the following are true.
 
 1. A business owner can create a business and location.
-2. A business owner can add services, providers, schedules, and media.
+2. A business owner can add services, providers, schedules, and business photos.
 3. A customer can discover a business and book a service.
 4. Availability is deterministic and prevents double booking.
 5. Payment or deposit flows work through a sandboxed Moyasar integration.
@@ -22,8 +23,8 @@ tags: [completion, acceptance-criteria, scope]
 9. WhatsApp notifications are sent for booking and queue events.
 10. AI assistants can help customers and businesses through controlled tools.
 11. AI does not bypass domain rules.
-12. Nextcloud stores business media files.
-13. FastAPI stores media references only.
+12. Business photos are re-encoded on upload and stored outside PostgreSQL (`MEDIA_ROOT`).
+13. PostgreSQL stores photo metadata only (`business_photos`).
 14. The backend runs locally using Docker.
 15. Cloudflare Tunnel securely exposes the system.
 16. PostgreSQL and Redis run reliably.
@@ -31,3 +32,8 @@ tags: [completion, acceptance-criteria, scope]
 18. Tests cover booking, queue, payment, tenant isolation, and AI guardrails.
 19. Documentation is complete and aligned with the codebase.
 20. Backup and restore procedures work.
+
+> [!note] Revised criteria
+> Items 12 and 13 originally named Nextcloud. ADR-0013 removed Nextcloud and moved business photos
+> into `catalog`, with files in the API's own image store. The intent is unchanged: binaries stay
+> out of the database.

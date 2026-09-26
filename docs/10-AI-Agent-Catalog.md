@@ -3,6 +3,7 @@ title: AI Agent Catalog
 created: 2026-08-14
 project: NOVA
 type: ai
+status: design
 tags: [ai, agents, pydanticai, tools, guardrails]
 related_code:
   - app/modules/ai_agents/agents.py

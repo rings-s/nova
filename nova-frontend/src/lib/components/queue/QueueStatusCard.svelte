@@ -1,4 +1,6 @@
 <script>
+	import { queueStatusLabel } from '$lib/i18n/labels.js';
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * Polls a customer's own queue entry — the one read a waiting customer
 	 * actually needs ("how much longer?"). Staff should use `listQueueEntries`
@@ -59,17 +61,17 @@
 	{:else}
 		<div class="flex items-center justify-between">
 			<div>
-				<p class="text-sm text-fg-muted">Your place in line</p>
+				<p class="text-sm text-fg-muted">{t('Your place in line')}</p>
 				<p class="text-3xl font-semibold text-fg">
 					{entry.place_in_line ?? '—'}
 				</p>
 				{#if entry.estimated_wait_minutes !== null}
 					<p class="text-sm text-fg-muted">
-						~{entry.estimated_wait_minutes} min estimated wait
+						{t('~{minutes} min estimated wait', { minutes: entry.estimated_wait_minutes })}
 					</p>
 				{/if}
 			</div>
-			<Badge tone={statusTone[entry.status] ?? 'neutral'}>{entry.status}</Badge>
+			<Badge tone={statusTone[entry.status] ?? 'neutral'}>{queueStatusLabel(entry.status)}</Badge>
 		</div>
 	{/if}
 </Card>

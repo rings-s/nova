@@ -57,12 +57,35 @@ class AiChatRequest(ApiSchema):
     message: str = Field(max_length=4000)
     channel: str = Field(default="pwa", max_length=32)
     locale: str = Field(default="ar", max_length=8)
+    #: The held time the customer pressed "Yes, book it" on: its `hold_token`,
+    #: from an earlier turn's `held_slots`. `book_held_slot` books only this
+    #: offer, so a model's reading of "yes" never books by itself (ADR-0015).
+    confirm_hold_token: str | None = Field(default=None, max_length=64)
 
     #: Staff may ask on behalf of a named customer; a customer principal
     #: supplying this is rejected, exactly as in booking.
     customer_id: UUID | None = None
-    #: Required by the staff agents, which each work on one business.
+    #: Required by the staff agents, which each work on one business. The
+    #: receptionist takes it as context: the storefront the customer is on.
     business_id: UUID | None = None
+    #: The marketplace referral the client got for this storefront, so a
+    #: booking the agent makes is attributed exactly as the picker's would be.
+    #: Booking's attribution verifies it; a made-up one attributes nothing.
+    referral_token: str | None = Field(default=None, max_length=200)
+
+
+class MarketplaceChatRequest(ApiSchema):
+    """A turn with the marketplace assistant: no tenant, no business, and no
+    `customer_id`, because it books only in the caller's own name."""
+
+    session_id: str = Field(max_length=128)
+    message: str = Field(max_length=4000)
+    channel: str = Field(default="pwa", max_length=32)
+    locale: str = Field(default="ar", max_length=8)
+    #: The held time the customer pressed "Yes, book it" on: its `hold_token`,
+    #: from an earlier turn's `held_slots`. `book_held_slot` books only this
+    #: offer, so a model's reading of "yes" never books by itself (ADR-0015).
+    confirm_hold_token: str | None = Field(default=None, max_length=64)
 
 
 class ProposedActionOut(ApiSchema):
@@ -100,6 +123,26 @@ class PendingCancellationOut(ApiSchema):
     reason: str | None
 
 
+class BookingTicketOut(ApiSchema):
+    """A booking an agent made, with the QR ticket the customer shows to check in.
+
+    `qr_payload` is the credential: render it as a QR code. Reception scans it
+    at `POST /tenants/{tenant_id}/tickets/check-in`.
+    """
+
+    booking_id: UUID
+    tenant_id: UUID
+    business_name: str
+    booking_status: str
+    starts_at: datetime
+    ends_at: datetime
+    ticket_id: UUID
+    ticket_code: str
+    qr_payload: str
+    expires_at: datetime
+    ticket_page_url: str
+
+
 class AiChatResponse(ApiSchema):
     """docs/07 section 10, with docs/13 section 3.4's additions."""
 
@@ -120,6 +163,8 @@ class AiChatResponse(ApiSchema):
     #: Bookings the customer asked to cancel. The agent cancels nothing: the
     #: client asks the customer to confirm, then calls the booking's cancel route.
     pending_cancellations: list[PendingCancellationOut] = []
+    #: Bookings an agent made this turn, each with its QR ticket.
+    tickets: list[BookingTicketOut] = []
 
     #: A client should be able to tell a confident answer from one produced by
     #: the routing model after the reasoning model failed, or by the fallback.
@@ -137,6 +182,11 @@ class AgentInfoOut(ApiSchema):
     audience: str
     goal: str
     required_feature: str | None
+    #: The role permission a staff caller needs in this tenant, if any. A client
+    #: hides what the caller can't use; the turn still checks it.
+    required_permission: str | None = None
+    #: Staff agents work on one business, named as `business_id` in the chat.
+    needs_business: bool = False
 
 
 class AgentCatalogOut(ApiSchema):
@@ -145,3 +195,13 @@ class AgentCatalogOut(ApiSchema):
     #: Old agent names and the agent each now resolves to (ADR-0011).
     aliases: dict[str, str]
     agents: list[AgentInfoOut]
+    #: Whether a turn can reach a model right now: the AI extra is installed,
+    #: AI is enabled, and the model server answered. False means every turn
+    #: would hand off, so a client should say "offline" instead of a chat box.
+    inference_available: bool = False
+
+
+class MarketplaceAssistantOut(ApiSchema):
+    """Whether the marketplace assistant can answer right now."""
+
+    inference_available: bool

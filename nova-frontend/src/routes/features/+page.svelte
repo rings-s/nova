@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -12,99 +13,117 @@
 		{
 			number: '01',
 			icon: 'calendar',
-			label: 'Smart scheduling',
-			title: 'Appointments that never collide.',
-			body: 'NOVA calculates availability across providers, services and branches in real time. A slot is temporarily reserved the moment checkout begins, preventing double bookings before they happen.',
+			label: m('Smart scheduling'),
+			title: m('Appointments that never collide.'),
+			body: m(
+				'NOVA calculates availability across providers, services and branches in real time. A slot is temporarily reserved the moment checkout begins, preventing double bookings before they happen.'
+			),
 			points: [
-				'Per-provider schedules and skills',
-				'Real-time availability calculation',
-				'Temporary checkout holds'
+				m('Per-provider schedules and skills'),
+				m('Real-time availability calculation'),
+				m('Temporary checkout holds')
 			]
 		},
 		{
 			number: '02',
 			icon: 'users',
-			label: 'Queue management',
-			title: 'Turn waiting into a system.',
-			body: 'Appointments and walk-ins operate from the same operational layer. Your front desk sees exactly who is next, who is waiting and what needs attention.',
+			label: m('Queue management'),
+			title: m('Turn waiting into a system.'),
+			body: m(
+				'Appointments and walk-ins operate from the same operational layer. Your front desk sees exactly who is next, who is waiting and what needs attention.'
+			),
 			points: [
-				'Unified booking and walk-in queue',
-				'Live customer position',
-				'One-click call-next workflow'
+				m('Unified booking and walk-in queue'),
+				m('Live customer position'),
+				m('One-click call-next workflow')
 			]
 		},
 		{
 			number: '03',
 			icon: 'chat-bubble',
-			label: 'Customer communication',
-			title: 'Meet customers where they already are.',
-			body: 'Keep customers informed through WhatsApp without forcing them into another application. Confirmations, reminders and receipts become part of the booking experience.',
-			points: ['Automatic confirmations', 'Appointment reminders', 'Receipts and booking updates']
+			label: m('Customer communication'),
+			title: m('Meet customers where they already are.'),
+			body: m(
+				'Keep customers informed through WhatsApp without forcing them into another application. Confirmations, reminders and receipts become part of the booking experience.'
+			),
+			points: [
+				m('Automatic confirmations'),
+				m('Appointment reminders'),
+				m('Receipts and booking updates')
+			]
 		},
 		{
 			number: '04',
 			icon: 'credit-card',
-			label: 'Payments',
-			title: 'Protect every appointment.',
-			body: 'Require a configurable deposit before confirming a booking. Payments are securely processed through Moyasar while NOVA keeps your booking state synchronized.',
+			label: m('Payments'),
+			title: m('Protect every appointment.'),
+			body: m(
+				'Require a configurable deposit before confirming a booking. Payments are securely processed through Moyasar while NOVA keeps your booking state synchronized.'
+			),
 			points: [
-				'Configurable deposit percentage',
-				'Moyasar payment processing',
-				'Clear payment state per booking'
+				m('Configurable deposit percentage'),
+				m('Moyasar payment processing'),
+				m('Clear payment state per booking')
 			]
 		},
 		{
 			number: '05',
 			icon: 'globe',
-			label: 'Discovery',
-			title: 'Give your business another front door.',
-			body: 'Businesses can opt into the NOVA marketplace and become discoverable by customers searching for services, locations and availability.',
+			label: m('Discovery'),
+			title: m('Give your business another front door.'),
+			body: m(
+				'Businesses can opt into the NOVA marketplace and become discoverable by customers searching for services, locations and availability.'
+			),
 			points: [
-				'Search by city and service',
-				'Public business storefront',
-				'Booking referral tracking'
+				m('Search by city and service'),
+				m('Public business storefront'),
+				m('Booking referral tracking')
 			]
 		},
 		{
 			number: '06',
 			icon: 'sparkles',
-			label: 'Intelligence',
-			title: 'Ask your business anything.',
-			body: 'The NOVA assistant lets staff interact with operational data using natural language. Responses are grounded in real tool results instead of invented numbers.',
+			label: m('Intelligence'),
+			title: m('Ask your business anything.'),
+			body: m(
+				'The NOVA assistant lets staff interact with operational data using natural language. Responses are grounded in real tool results instead of invented numbers.'
+			),
 			points: [
-				'Grounded in your business data',
-				'Role-based access',
-				'Actions require staff confirmation'
+				m('Grounded in your business data'),
+				m('Role-based access'),
+				m('Actions require staff confirmation')
 			]
 		},
 		{
 			number: '07',
 			icon: 'shield-check',
-			label: 'Local by design',
-			title: 'Built for Arabic and English from day one.',
-			body: 'Every important business record can carry Arabic and English values from its first creation. NOVA is designed around the operational reality of businesses in the region.',
+			label: m('Local by design'),
+			title: m('Built for Arabic and English from day one.'),
+			body: m(
+				'Every important business record can carry Arabic and English values from its first creation. NOVA is designed around the operational reality of businesses in the region.'
+			),
 			points: [
-				'Arabic and English records',
-				'RTL and LTR ready',
-				'Designed for regional businesses'
+				m('Arabic and English records'),
+				m('RTL and LTR ready'),
+				m('Designed for regional businesses')
 			]
 		}
 	];
 
 	/** @type {{ n: number, label: string, s: string, t: 'accent'|'info'|'neutral' }[]} */
 	const queueSample = [
-		{ n: 1, label: 'Noura A.', s: 'In service', t: 'accent' },
-		{ n: 2, label: 'Sara M.', s: 'Called', t: 'info' },
-		{ n: 3, label: 'Reem K.', s: 'Waiting', t: 'neutral' },
-		{ n: 4, label: 'Huda S.', s: 'Waiting', t: 'neutral' }
+		{ n: 1, label: m('Noura A.'), s: m('In service'), t: 'accent' },
+		{ n: 2, label: m('Sara M.'), s: m('Called'), t: 'info' },
+		{ n: 3, label: m('Reem K.'), s: m('Waiting'), t: 'neutral' },
+		{ n: 4, label: m('Huda S.'), s: m('Waiting'), t: 'neutral' }
 	];
 </script>
 
 <svelte:head>
-	<title>Features — NOVA</title>
+	<title>{t('Features')} — NOVA</title>
 	<meta
 		name="description"
-		content="Booking, queues, payments, messaging and business intelligence in one platform."
+		content={t('Booking, queues, payments, messaging and business intelligence in one platform.')}
 	/>
 </svelte:head>
 
@@ -116,37 +135,42 @@
 			class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 		>
 			<span class="size-1.5 rounded-full bg-brand-500"></span>
-			The NOVA platform
+			{t('The NOVA platform')}
 		</p>
 		<h1 class="mx-auto mt-6 max-w-4xl text-display-2xl font-semibold tracking-tight text-fg">
-			One operating system for
+			{t('One operating system for')}
 			<span
 				class="text-transparent"
 				style="background-image: var(--gradient-hero); -webkit-background-clip: text; background-clip: text;"
-				>your front desk.</span
+				>{t('your front desk.')}</span
 			>
 		</h1>
 		<p class="mx-auto mt-6 max-w-2xl text-body-lg text-fg-muted">
-			Bookings, queues, customer messages, payments and insight — designed to work together instead
-			of becoming another collection of disconnected tools.
+			{t(
+				'Bookings, queues, customer messages, payments and insight — designed to work together instead of becoming another collection of disconnected tools.'
+			)}
 		</p>
 		<div class="mt-9 flex flex-wrap justify-center gap-3">
-			<Button size="lg" href={`${resolve('/register')}?as=business`}>Start free trial</Button>
+			<Button size="lg" href={`${resolve('/register')}?as=business`}>{t('Start free trial')}</Button
+			>
 			<Button size="lg" variant="outline" href={resolve('/pricing')}>
-				See pricing
+				{t('See pricing')}
 				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 			</Button>
 		</div>
 
 		<!-- Section index -->
-		<nav class="mx-auto mt-14 flex max-w-4xl flex-wrap justify-center gap-2" aria-label="Features">
+		<nav
+			class="mx-auto mt-14 flex max-w-4xl flex-wrap justify-center gap-2"
+			aria-label={t('Features')}
+		>
 			{#each sections as section (section.number)}
 				<a
 					href={`#feature-${section.number}`}
 					class="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-xs font-medium text-fg-secondary focus-ring transition-colors hover:border-line-strong hover:text-fg"
 				>
 					<Icon name={section.icon} class="size-3.5 text-accent" />
-					{section.label}
+					{t(section.label)}
 				</a>
 			{/each}
 		</nav>
@@ -157,7 +181,9 @@
 {#snippet visual(/** @type {string} */ number)}
 	{#if number === '01'}
 		<div class="space-y-3">
-			<p class="text-xs font-semibold tracking-wider text-fg-subtle uppercase">Tuesday · Morning</p>
+			<p class="text-xs font-semibold tracking-wider text-fg-subtle uppercase">
+				{t('Tuesday · Morning')}
+			</p>
 			<div class="grid grid-cols-3 gap-2">
 				{#each ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30'] as time, index (time)}
 					<span
@@ -176,7 +202,7 @@
 				class="flex items-center gap-2 rounded-control bg-accent-soft px-3 py-2 text-xs text-accent"
 			>
 				<Icon name="clock" class="size-4" />
-				10:00 held for you · 9:42 left
+				{t('10:00 held for you · 9:42 left')}
 			</div>
 		</div>
 	{:else if number === '02'}
@@ -189,8 +215,8 @@
 						class={`flex size-8 items-center justify-center rounded-full text-xs font-semibold tabular-nums ${row.n === 1 ? 'bg-brand-600 text-white' : 'bg-surface-muted text-fg'}`}
 						>{row.n}</span
 					>
-					<span class="flex-1 text-sm font-medium text-fg">{row.label}</span>
-					<Badge tone={row.t} size="sm" dot>{row.s}</Badge>
+					<span class="flex-1 text-sm font-medium text-fg">{t(row.label)}</span>
+					<Badge tone={row.t} size="sm" dot>{t(row.s)}</Badge>
 				</li>
 			{/each}
 		</ul>
@@ -199,45 +225,48 @@
 			<div
 				class="rounded-card rounded-ss-sm bg-emerald-600 px-4 py-3 text-sm text-white shadow-card"
 			>
-				<p class="font-semibold">Lumière Spa</p>
+				<p class="font-semibold">{t('Lumière Spa')}</p>
 				<p class="mt-1 text-white/90">
-					Your facial is confirmed for Tue 10:00 at Olaya branch. Reply 1 to reschedule.
+					{t('Your facial is confirmed for Tue 10:00 at Olaya branch. Reply 1 to reschedule.')}
 				</p>
 				<p class="mt-1 text-end text-[10px] text-white/70">09:41 ✓✓</p>
 			</div>
 			<div
 				class="ms-auto w-fit rounded-card rounded-se-sm bg-surface px-4 py-2 text-sm text-fg shadow-card"
 			>
-				Thank you!
+				{t('Thank you!')}
 			</div>
 		</div>
 	{:else if number === '04'}
 		<div class="mx-auto max-w-xs rounded-card border border-line bg-surface p-4 shadow-card">
 			<div class="flex justify-between text-sm">
-				<span class="text-fg-muted">Signature facial</span><span
-					class="font-medium text-fg tabular-nums">SAR 350</span
+				<span class="text-fg-muted">{t('Signature facial')}</span><span
+					class="font-medium text-fg tabular-nums">{t('SAR {amount}', { amount: 350 })}</span
 				>
 			</div>
 			<div class="mt-2 flex justify-between text-sm">
-				<span class="text-fg-muted">Deposit (30%)</span><span
-					class="font-semibold text-fg tabular-nums">SAR 105</span
+				<span class="text-fg-muted">{t('Deposit ({percent}%)', { percent: 30 })}</span><span
+					class="font-semibold text-fg tabular-nums">{t('SAR {amount}', { amount: 105 })}</span
 				>
 			</div>
 			<div
 				class="mt-4 flex h-10 items-center justify-center rounded-control bg-slate-900 text-sm font-medium text-white dark:bg-white dark:text-slate-900"
 			>
-				Pay with Apple Pay
+				{t('Pay with Apple Pay')}
 			</div>
-			<p class="mt-2 text-center text-[11px] text-fg-muted">Mada · Visa · Mastercard via Moyasar</p>
+			<p class="mt-2 text-center text-[11px] text-fg-muted">
+				{t('Mada · Visa · Mastercard via Moyasar')}
+			</p>
 		</div>
 	{:else if number === '05'}
 		<div class="space-y-2">
 			<div
 				class="flex h-10 items-center gap-2 rounded-control border border-line-strong bg-surface px-3 text-sm text-fg-subtle"
 			>
-				<Icon name="search" class="size-4" /> Hammam in Riyadh
+				<Icon name="search" class="size-4" />
+				{t('Hammam in Riyadh')}
 			</div>
-			{#each [['Lumière Spa', 'Olaya · 1.2 km', 'SAR 180'], ['Rose Hammam', 'Al Malqa · 3.4 km', 'SAR 220']] as row (row[0])}
+			{#each [[t('Lumière Spa'), t( 'Olaya · {km} km', { km: 1.2 } ), t( 'SAR {amount}', { amount: 180 } )], [t('Rose Hammam'), t( 'Al Malqa · {km} km', { km: 3.4 } ), t( 'SAR {amount}', { amount: 220 } )]] as row (row[0])}
 				<div
 					class="flex items-center justify-between rounded-control border border-line bg-surface px-3 py-2.5"
 				>
@@ -254,15 +283,17 @@
 			<div
 				class="ms-auto w-fit max-w-[85%] rounded-card rounded-se-sm bg-brand-600 px-4 py-2 text-sm text-white"
 			>
-				How did Olaya do last week?
+				{t('How did Olaya do last week?')}
 			</div>
 			<div
 				class="w-fit max-w-[90%] rounded-card rounded-ss-sm border border-line bg-surface px-4 py-3 text-sm text-fg shadow-card"
 			>
-				Revenue was <span class="font-semibold">SAR 18,420</span>, up 12%. Tuesday mornings were 86%
-				booked.
+				{t('Revenue was {amount}, up 12%. Tuesday mornings were 86% booked.', {
+					amount: t('SAR {amount}', { amount: '18,420' })
+				})}
 				<p class="mt-2 inline-flex items-center gap-1 text-[11px] text-fg-muted">
-					<Icon name="chart-bar" class="size-3" /> From the revenue report
+					<Icon name="chart-bar" class="size-3" />
+					{t('From the revenue report')}
 				</p>
 			</div>
 		</div>
@@ -288,12 +319,12 @@
 					<p class="flex items-center gap-3 text-xs font-semibold tracking-wider uppercase">
 						<span class="text-accent tabular-nums">{section.number}</span>
 						<span class="h-px w-8 bg-line-strong" aria-hidden="true"></span>
-						<span class="text-fg-muted">{section.label}</span>
+						<span class="text-fg-muted">{t(section.label)}</span>
 					</p>
 					<h2 class="mt-5 max-w-xl text-display-lg font-semibold tracking-tight text-fg">
-						{section.title}
+						{t(section.title)}
 					</h2>
-					<p class="mt-5 max-w-xl text-body-lg text-fg-muted">{section.body}</p>
+					<p class="mt-5 max-w-xl text-body-lg text-fg-muted">{t(section.body)}</p>
 					<ul class="mt-8 space-y-3">
 						{#each section.points as point (point)}
 							<li class="flex items-center gap-3 text-sm font-medium text-fg-secondary">
@@ -302,7 +333,7 @@
 								>
 									<Icon name="check" class="size-3.5" />
 								</span>
-								{point}
+								{t(point)}
 							</li>
 						{/each}
 					</ul>
@@ -321,7 +352,7 @@
 								>
 									<Icon name={section.icon} class="size-[18px]" />
 								</span>
-								<span class="text-sm font-semibold text-fg">{section.label}</span>
+								<span class="text-sm font-semibold text-fg">{t(section.label)}</span>
 							</div>
 							{@render visual(section.number)}
 						</div>
@@ -340,17 +371,17 @@
 	<GradientBlob variant="corner" />
 	<Container size="md" class="relative py-8 text-center sm:py-12">
 		<h2 class="text-display-lg font-semibold tracking-tight text-white">
-			Your next customer is already looking.
+			{t('Your next customer is already looking.')}
 		</h2>
 		<p class="mx-auto mt-4 max-w-xl text-body-lg text-white/80">
-			Give them a faster way to discover your business, book a service and stay connected.
+			{t('Give them a faster way to discover your business, book a service and stay connected.')}
 		</p>
 		<div class="mt-8 flex justify-center">
 			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
-				Start with NOVA
+				{t('Start with NOVA')}
 				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 			</Button>
 		</div>
-		<p class="mt-5 text-xs text-white/60">No credit card required · Set up in minutes</p>
+		<p class="mt-5 text-xs text-white/60">{t('No credit card required · Set up in minutes')}</p>
 	</Container>
 </Section>

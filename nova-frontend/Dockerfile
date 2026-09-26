@@ -82,6 +82,14 @@ CMD ["pnpm", "exec", "vite", "dev", "--host", "0.0.0.0", "--port", "5173"]
 
 FROM deps AS build
 
+# `$env/static/public` is baked in at build time, and `.env` is dockerignored,
+# so the API origin has to arrive as a build arg. Empty means same-origin
+# `/api/v1`, i.e. a reverse proxy in front of both; the in-repo mock at that
+# path answers only under `vite dev`.
+#   docker build --build-arg PUBLIC_API_BASE_URL=https://api.example.com ...
+ARG PUBLIC_API_BASE_URL=""
+ENV PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL}
+
 COPY . .
 RUN pnpm exec vite build
 

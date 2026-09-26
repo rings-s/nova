@@ -15,6 +15,7 @@ from pydantic import Field
 
 from app.core.schemas import ApiSchema
 from app.modules.billing.domain import (
+    CheckoutStatus,
     CommissionClass,
     CommissionLineStatus,
     InvoiceStatus,
@@ -41,6 +42,10 @@ class PlanOut(ApiSchema):
     priced_per_location: bool = False
     max_seats: int | None = None
     max_locations: int | None = None
+    #: None means unlimited.
+    whatsapp_reminders_per_month: int | None = None
+    #: 0 means month to month.
+    contract_months: int = 0
 
 
 class SubscriptionOut(ApiSchema):
@@ -53,6 +58,8 @@ class SubscriptionOut(ApiSchema):
     seats: int
     locations: int
     cancel_at_period_end: bool
+    #: Billed yearly. `monthly_amount` stays the per-month figure either way.
+    annual: bool = False
 
     #: What the next invoice will charge for the subscription line, given the
     #: current footprint. A Chain with three branches pays 3 x 449.
@@ -61,6 +68,31 @@ class SubscriptionOut(ApiSchema):
     #: docs/11 section 7 step 6. True means the marketplace listing is hidden
     #: for non-payment; the calendar and queue are unaffected.
     marketplace_listing_hidden: bool = False
+
+
+class StartCheckoutRequest(ApiSchema):
+    #: Where Moyasar sends the owner back, with `?checkout=<id>` added. Must be
+    #: on the web app's own origin (`PUBLIC_APP_URL`).
+    return_url: str = Field(max_length=2048)
+
+
+class CheckoutOut(ApiSchema):
+    id: UUID
+    business_id: UUID
+    tier: PlanTier
+    annual: bool
+    status: CheckoutStatus
+    net_amount: Decimal
+    vat_amount: Decimal
+    total_amount: Decimal
+    currency: str
+    #: The months this payment covers: from `covers_from` up to, not
+    #: including, `covers_until`.
+    covers_from: date
+    covers_until: date
+    paid_at: datetime | None = None
+    #: Moyasar's hosted page. Only when the checkout was just opened.
+    redirect_url: str | None = None
 
 
 class CreateSubscriptionRequest(ApiSchema):

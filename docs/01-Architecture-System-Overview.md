@@ -3,7 +3,8 @@ title: Architecture System Overview
 created: 2026-08-11
 project: NOVA
 type: architecture
-tags: [architecture, c4, system-design, cloudflare, nextcloud]
+status: design
+tags: [architecture, c4, system-design, cloudflare]
 ---
 
 # Architecture System Overview
@@ -13,11 +14,14 @@ tags: [architecture, c4, system-design, cloudflare, nextcloud]
 
 ## System Components
 
-1. **Customer/Business PWA (SvelteKit):** The frontend interface.
+1. **SvelteKit frontend (`nova-frontend/`):** the public marketplace (`/discover`, storefronts,
+   bookings) and the staff dashboard (`/app`), in English and Arabic. Server-rendered by
+   `adapter-node`; it talks to the API over `/api/v1` from the browser.
 2. **Cloudflare Tunnel:** The secure ingress layer. No public ports are exposed on the local server.
 3. **FastAPI Backend (DDD):** The core application server handling API, Webhooks, and Domain orchestration.
 4. **PydanticAI Engine:** Local AI agents running on the RTX 5090, triggered by the backend.
-5. **Nextcloud:** Dedicated media storage for business owners (logos, portfolios, facility images).
+5. **Photo store (`MEDIA_ROOT`):** business covers and galleries, re-encoded to WebP by the API
+   and kept on a local volume behind the `ImageStore` interface (ADR-0013).
 6. **PostgreSQL & Redis:** State and caching databases running locally on the NVMe Gen5 storage.
 
 ## Data Flow & Architecture Diagram
@@ -39,7 +43,8 @@ graph TD
         AI[PydanticAI Agents / Ollama]
         PG[(PostgreSQL)]
         RD[(Redis)]
-        NC[Nextcloud / Media Storage]
+        FS[(Photo store / MEDIA_ROOT)]
+        WK[ARQ Worker]
     end
 
     C --> CF
@@ -50,7 +55,12 @@ graph TD
 
     API -->|Domain Commands| PG
     API -->|Cache/Queues| RD
-    API -->|Media Upload/Retrieve| NC
+    API -->|Photo save/serve| FS
+    API -->|Outbox events| PG
+    WK -->|Dispatch outbox, cron| PG
+    WK -->|Jobs| RD
+    WK -->|Messages| WA[WhatsApp BSP]
+    API -->|Hosted checkout| MY[Moyasar]
     API -->|Agent Execution| AI
 
     AI -->|Read Domain State| API
@@ -60,5 +70,11 @@ graph TD
 ## Key Architectural Decisions
 
 - **No Port Forwarding:** We use Cloudflare Tunnels (`cloudflared`) to route traffic to the local FastAPI server. This hides the home/office IP and provides enterprise-grade DDoS protection.
-- **Decoupled Media:** Business owners upload heavy media (salon portfolios, clinic images) directly to **Nextcloud**. The FastAPI backend only stores the Nextcloud WebDAV URLs or share links in PostgreSQL, keeping the core DB lightweight and fast.
+- **Photos outside the database:** A business's cover and gallery are uploaded to the API, decoded and re-encoded (which strips EXIF location and refuses non-images), and stored as files. PostgreSQL holds only the `business_photos` index. An S3-compatible adapter can replace the local store without touching callers (ADR-0013).
+- **Maps without a vendor:** Leaflet with OpenStreetMap tiles runs in the browser; the backend only stores branch coordinates and answers viewport and GeoJSON queries (ADR-0012).
 - **Local AI Sovereignty:** Sensitive customer data (health, beauty preferences) is processed locally on the RTX 5090, ensuring strict compliance with GCC data residency laws.
+
+> [!note] Implemented differences
+> Nextcloud was removed on 2026-09-17 (ADR-0013). The worker is a separate process (`worker`
+> service) that dispatches the domain-event outbox and runs cron jobs; without it no notification
+> is sent and no commission accrues.

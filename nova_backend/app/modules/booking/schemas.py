@@ -117,6 +117,8 @@ class HoldSlotResult(ApiSchema):
     """Named `Result`, per the docs/07 section 1 naming table."""
 
     hold_token: str
+    #: Where the slot is. `CreateBookingRequest` needs it to book the hold.
+    location_id: UUID
     provider_id: UUID
     service_id: UUID
     starts_at: datetime

@@ -1,3 +1,4 @@
+import { t, m } from '$lib/i18n/index.svelte.js';
 /**
  * Turns the Plotly figure JSON that `analytics.getChart` returns
  * (nova_backend/app/modules/analytics/charts.py — `data` traces plus `layout`)
@@ -106,6 +107,8 @@ const CHART_UNITS = {
  * @typedef {ColumnsModel|RankedModel|PartsModel|ComboModel|LineModel|HeatmapModel} ChartModel
  */
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+
 /** @param {unknown} value */
 function toNumber(value) {
 	if (value === null || value === undefined || value === '') return null;
@@ -154,7 +157,7 @@ function alignedSeries(traces, unit) {
 		});
 		return {
 			key: `${index}`,
-			label: trace.name || (unit === 'money' ? 'Revenue' : 'Value'),
+			label: trace.name || (unit === 'money' ? t('Revenue') : t('Value')),
 			color: seriesColor(trace, index, traces.length),
 			values
 		};
@@ -174,6 +177,14 @@ function fromBars(chartId, figure) {
 		return { type: 'ranked', rows, unit };
 	}
 	const { categories, series } = alignedSeries(traces, unit);
+	// One series over named things (not days) is a ranking: bars with their
+	// labels and values beside them read better than a row of columns.
+	if (series.length === 1 && !categories.some((category) => ISO_DATE_RE.test(category))) {
+		const rows = categories
+			.map((label, i) => ({ label, value: series[0].values[i] ?? 0 }))
+			.sort((a, b) => b.value - a.value);
+		return { type: 'ranked', rows, unit };
+	}
 	return { type: 'columns', categories, series, stacked: series.length > 1, unit };
 }
 
@@ -262,7 +273,8 @@ function fromForecast(chartId, figure) {
 		const last = values[forecastFrom] ?? 0;
 		band = categories.map((category, i) => {
 			const at = bandX.slice(0, half).map(String).indexOf(category);
-			if (at === -1) return { lower: i === forecastFrom ? last : NaN, upper: i === forecastFrom ? last : NaN };
+			if (at === -1)
+				return { lower: i === forecastFrom ? last : NaN, upper: i === forecastFrom ? last : NaN };
 			return { lower: toNumber(lower[at]) ?? 0, upper: toNumber(upper[at]) ?? 0 };
 		});
 	}
@@ -271,7 +283,7 @@ function fromForecast(chartId, figure) {
 		type: 'line',
 		categories,
 		series: [
-			{ key: '0', label: historyTrace?.name || 'Bookings', color: CATEGORICAL_COLORS[0], values }
+			{ key: '0', label: historyTrace?.name || t('Bookings'), color: CATEGORICAL_COLORS[0], values }
 		],
 		band,
 		forecastFrom,
@@ -300,8 +312,8 @@ function fromHeatmap(chartId, figure) {
 		values,
 		max,
 		unit: unitOf(chartId),
-		rowTitle: cohorts ? 'First visit' : 'Day',
-		columnTitle: cohorts ? 'Months since' : 'Hour'
+		rowTitle: cohorts ? m('First visit') : m('Day'),
+		columnTitle: cohorts ? m('Months since') : m('Hour')
 	};
 }
 
@@ -333,6 +345,7 @@ export function chartModel(chart) {
  * Whether there is anything to draw: a window with no bookings comes back as
  * a full axis of zeros, which would otherwise render as an empty frame.
  * @param {ChartModel} model
+ * @returns {boolean}
  */
 export function hasData(model) {
 	/** @param {(number|null)[]} values */
@@ -366,7 +379,10 @@ export function tableOf(model, format, formatCategory) {
 			return {
 				head: ['', ...model.series.map((series) => series.label)],
 				rows: model.categories.map((category, i) => [
-					formatCategory(category) + (model.type === 'line' && model.forecastFrom !== null && i > model.forecastFrom ? ' (trend)' : ''),
+					formatCategory(category) +
+						(model.type === 'line' && model.forecastFrom !== null && i > model.forecastFrom
+							? ` ${t('(trend)')}`
+							: ''),
 					...model.series.map((series) => format(series.values[i], model.unit))
 				])
 			};
@@ -385,13 +401,13 @@ export function tableOf(model, format, formatCategory) {
 			};
 		case 'ranked':
 			return {
-				head: ['', 'Value'],
+				head: ['', t('Value')],
 				rows: model.rows.map((row) => [row.label, format(row.value, model.unit)])
 			};
 		case 'parts': {
 			const total = model.parts.reduce((sum, part) => sum + part.value, 0);
 			return {
-				head: ['', 'Value', 'Share'],
+				head: ['', t('Value'), t('Share')],
 				rows: model.parts.map((part) => [
 					part.label,
 					format(part.value, model.unit),
@@ -401,7 +417,7 @@ export function tableOf(model, format, formatCategory) {
 		}
 		case 'heatmap':
 			return {
-				head: [model.rowTitle, ...model.columns],
+				head: [t(model.rowTitle), ...model.columns],
 				rows: model.rows.map((row, r) => [
 					formatCategory(row),
 					...model.values[r].map((value) => format(value, model.unit))

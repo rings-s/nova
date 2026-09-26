@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	/**
 	 * The staff dashboard shell. `tenant_id` for every call underneath comes
 	 * from `tenantStore.activeTenantId` — set here once, read by every page in
@@ -23,6 +24,7 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
+	import LanguageSwitch from '$lib/components/ui/LanguageSwitch.svelte';
 	import { iconButton } from '$lib/components/ui/styles.js';
 	import DashboardNav from '$lib/components/layout/DashboardNav.svelte';
 	import TenantSwitcher from '$lib/components/tenant/TenantSwitcher.svelte';
@@ -64,12 +66,20 @@
 
 	// This business's role, from its membership row — not the token's `roles`,
 	// which merges every business the user works at.
+	const ROLE_LABELS = /** @type {Record<string, string>} */ ({
+		owner: m('Owner'),
+		manager: m('Manager'),
+		receptionist: m('Receptionist'),
+		provider: m('Provider')
+	});
 	let roleLabel = $derived(
-		accessStore.role
-			? accessStore.role.replace(/^\w/, (c) => c.toUpperCase())
-			: authStore.principal?.kind === 'service'
-				? 'Service'
-				: 'Staff'
+		t(
+			accessStore.role
+				? (ROLE_LABELS[accessStore.role] ?? accessStore.role)
+				: authStore.principal?.kind === 'service'
+					? m('Service')
+					: m('Staff')
+		)
 	);
 
 	$effect(() => {
@@ -88,7 +98,7 @@
 			// A signed-in account without a business: most often an owner who
 			// signed up as a customer. Offer to set one up rather than bouncing
 			// them to the home page with no way forward.
-			toastStore.info('Set up your business to use the dashboard.');
+			toastStore.info(t('Set up your business to use the dashboard.'));
 			goto(resolve('/business/new'), { replaceState: true });
 		}
 	});
@@ -124,7 +134,7 @@
 
 	async function signOut() {
 		authStore.logout();
-		toastStore.info('Signed out.');
+		toastStore.info(t('Signed out.'));
 		await goto(resolve('/'));
 	}
 </script>
@@ -136,14 +146,14 @@
 {#snippet sidebar()}
 	<div class="flex h-full flex-col">
 		<div class="flex h-16 shrink-0 items-center justify-between px-5">
-			<a href={resolve('/')} class="rounded-control focus-ring" aria-label="NOVA home">
+			<a href={resolve('/')} class="rounded-control focus-ring" aria-label={t('NOVA home')}>
 				<Logo />
 			</a>
 			<button
 				type="button"
 				class={`${iconButton} size-9 lg:hidden`}
 				onclick={() => (drawerOpen = false)}
-				aria-label="Close menu"
+				aria-label={t('Close menu')}
 			>
 				<Icon name="x" class="size-5" />
 			</button>
@@ -151,7 +161,7 @@
 
 		<div class="px-4 pb-5">
 			<p class="mb-1.5 px-1 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">
-				Business
+				{t('Business')}
 			</p>
 			<TenantSwitcher />
 		</div>
@@ -173,16 +183,18 @@
 						href={resolve('/discover')}
 						class="inline-flex items-center gap-0.5 text-xs whitespace-nowrap text-fg-muted hover:text-accent"
 					>
-						Marketplace <Icon name="arrow-up-right" class="size-3 rtl:-scale-x-100" />
+						{t('Marketplace')}
+						<Icon name="arrow-up-right" class="size-3 rtl:-scale-x-100" />
 					</a>
 				</div>
+				<LanguageSwitch compact class="size-9 h-9 w-9" />
 				<ThemeToggle />
 				<button
 					type="button"
 					onclick={signOut}
 					class={`${iconButton} size-9`}
-					aria-label="Sign out"
-					title="Sign out"
+					aria-label={t('Sign out')}
+					title={t('Sign out')}
 				>
 					<Icon name="log-out" class="size-[18px] rtl:rotate-180" />
 				</button>
@@ -210,13 +222,13 @@
 				type="button"
 				class={`${iconButton} -ms-1.5 size-9`}
 				onclick={() => (drawerOpen = true)}
-				aria-label="Open menu"
+				aria-label={t('Open menu')}
 				aria-expanded={drawerOpen}
 			>
 				<Icon name="menu" class="size-5" />
 			</button>
 			<Logo />
-			<div class="ms-auto"><ThemeToggle /></div>
+			<div class="ms-auto flex items-center gap-1"><LanguageSwitch compact /><ThemeToggle /></div>
 		</header>
 
 		<!-- Mobile drawer -->
@@ -229,7 +241,7 @@
 				></div>
 				<aside
 					class="absolute inset-y-0 start-0 w-72 max-w-[85vw] animate-drawer-in border-e border-line bg-canvas shadow-overlay"
-					aria-label="Menu"
+					aria-label={t('Menu')}
 				>
 					{@render sidebar()}
 				</aside>

@@ -1,4 +1,6 @@
 <script>
+	import { roleLabel } from '$lib/i18n/labels.js';
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * Staff roster and invites. Everyday work (calendar, queue, check-in) is
 	 * open to any active member — only who's on the roster, at what rank, is
@@ -52,7 +54,10 @@
 	// anyone else just sees the roster. The server enforces the same rule.
 	let canInvite = $derived(accessStore.manageableRoles.length > 0);
 	let grantableOptions = $derived(
-		ROLE_OPTIONS.filter((option) => accessStore.canManage(option.value))
+		ROLE_OPTIONS.filter((option) => accessStore.canManage(option.value)).map((option) => ({
+			...option,
+			label: roleLabel(option.value)
+		}))
 	);
 	let myUserId = $derived(String(authStore.principal?.sub ?? ''));
 
@@ -124,9 +129,9 @@
 		if (!issuedInvite) return;
 		try {
 			await navigator.clipboard?.writeText(issuedInvite.token);
-			toastStore.success('Invite token copied.');
+			toastStore.success(t('Invite token copied.'));
 		} catch {
-			toastStore.error('Could not copy — select and copy it manually.');
+			toastStore.error(t('Could not copy — select and copy it manually.'));
 		}
 	}
 
@@ -145,7 +150,12 @@
 			const updated = await changeMembershipRole(tenantId, member.id, nextRole);
 			members = members.map((m) => (m.id === updated.id ? updated : m));
 			roleDrafts = { ...roleDrafts, [updated.id]: updated.role };
-			toastStore.success(`${updated.full_name}'s role is now ${updated.role}.`);
+			toastStore.success(
+				t("{name}'s role is now {role}.", {
+					name: updated.full_name,
+					role: roleLabel(updated.role)
+				})
+			);
 		} catch (err) {
 			toastStore.fromError(err);
 			roleDrafts = { ...roleDrafts, [member.id]: member.role };
@@ -166,7 +176,7 @@
 		try {
 			await revokeMembership(tenantId, target.id);
 			members = members.filter((m) => m.id !== target.id);
-			toastStore.success(`Revoked ${target.full_name}'s access.`);
+			toastStore.success(t("Revoked {name}'s access.", { name: target.full_name }));
 			revokeTarget = null;
 		} catch (err) {
 			toastStore.fromError(err);
@@ -176,18 +186,18 @@
 	}
 </script>
 
-<svelte:head><title>Team — NOVA</title></svelte:head>
+<svelte:head><title>{t('Team')} — NOVA</title></svelte:head>
 
 <PageHeader
-	eyebrow="Business"
-	title="Team"
-	subtitle="Who has access to this business, and at what rank."
+	eyebrow={t('Business')}
+	title={t('Team')}
+	subtitle={t('Who has access to this business, and at what rank.')}
 >
 	{#snippet actions()}
 		{#if canInvite}
 			<Button onclick={() => (inviteModalOpen = true)}>
 				<Icon name="plus" class="size-4" />
-				Invite someone
+				{t('Invite someone')}
 			</Button>
 		{/if}
 	{/snippet}
@@ -196,15 +206,17 @@
 {#if issuedInvite}
 	<Alert tone="success" class="mb-4" dismissible ondismiss={() => (issuedInvite = null)}>
 		<p>
-			Invite created for <strong>{issuedInvite.email}</strong> ({issuedInvite.role}). Send this
-			token to them yourself — NOVA won't, and it won't be shown again.
+			{t(
+				"Invite created for {email} ({role}). Send this token to them yourself — NOVA won't, and it won't be shown again.",
+				{ email: issuedInvite.email, role: roleLabel(issuedInvite.role) }
+			)}
 		</p>
 		<div class="mt-3 flex items-center gap-2">
 			<code
 				class="h-8 flex-1 truncate rounded-control border border-emerald-200 bg-surface px-3 font-mono text-xs leading-8 text-fg dark:border-emerald-500/20"
-				>{issuedInvite.token}</code
+				dir="ltr">{issuedInvite.token}</code
 			>
-			<Button size="sm" variant="outline" onclick={copyInviteToken}>Copy</Button>
+			<Button size="sm" variant="outline" onclick={copyInviteToken}>{t('Copy')}</Button>
 		</div>
 	</Alert>
 {/if}
@@ -216,10 +228,10 @@
 {:else}
 	<section class="mb-10">
 		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">
-			Members <span class="ms-1 text-sm font-normal text-fg-muted">{members.length}</span>
+			{t('Members')} <span class="ms-1 text-sm font-normal text-fg-muted">{members.length}</span>
 		</h2>
 		{#if members.length === 0}
-			<EmptyState title="No members yet">
+			<EmptyState title={t('No members yet')}>
 				{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
 			</EmptyState>
 		{:else}
@@ -236,15 +248,13 @@
 							</div>
 							{#if !accessStore.canManage(member.role) || member.user_id === myUserId}
 								<Badge tone={member.role === 'owner' ? 'accent' : 'neutral'} size="sm">
-									{member.role.replace(/^\w/, (c) => c.toUpperCase())}{member.user_id === myUserId
-										? ' · you'
-										: ''}
+									{roleLabel(member.role)}{member.user_id === myUserId ? ` · ${t('you')}` : ''}
 								</Badge>
 							{:else}
 								<div class="flex items-center gap-2">
 									<div class="w-36">
 										<Select
-											aria-label={`Role for ${member.full_name}`}
+											aria-label={t('Role for {name}', { name: member.full_name })}
 											bind:value={roleDrafts[member.id]}
 											options={grantableOptions}
 										/>
@@ -256,10 +266,10 @@
 										loading={savingRoleId === member.id}
 										onclick={() => saveRole(member)}
 									>
-										Save
+										{t('Save')}
 									</Button>
 									<Button size="sm" variant="danger-ghost" onclick={() => (revokeTarget = member)}>
-										Revoke
+										{t('Revoke')}
 									</Button>
 								</div>
 							{/if}
@@ -271,11 +281,11 @@
 	</section>
 
 	<section>
-		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Pending invites</h2>
+		<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">{t('Pending invites')}</h2>
 		{#if invites.length === 0}
 			<EmptyState
-				title="No pending invites"
-				description="Invites you send appear here until they're accepted."
+				title={t('No pending invites')}
+				description={t("Invites you send appear here until they're accepted.")}
 			>
 				{#snippet icon()}<Icon name="user-check" class="size-6" />{/snippet}
 			</EmptyState>
@@ -293,11 +303,11 @@
 								<div class="min-w-0">
 									<p class="truncate text-sm font-medium text-fg">{invite.email}</p>
 									<p class="text-xs text-fg-muted">
-										Expires {formatDate(invite.expires_at, 'en')}
+										{t('Expires {date}', { date: formatDate(invite.expires_at) })}
 									</p>
 								</div>
 							</div>
-							<Badge tone="info" size="sm">{invite.role}</Badge>
+							<Badge tone="info" size="sm">{roleLabel(invite.role)}</Badge>
 						</div>
 					{/each}
 				</div>
@@ -306,26 +316,33 @@
 	</section>
 {/if}
 
-<Modal bind:open={inviteModalOpen} title="Invite someone">
+<Modal bind:open={inviteModalOpen} title={t('Invite someone')}>
 	{#if inviteError}
 		<Alert tone="error" class="mb-4">{inviteError}</Alert>
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleInvite}>
-		<Input type="email" label="Email" required bind:value={inviteForm.email} />
-		<Select label="Role" bind:value={inviteForm.role} options={grantableOptions} />
-		<Button type="submit" loading={inviting} fullWidth>Send invite</Button>
+		<Input type="email" label={t('Email')} required bind:value={inviteForm.email} />
+		<Select label={t('Role')} bind:value={inviteForm.role} options={grantableOptions} />
+		<Button type="submit" loading={inviting} fullWidth>{t('Send invite')}</Button>
 	</form>
 </Modal>
 
-<Modal open={revokeTarget !== null} title="Revoke access" onclose={() => (revokeTarget = null)}>
+<Modal
+	open={revokeTarget !== null}
+	title={t('Revoke access')}
+	onclose={() => (revokeTarget = null)}
+>
 	{#if revokeTarget}
 		<p class="text-sm text-fg-secondary">
-			Revoke <strong>{revokeTarget.full_name}</strong>'s access to this business? They'll be signed
-			out everywhere and will need a new invite to come back.
+			{t(
+				"Revoke {name}'s access to this business? They'll be signed out everywhere and will need a new invite to come back.",
+				{ name: revokeTarget.full_name }
+			)}
 		</p>
 	{/if}
 	{#snippet footer()}
-		<Button variant="ghost" onclick={() => (revokeTarget = null)}>Cancel</Button>
-		<Button variant="danger" loading={revoking} onclick={confirmRevoke}>Revoke access</Button>
+		<Button variant="ghost" onclick={() => (revokeTarget = null)}>{t('Cancel')}</Button>
+		<Button variant="danger" loading={revoking} onclick={confirmRevoke}>{t('Revoke access')}</Button
+		>
 	{/snippet}
 </Modal>

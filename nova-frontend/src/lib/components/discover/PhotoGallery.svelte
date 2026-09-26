@@ -1,4 +1,5 @@
 <script>
+	import { t, tp } from '$lib/i18n/index.svelte.js';
 	/**
 	 * A storefront's photos: a mosaic (the cover large, up to four more beside
 	 * it) and a full-screen viewer for all of them. The viewer takes the arrow
@@ -80,7 +81,7 @@
 							: 'hidden sm:block',
 					shown.length === 2 && i === 1 ? 'sm:col-span-2 sm:row-span-2' : ''
 				].join(' ')}
-				aria-label={`View photo ${i + 1} of ${photos.length}`}
+				aria-label={t('View photo {n} of {total}', { n: i + 1, total: photos.length })}
 			>
 				<img
 					src={apiAssetUrl(i === 0 ? photo.urls.large : photo.urls.thumb)}
@@ -97,7 +98,7 @@
 				class="absolute end-3 bottom-3 inline-flex h-9 items-center gap-2 rounded-control border border-line bg-surface/90 px-3 text-sm font-medium text-fg shadow-raised focus-ring backdrop-blur transition-colors hover:bg-surface"
 			>
 				<Icon name="layers" class="size-4" />
-				Show all {photos.length} photos
+				{tp(photos.length, 'Show {count} photo', 'Show all {count} photos')}
 			</button>
 		{/if}
 	</div>
@@ -117,7 +118,7 @@
 				type="button"
 				onclick={close}
 				class="flex size-10 items-center justify-center rounded-full text-white/80 focus-ring hover:bg-white/10 hover:text-white"
-				aria-label="Close photos"
+				aria-label={t('Close photos')}
 			>
 				<Icon name="x" class="size-6" />
 			</button>
@@ -125,7 +126,7 @@
 		<div class="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6 sm:px-16">
 			<img
 				src={apiAssetUrl(current.urls.large)}
-				alt={`${name} — photo ${index + 1}`}
+				alt={t('{name} — photo {n}', { name, n: index + 1 })}
 				class="max-h-full max-w-full rounded-card object-contain"
 			/>
 			{#if photos.length > 1}
@@ -133,7 +134,7 @@
 					type="button"
 					onclick={() => move(-1)}
 					class="absolute start-2 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white focus-ring hover:bg-white/20 sm:start-4"
-					aria-label="Previous photo"
+					aria-label={t('Previous photo')}
 				>
 					<Icon name="chevron-left" class="size-6 rtl:rotate-180" />
 				</button>
@@ -141,7 +142,7 @@
 					type="button"
 					onclick={() => move(1)}
 					class="absolute end-2 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white focus-ring hover:bg-white/20 sm:end-4"
-					aria-label="Next photo"
+					aria-label={t('Next photo')}
 				>
 					<Icon name="chevron-right" class="size-6 rtl:rotate-180" />
 				</button>

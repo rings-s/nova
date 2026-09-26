@@ -153,6 +153,32 @@ class BookingRepository(TenantScopedRepository[BookingRecord]):
         record = result.scalar_one_or_none()
         return _to_domain(record) if record else None
 
+    async def has_upcoming(
+        self,
+        *,
+        now: datetime,
+        location_id: UUID | None = None,
+        service_id: UUID | None = None,
+        provider_id: UUID | None = None,
+    ) -> bool:
+        """Whether any booking still to happen (not yet over, not cancelled or
+        finished) names this branch, service or provider. Catalog asks before
+        deleting one."""
+        stmt = self._scope(
+            select(BookingRecord.id).where(
+                BookingRecord.status.in_(tuple(BLOCKING_STATUSES)),
+                BookingRecord.ends_at > now,
+            )
+        )
+        if location_id is not None:
+            stmt = stmt.where(BookingRecord.location_id == location_id)
+        if service_id is not None:
+            stmt = stmt.where(BookingRecord.service_id == service_id)
+        if provider_id is not None:
+            stmt = stmt.where(BookingRecord.provider_id == provider_id)
+        result = await self.session.execute(stmt.limit(1))
+        return result.scalar_one_or_none() is not None
+
     async def list_for_provider(self, *, provider_id: UUID, window: TimeRange) -> list[Booking]:
         stmt = self._scope(
             select(BookingRecord)

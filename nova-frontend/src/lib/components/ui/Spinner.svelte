@@ -1,6 +1,7 @@
 <script>
-	/** @type {{ size?: 'sm'|'md'|'lg', label?: string, class?: string }} */
-	let { size = 'md', label = 'Loading', class: className = '' } = $props();
+	import { t } from '$lib/i18n/index.svelte.js';
+	/** @type {{ size?: 'sm'|'md'|'lg', label?: string|null, class?: string }} */
+	let { size = 'md', label = null, class: className = '' } = $props();
 
 	const sizeClasses = { sm: 'size-4', md: 'size-6', lg: 'size-9' };
 </script>
@@ -10,7 +11,7 @@
 	viewBox="0 0 24 24"
 	fill="none"
 	role="status"
-	aria-label={label}
+	aria-label={label ?? t('Loading')}
 >
 	<circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
 	<path

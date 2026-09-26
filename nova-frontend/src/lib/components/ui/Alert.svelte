@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { iconButton } from './styles.js';
 
 	/**
@@ -70,7 +71,7 @@
 			type="button"
 			onclick={ondismiss}
 			class={`${iconButton} -me-1.5 -mt-0.5 size-7 text-current opacity-60 hover:bg-black/5 hover:text-current hover:opacity-100 dark:hover:bg-white/10`}
-			aria-label="Dismiss"
+			aria-label={t('Dismiss')}
 		>
 			<svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
 				<path

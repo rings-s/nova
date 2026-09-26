@@ -16,6 +16,7 @@ discovery -> catalog, review -> booking/catalog/identity).
 # side effect of registering with Base.metadata so Alembic sees them.
 from app.core import idempotency as _idempotency  # noqa: F401
 from app.db import outbox as _outbox  # noqa: F401
+from app.modules.ai_agents.router import marketplace_router as ai_marketplace_router
 from app.modules.ai_agents.router import router as ai_router
 
 # analytics owns no tables, so only its router is imported (ADR-0011).
@@ -26,6 +27,7 @@ from app.modules.booking import models as booking_models  # noqa: F401
 from app.modules.booking.router import router as booking_router
 from app.modules.booking.router import schedule_router
 from app.modules.catalog import models as catalog_models  # noqa: F401
+from app.modules.catalog.router import admin_router as catalog_admin_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.discovery import models as discovery_models  # noqa: F401
 from app.modules.discovery.router import router as discovery_router
@@ -50,6 +52,7 @@ routers = [
     customers_router,
     memberships_router,
     catalog_router,
+    catalog_admin_router,
     discovery_router,
     booking_router,
     schedule_router,
@@ -62,4 +65,5 @@ routers = [
     billing_router,
     analytics_router,
     ai_router,
+    ai_marketplace_router,
 ]

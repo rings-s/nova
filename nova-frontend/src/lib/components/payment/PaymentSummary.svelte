@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import Card from '../ui/Card.svelte';
 	import { formatMoney } from '../../utils/money.js';
 	import { formatDateTime } from '../../utils/datetime.js';
@@ -7,11 +8,10 @@
 	/**
 	 * @type {{
 	 *   payment: import('../../api/payment.js').Payment,
-	 *   locale?: 'en'|'ar',
 	 *   actions?: import('svelte').Snippet
 	 * }}
 	 */
-	let { payment, locale = 'en', actions } = $props();
+	let { payment, actions } = $props();
 
 	let refundedAmount = $derived(Number(payment.refunded_amount ?? 0));
 </script>
@@ -20,17 +20,19 @@
 	<div class="flex items-start justify-between gap-3">
 		<div>
 			<p class="text-lg font-semibold text-fg">
-				{formatMoney(payment.amount, payment.currency, locale)}
+				{formatMoney(payment.amount, payment.currency)}
 			</p>
 			<p class="text-sm text-fg-muted">
 				{payment.gateway}
 				{#if payment.captured_at}
-					· captured {formatDateTime(payment.captured_at, locale)}
+					· {t('paid {time}', { time: formatDateTime(payment.captured_at) })}
 				{/if}
 			</p>
 			{#if refundedAmount > 0}
 				<p class="mt-1 text-sm text-amber-600">
-					Refunded {formatMoney(payment.refunded_amount, payment.currency, locale)}
+					{t('Refunded {amount}', {
+						amount: formatMoney(payment.refunded_amount, payment.currency)
+					})}
 				</p>
 			{/if}
 			{#if payment.failure_code}

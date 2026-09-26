@@ -1,4 +1,5 @@
 <script>
+	import { t, m, tp } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
 	import { businessStore } from '$lib/stores/business.svelte.js';
 	import { tenantStore } from '$lib/stores/tenant.svelte.js';
@@ -44,54 +45,54 @@
 	 */
 	const shortcuts = [
 		{
-			title: 'Walk-in queue',
+			title: m('Walk-in queue'),
 			icon: 'users',
-			description: 'Issue tickets and call the next customer.',
+			description: m('Issue tickets and call the next customer.'),
 			href: '/app/queue'
 		},
 		{
-			title: 'Day sheet',
+			title: m('Day sheet'),
 			icon: 'calendar',
-			description: 'Confirm, check in and complete visits.',
+			description: m('Confirm, check in and complete visits.'),
 			href: '/app/bookings'
 		},
 		{
-			title: 'Catalog',
+			title: m('Catalog'),
 			icon: 'layers',
-			description: 'Locations, bilingual services and providers.',
+			description: m('Locations, bilingual services and providers.'),
 			href: '/app/catalog'
 		},
 		{
-			title: 'Customers',
+			title: m('Customers'),
 			icon: 'user',
-			description: 'Search your customers and manage consent.',
+			description: m('Search your customers and manage consent.'),
 			href: '/app/customers'
 		},
 		{
-			title: 'Analytics',
+			title: m('Analytics'),
 			icon: 'chart-bar',
-			description: 'Bookings, revenue and utilization.',
+			description: m('Bookings, revenue and utilization.'),
 			href: '/app/analytics',
 			needs: 'view_analytics'
 		},
 		{
-			title: 'Billing',
+			title: m('Billing'),
 			icon: 'credit-card',
-			description: 'Subscription, invoices and payouts.',
+			description: m('Subscription, invoices and payouts.'),
 			href: '/app/billing',
 			needs: 'view_financials'
 		},
 		{
-			title: 'Team',
+			title: m('Team'),
 			icon: 'user-check',
-			description: 'Who works here, and at what role.',
+			description: m('Who works here, and at what role.'),
 			href: '/app/team'
 		}
 	];
 
 	const greeting = (() => {
 		const hour = new Date().getHours();
-		return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+		return hour < 12 ? t('Good morning') : hour < 17 ? t('Good afternoon') : t('Good evening');
 	})();
 
 	/**
@@ -176,18 +177,22 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard — NOVA</title>
+	<title>{t('Dashboard')} — NOVA</title>
 </svelte:head>
 
-<PageHeader eyebrow="Overview" title={greeting} subtitle="Here's how your business looks today.">
+<PageHeader
+	eyebrow={t('Overview')}
+	title={greeting}
+	subtitle={t("Here's how your business looks today.")}
+>
 	{#snippet actions()}
 		<Button variant="outline" href={resolve('/app/bookings')}>
 			<Icon name="calendar" class="size-4" />
-			Day sheet
+			{t('Day sheet')}
 		</Button>
 		<Button href={resolve('/app/queue')}>
 			<Icon name="users" class="size-4" />
-			Open queue
+			{t('Open queue')}
 		</Button>
 	{/snippet}
 </PageHeader>
@@ -202,48 +207,48 @@
 				<Icon name="sparkles" class="size-6" />
 			</div>
 			<div class="flex-1">
-				<h2 class="text-lg font-semibold tracking-tight text-fg">Set up your storefront</h2>
+				<h2 class="text-lg font-semibold tracking-tight text-fg">{t('Set up your storefront')}</h2>
 				<p class="mt-1 text-sm text-fg-muted">
-					Add a location, your services and your staff before you start accepting bookings.
+					{t('Add a location, your services and your staff before you start accepting bookings.')}
 				</p>
 			</div>
 			<Button href={resolve('/app/catalog')}>
-				Go to catalog
+				{t('Go to catalog')}
 				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 			</Button>
 		</div>
 	</Card>
 {:else}
 	<div class="space-y-8">
-		<section class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4" aria-label="Key numbers">
+		<section class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4" aria-label={t('Key numbers')}>
 			<StatCard
-				label="Today"
+				label={t('Today')}
 				icon="calendar"
 				{loading}
 				value={bookingCount}
-				hint={`${confirmedCount} confirmed or underway`}
+				hint={t('{count} confirmed or underway', { count: confirmedCount })}
 				href={resolve('/app/bookings')}
 			/>
 			<StatCard
-				label="Providers"
+				label={t('Providers')}
 				icon="users"
 				{loading}
 				value={providerCount}
-				hint={`Across ${locationCount} location${locationCount === 1 ? '' : 's'}`}
+				hint={tp(locationCount, 'Across {count} location', 'Across {count} locations')}
 			/>
 			<StatCard
-				label="Services"
+				label={t('Services')}
 				icon="sparkles"
 				{loading}
 				value={serviceCount}
-				hint="Arabic & English"
+				hint={t('Arabic & English')}
 			/>
 			<StatCard
-				label="Locations"
+				label={t('Locations')}
 				icon="map-pin"
 				{loading}
 				value={locationCount}
-				hint="Active branches"
+				hint={t('Active branches')}
 				href={resolve('/app/catalog')}
 			/>
 		</section>
@@ -253,11 +258,11 @@
 				{#snippet header()}
 					<div class="flex items-center justify-between gap-4">
 						<div>
-							<h2 class="font-semibold text-fg">Today's appointments</h2>
-							<p class="mt-0.5 text-xs text-fg-muted">Next up across your providers</p>
+							<h2 class="font-semibold text-fg">{t("Today's appointments")}</h2>
+							<p class="mt-0.5 text-xs text-fg-muted">{t('Next up across your providers')}</p>
 						</div>
 						<Button href={resolve('/app/bookings')} variant="ghost" size="sm">
-							View all
+							{t('View all')}
 							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 						</Button>
 					</div>
@@ -275,8 +280,8 @@
 				{:else if recentBookings.length === 0}
 					<div class="p-5">
 						<EmptyState
-							title="Nothing booked today"
-							description="New appointments will appear here as customers book."
+							title={t('Nothing booked today')}
+							description={t('New appointments will appear here as customers book.')}
 						>
 							{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
 						</EmptyState>
@@ -292,12 +297,12 @@
 										<Icon name="clock" class="size-4" />
 									</span>
 									<p class="truncate text-sm font-medium text-fg">
-										{formatTime(booking.starts_at, 'en')} – {formatTime(booking.ends_at, 'en')}
+										{formatTime(booking.starts_at)} – {formatTime(booking.ends_at)}
 									</p>
 								</div>
 								<div class="flex shrink-0 items-center gap-3">
 									<span class="text-sm font-medium text-fg tabular-nums">
-										{formatMoney(booking.price, booking.currency, 'en')}
+										{formatMoney(booking.price, booking.currency)}
 									</span>
 									<BookingStatusBadge status={booking.status} />
 								</div>
@@ -308,7 +313,7 @@
 			</Card>
 
 			<section aria-labelledby="shortcuts-heading">
-				<h2 id="shortcuts-heading" class="mb-3 text-sm font-semibold text-fg">Shortcuts</h2>
+				<h2 id="shortcuts-heading" class="mb-3 text-sm font-semibold text-fg">{t('Shortcuts')}</h2>
 				<ul class="overflow-hidden rounded-card border border-line bg-surface shadow-card">
 					{#each shortcuts.filter((item) => !item.needs || accessStore.can(item.needs)) as item (item.href)}
 						<li class="border-b border-line-subtle last:border-b-0">
@@ -322,8 +327,8 @@
 									<Icon name={item.icon} class="size-[18px]" />
 								</span>
 								<span class="min-w-0 flex-1">
-									<span class="block text-sm font-medium text-fg">{item.title}</span>
-									<span class="block truncate text-xs text-fg-muted">{item.description}</span>
+									<span class="block text-sm font-medium text-fg">{t(item.title)}</span>
+									<span class="block truncate text-xs text-fg-muted">{t(item.description)}</span>
 								</span>
 								<Icon
 									name="chevron-right"

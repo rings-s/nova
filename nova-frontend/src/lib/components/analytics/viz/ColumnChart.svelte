@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * Vertical columns over an ordered category axis (usually days), one
 	 * series or several stacked. Marks follow the chart kit's spec: at most
@@ -82,10 +83,12 @@
 	let tip = $derived.by(() => {
 		if (hover === null) return null;
 		const i = hover;
+		/** @type {{ label: string, value: string, color: string, strong?: boolean }[]} */
 		const rows = model.series
 			.map((series) => ({ label: series.label, value: fmt(series.values[i]), color: series.color }))
 			.reverse();
-		if (model.stacked) rows.push({ label: 'Total', value: fmt(totals[i]), color: '', strong: true });
+		if (model.stacked)
+			rows.push({ label: t('Total'), value: fmt(totals[i]), color: '', strong: true });
 		return {
 			x: M.left + (x(String(i)) ?? 0) + x.bandwidth() / 2,
 			y: M.top + Math.min(y(totals[i]), innerH - 40) - 8,
@@ -98,6 +101,7 @@
 <div class="relative w-full" bind:clientWidth={width} style:height={`${height}px`}>
 	{#if width > 0}
 		<svg
+			direction="ltr"
 			{width}
 			{height}
 			role="img"
@@ -160,9 +164,10 @@
 					{/each}
 				{/if}
 
-				{#each model.categories as _, i (i)}
+				{#each model.categories as category, i (i)}
 					<rect
 						role="presentation"
+						data-category={category}
 						x={(x(String(i)) ?? 0) - (x.step() * x.paddingInner()) / 2}
 						y="0"
 						width={x.step()}

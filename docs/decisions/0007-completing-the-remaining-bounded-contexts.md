@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — 2026-08-16
+Accepted — 2026-08-16. The `media` section is superseded by ADR-0013: the module and
+Nextcloud were removed on 2026-09-17, and business photos are uploaded to the API itself.
 
 ## Context
 
@@ -102,6 +103,10 @@ returning half the money.
 `media` issues a scoped, short-lived, signed authorisation to write to one exact path; the
 browser PUTs to Nextcloud directly. There is deliberately no endpoint accepting a file body.
 `assert_path_belongs_to_tenant` runs on every read and write.
+
+> [!note] Superseded (ADR-0013)
+> Removed with the `media` module. Photos now do pass through FastAPI, deliberately, so they can be
+> decoded and re-encoded before anything is stored.
 
 ### Notification is a consumer, and consent is a gate
 

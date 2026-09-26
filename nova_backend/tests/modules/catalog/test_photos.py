@@ -151,6 +151,36 @@ async def test_deleting_a_photo_removes_it_and_its_files(client, store, listed):
     assert (await client.get(_photos(listed.tenant_id, listed.id))).json() == []
 
 
+async def test_a_gallery_photo_becomes_the_cover_and_the_old_cover_joins_the_gallery(
+    client, store, listed
+):
+    cover = (await _upload(client, listed, kind="cover")).json()
+    gallery = (await _upload(client, listed)).json()
+
+    response = await client.patch(
+        f"/api/v1/tenants/{listed.tenant_id}/catalog/photos/{gallery['id']}",
+        json={"kind": "cover"},
+    )
+
+    assert response.status_code == 200, response.text
+    kinds = {
+        p["id"]: p["kind"] for p in (await client.get(_photos(listed.tenant_id, listed.id))).json()
+    }
+    assert kinds == {gallery["id"]: "cover", cover["id"]: "gallery"}
+
+
+async def test_gallery_photos_are_reordered(client, store, listed):
+    first = (await _upload(client, listed)).json()
+    second = (await _upload(client, listed)).json()
+
+    await client.patch(
+        f"/api/v1/tenants/{listed.tenant_id}/catalog/photos/{first['id']}", json={"position": 9}
+    )
+
+    order = [p["id"] for p in (await client.get(_photos(listed.tenant_id, listed.id))).json()]
+    assert order == [second["id"], first["id"]]
+
+
 async def test_the_gallery_has_a_limit(client, store, listed):
     for _ in range(MAX_GALLERY_PHOTOS):
         assert (await _upload(client, listed, data=_jpeg(size=(40, 40)))).status_code == 201

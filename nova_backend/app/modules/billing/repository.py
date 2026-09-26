@@ -16,12 +16,14 @@ from app.core.values import Money
 from app.db.repository import TenantScopedRepository
 from app.modules.billing.domain import (
     BillingPeriod,
+    CheckoutStatus,
     CommissionLine,
     CommissionLineStatus,
     Invoice,
     InvoiceStatus,
     Payout,
     Subscription,
+    SubscriptionCheckout,
     SubscriptionStatus,
 )
 from app.modules.billing.models import (
@@ -29,6 +31,7 @@ from app.modules.billing.models import (
     CustomerBusinessFirstBookingRecord,
     InvoiceRecord,
     PayoutRecord,
+    SubscriptionCheckoutRecord,
     SubscriptionRecord,
 )
 
@@ -116,6 +119,104 @@ class SubscriptionRepository(TenantScopedRepository[SubscriptionRecord]):
         )
         rows = (await self.session.execute(stmt)).scalars().all()
         return [_subscription_to_domain(r) for r in rows]
+
+
+# --- subscription checkouts ------------------------------------------------
+
+
+def _checkout_to_domain(record: SubscriptionCheckoutRecord) -> SubscriptionCheckout:
+    return SubscriptionCheckout(
+        id=record.id,
+        tenant_id=record.tenant_id,
+        business_id=record.business_id,
+        subscription_id=record.subscription_id,
+        tier=record.tier,
+        annual=record.annual,
+        net=Money(amount=record.net_amount, currency=record.currency),
+        vat=Money(amount=record.vat_amount, currency=record.currency),
+        covers_from=record.covers_from,
+        covers_until=record.covers_until,
+        status=record.status,
+        gateway_invoice_id=record.gateway_invoice_id,
+        gateway_payment_id=record.gateway_payment_id,
+        paid_at=record.paid_at,
+        failure_code=record.failure_code,
+    )
+
+
+class SubscriptionCheckoutRepository(TenantScopedRepository[SubscriptionCheckoutRecord]):
+    model = SubscriptionCheckoutRecord
+
+    async def add_checkout(self, checkout: SubscriptionCheckout) -> SubscriptionCheckout:
+        record = SubscriptionCheckoutRecord(
+            id=checkout.id,
+            tenant_id=checkout.tenant_id,
+            business_id=checkout.business_id,
+            subscription_id=checkout.subscription_id,
+            tier=checkout.tier,
+            annual=checkout.annual,
+            net_amount=checkout.net.amount,
+            vat_amount=checkout.vat.amount,
+            currency=checkout.net.currency,
+            covers_from=checkout.covers_from,
+            covers_until=checkout.covers_until,
+            status=checkout.status,
+        )
+        self.add(record)
+        await self.session.flush()
+        return _checkout_to_domain(record)
+
+    async def get_checkout(self, checkout_id: UUID) -> SubscriptionCheckout | None:
+        record = await super().get(checkout_id)
+        return _checkout_to_domain(record) if record else None
+
+    async def find_by_gateway_invoice(self, gateway_invoice_id: str) -> SubscriptionCheckout | None:
+        stmt = self._scope(
+            select(SubscriptionCheckoutRecord).where(
+                SubscriptionCheckoutRecord.gateway_invoice_id == gateway_invoice_id
+            )
+        )
+        record = (await self.session.execute(stmt)).scalar_one_or_none()
+        return _checkout_to_domain(record) if record else None
+
+    async def save(self, checkout: SubscriptionCheckout) -> SubscriptionCheckout:
+        record = await super().get(checkout.id)
+        if record is None:
+            raise ValueError(f"Checkout {checkout.id} vanished mid-transaction.")
+        record.status = checkout.status
+        record.gateway_invoice_id = checkout.gateway_invoice_id
+        record.gateway_payment_id = checkout.gateway_payment_id
+        record.paid_at = checkout.paid_at
+        record.failure_code = checkout.failure_code
+        await self.session.flush()
+        return _checkout_to_domain(record)
+
+    async def is_period_prepaid(self, business_id: UUID, day: date) -> bool:
+        """Whether a paid checkout already covers the month starting `day`,
+        so the monthly close must not charge the subscription for it again."""
+        stmt = self._scope(
+            select(SubscriptionCheckoutRecord.id).where(
+                SubscriptionCheckoutRecord.business_id == business_id,
+                SubscriptionCheckoutRecord.status == CheckoutStatus.PAID,
+                SubscriptionCheckoutRecord.covers_from <= day,
+                SubscriptionCheckoutRecord.covers_until > day,
+            )
+        )
+        return (await self.session.execute(stmt.limit(1))).scalar_one_or_none() is not None
+
+
+class UnscopedCheckoutRepository:
+    """For the Moyasar webhook, which knows a gateway invoice id but no tenant
+    yet. The caller must have opened `bypass_tenant_scope`."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def tenant_of_gateway_invoice(self, gateway_invoice_id: str) -> UUID | None:
+        stmt = select(SubscriptionCheckoutRecord.tenant_id).where(
+            SubscriptionCheckoutRecord.gateway_invoice_id == gateway_invoice_id
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
 
 # --- first-booking claim ---------------------------------------------------

@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import Button from './Button.svelte';
 	import Icon from './Icon.svelte';
 
@@ -24,13 +25,13 @@
 
 <nav
 	class="flex items-center justify-between gap-4 border-t border-line pt-4 text-sm"
-	aria-label="Pagination"
+	aria-label={t('Pagination')}
 >
 	<p class="text-fg-muted tabular-nums">
 		{#if totalPages}
-			Page <span class="font-medium text-fg">{currentPage}</span> of {totalPages}
+			{t('Page {page} of {pages}', { page: currentPage, pages: totalPages })}
 		{:else}
-			Page <span class="font-medium text-fg">{currentPage}</span>
+			{t('Page {page}', { page: currentPage })}
 		{/if}
 	</p>
 	<div class="flex gap-2">
@@ -41,7 +42,7 @@
 			onclick={() => onchange(Math.max(0, offset - limit))}
 		>
 			<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
-			Previous
+			{t('Previous')}
 		</Button>
 		<Button
 			variant="outline"
@@ -49,7 +50,7 @@
 			disabled={!hasNext}
 			onclick={() => onchange(offset + limit)}
 		>
-			Next
+			{t('Next')}
 			<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
 		</Button>
 	</div>

@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { untrack } from 'svelte';
 	/**
 	 * Registration has no "role" of its own at the backend — `POST /auth/register`
@@ -90,7 +91,7 @@
 
 	function goToBusinessStep() {
 		if (!isAccountStepValid()) {
-			error = 'Fill in your name, email and password first.';
+			error = t('Fill in your name, email and password first.');
 			return;
 		}
 		error = null;
@@ -103,18 +104,18 @@
 		error = null;
 
 		if (intent === null) {
-			error = 'Choose whether this is a customer or a business account.';
+			error = t('Choose whether this is a customer or a business account.');
 			return;
 		}
 		if (intent === 'business_owner') {
 			if (!isAccountStepValid()) {
 				businessSubTab = 'account';
-				error = 'Fill in your name, email and password first.';
+				error = t('Fill in your name, email and password first.');
 				return;
 			}
 			if (!businessNameEn.trim() || !businessNameAr.trim() || !businessPhone.trim()) {
 				businessSubTab = 'business';
-				error = "Fill in your business's name and phone.";
+				error = t("Fill in your business's name and phone.");
 				return;
 			}
 		}
@@ -153,8 +154,13 @@
 
 	/** @type {{ id: string, label: string, hint: string, icon: import('../ui/Icon.svelte').IconName }[]} */
 	const intentOptions = [
-		{ id: 'customer', label: 'Customer', hint: 'Book and join queues', icon: 'user' },
-		{ id: 'business_owner', label: 'Business', hint: 'List a salon or spa', icon: 'building' }
+		{ id: 'customer', label: m('Customer'), hint: m('Book and join queues'), icon: 'user' },
+		{
+			id: 'business_owner',
+			label: m('Business'),
+			hint: m('List a salon or spa'),
+			icon: 'building'
+		}
 	];
 </script>
 
@@ -164,7 +170,7 @@
 	{/if}
 
 	<fieldset class="flex flex-col gap-2">
-		<legend class="mb-2 text-sm font-medium text-fg-secondary">I'm signing up as a</legend>
+		<legend class="mb-2 text-sm font-medium text-fg-secondary">{t("I'm signing up as a")}</legend>
 		<div class="grid grid-cols-2 gap-2">
 			{#each intentOptions as option (option.id)}
 				<label
@@ -187,38 +193,38 @@
 						name={option.icon}
 						class={`size-5 ${intent === option.id ? 'text-accent' : 'text-fg-subtle'}`}
 					/>
-					<span class="text-sm font-semibold text-fg">{option.label}</span>
-					<span class="text-xs text-fg-muted">{option.hint}</span>
+					<span class="text-sm font-semibold text-fg">{t(option.label)}</span>
+					<span class="text-xs text-fg-muted">{t(option.hint)}</span>
 				</label>
 			{/each}
 		</div>
 	</fieldset>
 
 	{#if intent === 'customer'}
-		<Input label="Full name" required autocomplete="name" bind:value={fullName} />
-		<Input type="email" label="Email" required autocomplete="email" bind:value={email} />
+		<Input label={t('Full name')} required autocomplete="name" bind:value={fullName} />
+		<Input type="email" label={t('Email')} required autocomplete="email" bind:value={email} />
 		<Input
 			type="tel"
-			label="Phone"
+			label={t('Phone')}
 			required
-			hint="A GCC number — needed to book, so the salon can reach you."
+			hint={t('A GCC number — needed to book, so the salon can reach you.')}
 			autocomplete="tel"
 			bind:value={phone}
 		/>
 		<Input
 			type="password"
-			label="Password"
+			label={t('Password')}
 			required
-			hint="At least 12 characters."
+			hint={t('At least 12 characters.')}
 			autocomplete="new-password"
 			bind:value={password}
 		/>
 
-		<Button type="submit" {loading} fullWidth>Create account</Button>
+		<Button type="submit" {loading} fullWidth>{t('Create account')}</Button>
 	{:else if intent === 'business_owner'}
 		<div class="flex flex-col gap-4">
-			<ol class="flex items-center gap-2 text-xs font-medium" aria-label="Sign-up steps">
-				{#each [{ id: 'account', label: 'Your account' }, { id: 'business', label: 'Your business' }] as stepItem, index (stepItem.id)}
+			<ol class="flex items-center gap-2 text-xs font-medium" aria-label={t('Sign-up steps')}>
+				{#each [{ id: 'account', label: t('Your account') }, { id: 'business', label: t('Your business') }] as stepItem, index (stepItem.id)}
 					{#if index > 0}<li class="h-px flex-1 bg-line" aria-hidden="true"></li>{/if}
 					<li>
 						<button
@@ -248,33 +254,38 @@
 			</ol>
 
 			{#if businessSubTab === 'account'}
-				<Input label="Full name" required autocomplete="name" bind:value={fullName} />
-				<Input type="email" label="Email" required autocomplete="email" bind:value={email} />
+				<Input label={t('Full name')} required autocomplete="name" bind:value={fullName} />
+				<Input type="email" label={t('Email')} required autocomplete="email" bind:value={email} />
 				<Input
 					type="tel"
-					label="Phone"
-					hint="Optional — a GCC number."
+					label={t('Phone')}
+					hint={t('Optional — a GCC number.')}
 					autocomplete="tel"
 					bind:value={phone}
 				/>
 				<Input
 					type="password"
-					label="Password"
+					label={t('Password')}
 					required
-					hint="At least 12 characters."
+					hint={t('At least 12 characters.')}
 					autocomplete="new-password"
 					bind:value={password}
 				/>
 				<Button type="button" variant="outline" fullWidth onclick={goToBusinessStep}>
-					Continue to your business
+					{t('Continue to your business')}
 					<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 				</Button>
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2">
-					<Input label="Business name (English)" required bind:value={businessNameEn} />
-					<Input label="Business name (Arabic)" required dir="rtl" bind:value={businessNameAr} />
+					<Input label={t('Business name (English)')} required bind:value={businessNameEn} />
+					<Input
+						label={t('Business name (Arabic)')}
+						required
+						dir="rtl"
+						bind:value={businessNameAr}
+					/>
 				</div>
-				<Input type="tel" label="Business phone" required bind:value={businessPhone} />
+				<Input type="tel" label={t('Business phone')} required bind:value={businessPhone} />
 				<Button
 					type="button"
 					variant="ghost"
@@ -282,13 +293,13 @@
 					onclick={() => (businessSubTab = 'account')}
 				>
 					<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
-					Back to your account
+					{t('Back to your account')}
 				</Button>
 			{/if}
 		</div>
 
-		<Button type="submit" {loading} fullWidth>Create account and business</Button>
+		<Button type="submit" {loading} fullWidth>{t('Create account and business')}</Button>
 	{:else}
-		<p class="text-center text-sm text-fg-muted">Choose the kind of account to continue.</p>
+		<p class="text-center text-sm text-fg-muted">{t('Choose the kind of account to continue.')}</p>
 	{/if}
 </form>

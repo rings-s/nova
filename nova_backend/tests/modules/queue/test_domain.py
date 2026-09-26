@@ -299,3 +299,22 @@ class TestTicketLifecycle:
         ticket = self._ticket()
         ticket.revoke(now=NOW)
         assert ticket.status is TicketStatus.REVOKED
+
+
+def test_a_booking_ticket_lasts_until_the_visit_not_twelve_hours_from_issue():
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.queue.domain import default_ticket_expiry
+
+    now = datetime(2026, 9, 1, 9, tzinfo=UTC)
+    ends = now + timedelta(days=5)
+
+    assert default_ticket_expiry(now=now, ttl_hours=12) == now + timedelta(hours=12)
+    assert default_ticket_expiry(
+        now=now, ttl_hours=12, appointment_ends_at=ends
+    ) == ends + timedelta(hours=12)
+    # A visit sooner than the allowance keeps the allowance.
+    soon = now + timedelta(hours=1)
+    assert default_ticket_expiry(
+        now=now, ttl_hours=12, appointment_ends_at=soon
+    ) == soon + timedelta(hours=12)

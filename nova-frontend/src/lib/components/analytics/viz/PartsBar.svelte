@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * Part-to-whole as one 100% bar with a legend that carries the numbers:
 	 * lengths along one line compare more accurately than a donut's angles,
@@ -37,8 +38,8 @@
 			y: 40,
 			title: part.label,
 			rows: [
-				{ label: 'Value', value: formatValue(part.value, model.unit, { currency }) },
-				{ label: 'Share', value: pct(part.value), strong: true }
+				{ label: t('Value'), value: formatValue(part.value, model.unit, { currency }) },
+				{ label: t('Share'), value: pct(part.value), strong: true }
 			]
 		};
 	});
@@ -52,7 +53,11 @@
 		</p>
 	{/if}
 	<div class="relative" bind:clientWidth={width}>
-		<div class="flex h-4 w-full gap-0.5 overflow-hidden rounded-[4px]" role="img" aria-label={model.parts.map((p) => `${p.label} ${pct(p.value)}`).join(', ')}>
+		<div
+			class="flex h-4 w-full gap-0.5 overflow-hidden rounded-[4px]"
+			role="img"
+			aria-label={model.parts.map((p) => `${p.label} ${pct(p.value)}`).join(', ')}
+		>
 			{#each model.parts as part, i (part.label)}
 				{#if part.value > 0}
 					<div

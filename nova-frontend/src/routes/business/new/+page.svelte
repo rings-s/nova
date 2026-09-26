@@ -1,4 +1,6 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
+	import { pickBilingual } from '$lib/utils/bilingual.js';
 	/**
 	 * Turns the signed-in account into a business owner: creates the business
 	 * (tenant + storefront) with this account as its owner, then opens the
@@ -58,7 +60,9 @@
 			tenantStore.set(tenant.id);
 			businessStore.set(tenant.id, business.id);
 			accessStore.clear();
-			toastStore.success(`${tenant.name_en} is on NOVA. Welcome to your dashboard.`);
+			toastStore.success(
+				t('{name} is on NOVA. Welcome to your dashboard.', { name: pickBilingual(tenant, 'name') })
+			);
 			await goto(resolve('/app'));
 		} catch (err) {
 			error = formatApiError(err);
@@ -68,24 +72,27 @@
 	}
 </script>
 
-<svelte:head><title>List your business — NOVA</title></svelte:head>
+<svelte:head><title>{t('List your business')} — NOVA</title></svelte:head>
 
 <Container size="md" class="py-12 sm:py-16">
 	<div class="mx-auto max-w-xl">
 		<p class="text-xs font-semibold tracking-wider text-accent uppercase">
-			For salons, spas and clinics
+			{t('For salons, spas and clinics')}
 		</p>
-		<h1 class="mt-2 text-display-md font-semibold tracking-tight text-fg">List your business</h1>
+		<h1 class="mt-2 text-display-md font-semibold tracking-tight text-fg">
+			{t('List your business')}
+		</h1>
 		<p class="mt-2 text-fg-muted">
-			Your account becomes the business owner, with the dashboard, bookings, walk-in queue and
-			payments. You can add branches, services and your team next.
+			{t(
+				'Your account becomes the business owner, with the dashboard, bookings, walk-in queue and payments. You can add branches, services and your team next.'
+			)}
 		</p>
 
 		{#if authStore.isStaff}
 			<Alert tone="info" class="mt-6">
-				This account already runs a business.
+				{t('This account already runs a business.')}
 				<a href={resolve('/app')} class="font-semibold text-accent hover:underline">
-					Go to your dashboard
+					{t('Go to your dashboard')}
 				</a>
 			</Alert>
 		{/if}
@@ -96,19 +103,19 @@
 					<Alert tone="error">{error}</Alert>
 				{/if}
 				<div class="grid gap-4 sm:grid-cols-2">
-					<Input label="Business name (English)" required bind:value={nameEn} />
-					<Input label="Business name (Arabic)" required dir="rtl" bind:value={nameAr} />
+					<Input label={t('Business name (English)')} required bind:value={nameEn} />
+					<Input label={t('Business name (Arabic)')} required dir="rtl" bind:value={nameAr} />
 				</div>
 				<Input
 					type="tel"
-					label="Business phone"
+					label={t('Business phone')}
 					required
-					hint="A GCC number customers can reach, e.g. +966 5X XXX XXXX."
+					hint={t('A GCC number customers can reach, e.g. +966 5X XXX XXXX.')}
 					autocomplete="tel"
 					bind:value={phone}
 				/>
 				<Button type="submit" size="lg" fullWidth loading={saving}>
-					Create my business
+					{t('Create my business')}
 					<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 				</Button>
 			</form>

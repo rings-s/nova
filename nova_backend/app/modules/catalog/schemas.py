@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import ClassVar, Literal
 from uuid import UUID
 
 from pydantic import Field, computed_field
@@ -54,6 +55,14 @@ class BusinessPhotoOut(ApiSchema):
     urls: dict[str, str]
 
 
+class UpdatePhotoRequest(ApiSchema):
+    """`kind: "cover"` makes this the cover (the old one joins the gallery);
+    `position` is its place in the gallery, lowest first."""
+
+    kind: Literal["cover", "gallery"] | None = None
+    position: int | None = Field(default=None, ge=0)
+
+
 class SetListingVisibilityRequest(ApiSchema):
     is_listed: bool
 
@@ -73,13 +82,41 @@ class CreateLocationRequest(ApiSchema):
     business_id: UUID
     name_en: str = Field(min_length=1, max_length=255)
     name_ar: str = Field(min_length=1, max_length=255)
-    phone: str
     timezone: str = "Asia/Riyadh"
     #: Used by marketplace search. Optional, but a branch without one cannot be
     #: found by a city filter — only by name or map radius.
     city: str | None = Field(default=None, max_length=120)
     latitude: float | None = None
     longitude: float | None = None
+
+
+class _PartialUpdate(ApiSchema):
+    """A PATCH body: only the fields sent change.
+
+    `null` clears a field that may be empty (`clearable`); for any other it
+    means "leave it", since a name or a price cannot be nothing.
+    """
+
+    clearable: ClassVar[frozenset[str]] = frozenset()
+
+    def changes(self) -> dict[str, object]:
+        return {
+            field: value
+            for field, value in self.model_dump(exclude_unset=True).items()
+            if value is not None or field in self.clearable
+        }
+
+
+class UpdateLocationRequest(_PartialUpdate):
+    """The map pin is `PATCH .../position`; `city: null` clears the city."""
+
+    clearable = frozenset({"city"})
+
+    name_en: str | None = Field(default=None, min_length=1, max_length=255)
+    name_ar: str | None = Field(default=None, min_length=1, max_length=255)
+    city: str | None = Field(default=None, max_length=120)
+    timezone: str | None = None
+    is_active: bool | None = None
 
 
 class LocationOut(ApiSchema):
@@ -89,7 +126,6 @@ class LocationOut(ApiSchema):
     name_en: str
     name_ar: str
     slug: str
-    phone: str
     timezone: str
     city: str | None
     latitude: float | None
@@ -99,16 +135,64 @@ class LocationOut(ApiSchema):
     updated_at: datetime
 
 
+class CategoryOut(ApiSchema):
+    """A service category as a service carries it: enough to label it."""
+
+    id: UUID
+    slug: str
+    name_en: str
+    name_ar: str
+
+
+class CategoryAdminOut(CategoryOut):
+    """A category as the superuser manages it, retired ones included."""
+
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateCategoryRequest(ApiSchema):
+    name_en: str = Field(min_length=1, max_length=120)
+    name_ar: str = Field(min_length=1, max_length=120)
+
+
+class UpdateCategoryRequest(ApiSchema):
+    """Renames a category, or retires or restores it. Omitted fields keep
+    their value. The slug never changes, because shared links filter by it."""
+
+    name_en: str | None = Field(default=None, min_length=1, max_length=120)
+    name_ar: str | None = Field(default=None, min_length=1, max_length=120)
+    is_active: bool | None = None
+
+
 class CreateServiceRequest(ApiSchema):
     location_id: UUID
     name_en: str = Field(min_length=1, max_length=255)
     name_ar: str = Field(min_length=1, max_length=255)
     description_en: str | None = None
     description_ar: str | None = None
-    category: str | None = Field(default=None, max_length=120)
+    #: One of `GET /discovery/categories`. Tenants pick from that list; they
+    #: cannot add to it.
+    category_id: UUID | None = None
     duration_minutes: int = Field(gt=0)
     price: Decimal = Field(ge=0)
     currency: str = Field(default="SAR", min_length=3, max_length=3)
+
+
+class UpdateServiceRequest(_PartialUpdate):
+    """`null` clears the category or a description."""
+
+    clearable = frozenset({"category_id", "description_en", "description_ar"})
+
+    name_en: str | None = Field(default=None, min_length=1, max_length=255)
+    name_ar: str | None = Field(default=None, min_length=1, max_length=255)
+    description_en: str | None = None
+    description_ar: str | None = None
+    category_id: UUID | None = None
+    duration_minutes: int | None = Field(default=None, gt=0)
+    price: Decimal | None = Field(default=None, ge=0)
+    is_active: bool | None = None
 
 
 class ServiceOut(ApiSchema):
@@ -119,7 +203,8 @@ class ServiceOut(ApiSchema):
     name_ar: str
     description_en: str | None
     description_ar: str | None
-    category: str | None
+    category_id: UUID | None
+    category: CategoryOut | None
     duration_minutes: int
     price: Decimal
     currency: str
@@ -134,6 +219,18 @@ class CreateProviderRequest(ApiSchema):
     name_ar: str = Field(min_length=1, max_length=255)
     title_en: str | None = Field(default=None, max_length=255)
     title_ar: str | None = Field(default=None, max_length=255)
+
+
+class UpdateProviderRequest(_PartialUpdate):
+    """`null` clears a title."""
+
+    clearable = frozenset({"title_en", "title_ar"})
+
+    name_en: str | None = Field(default=None, min_length=1, max_length=255)
+    name_ar: str | None = Field(default=None, min_length=1, max_length=255)
+    title_en: str | None = Field(default=None, max_length=255)
+    title_ar: str | None = Field(default=None, max_length=255)
+    is_active: bool | None = None
 
 
 class ProviderOut(ApiSchema):

@@ -50,7 +50,6 @@ async def test_repository_add_rejects_mismatched_tenant(
         name_en="Rogue Branch",
         name_ar="فرع مخالف",
         slug="rogue-branch",
-        phone="+966500000009",
         timezone="Asia/Riyadh",
     )
 

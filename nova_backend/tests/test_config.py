@@ -99,3 +99,26 @@ class TestClientIpHeader:
         """Its first entry is whatever the client sent: the bypass this closes."""
         with pytest.raises(ValidationError, match="cannot be X-Forwarded-For"):
             build(client_ip_header=header)
+
+
+class TestMoyasarKey:
+    """A key of the wrong kind fails every payment at its first request, so
+    the process refuses to start on one instead."""
+
+    def test_the_publishable_key_is_refused(self):
+        with pytest.raises(ValidationError, match="secret key"):
+            build(env="local", moyasar_api_key="pk_test_abc")
+
+    def test_a_test_key_is_refused_in_production(self):
+        with pytest.raises(ValidationError, match="test key in production"):
+            build(moyasar_api_key="sk_test_abc")
+
+    @pytest.mark.parametrize(("env", "key"), [("local", "sk_test_a"), ("staging", "sk_test_a")])
+    def test_a_test_key_is_fine_before_production(self, env, key):
+        assert build(env=env, moyasar_api_key=key).moyasar_api_key == key
+
+    def test_a_live_key_is_fine_in_production(self):
+        assert build(moyasar_api_key="sk_live_a").moyasar_api_key == "sk_live_a"
+
+    def test_no_key_at_all_is_fine(self):
+        assert build(moyasar_api_key=None).moyasar_api_key is None

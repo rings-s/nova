@@ -1,4 +1,6 @@
 <script>
+	import { queueStatusLabel } from '$lib/i18n/labels.js';
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * The live walk-in line for one location. There is deliberately no manual
 	 * "check in" endpoint (queue/router.py) — CALLED only becomes CHECKED_IN by
@@ -59,17 +61,6 @@
 		completed: 'success',
 		missed: 'warning',
 		cancelled: 'neutral'
-	};
-
-	/** @type {Record<string, string>} */
-	const STATUS_LABEL = {
-		waiting: 'Waiting',
-		called: 'Called',
-		checked_in: 'Checked in',
-		in_service: 'In service',
-		completed: 'Completed',
-		missed: 'Missed',
-		cancelled: 'Cancelled'
 	};
 
 	let locations = $state(/** @type {import('$lib/api/catalog.js').Location[]} */ ([]));
@@ -138,7 +129,7 @@
 			const queue = await createQueue(tenantId, { locationId: selectedLocationId });
 			queues = [...queues, queue];
 			selectedQueueId = queue.id;
-			toastStore.success('Queue created.');
+			toastStore.success(t('Queue created.'));
 		} catch (err) {
 			toastStore.fromError(err);
 		} finally {
@@ -155,7 +146,7 @@
 		try {
 			const updated = await setQueueOpen(tenantId, selectedQueue.id, !selectedQueue.is_open);
 			queues = queues.map((q) => (q.id === updated.id ? updated : q));
-			toastStore.success(updated.is_open ? 'Queue opened.' : 'Queue closed.');
+			toastStore.success(updated.is_open ? t('Queue opened.') : t('Queue closed.'));
 		} catch (err) {
 			toastStore.fromError(err);
 		} finally {
@@ -349,7 +340,7 @@
 				// later, or the customer can be checked in by other means.
 			}
 			addModalOpen = false;
-			toastStore.success(`${selectedCustomer.full_name} added to the queue.`);
+			toastStore.success(t('{name} added to the queue.', { name: selectedCustomer.full_name }));
 		} catch (err) {
 			addError = formatApiError(err);
 		} finally {
@@ -358,33 +349,37 @@
 	}
 </script>
 
-<svelte:head><title>Queue — NOVA</title></svelte:head>
+<svelte:head><title>{t('Queue')} — NOVA</title></svelte:head>
 
-<PageHeader eyebrow="Operate" title="Walk-in queue" subtitle="Today's walk-in line." />
+<PageHeader
+	eyebrow={t('Operate')}
+	title={t('Walk-in queue')}
+	subtitle={t("Today's walk-in line.")}
+/>
 
 {#if !businessId}
-	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
+	<Alert tone="info">{t('Set up your storefront in Catalog first.')}</Alert>
 {:else if loadingSetup}
 	<div class="flex justify-center py-12"><Spinner /></div>
 {:else if setupErrorMessage}
 	<Alert tone="error">{setupErrorMessage}</Alert>
 {:else if locations.length === 0}
-	<EmptyState title="Add a location first" description="A queue belongs to one branch." />
+	<EmptyState title={t('Add a location first')} description={t('A queue belongs to one branch.')} />
 {:else}
 	<div class="mb-6 flex flex-wrap items-end gap-3">
 		<div class="w-full sm:w-56">
 			<Select
-				label="Location"
+				label={t('Location')}
 				bind:value={selectedLocationId}
-				options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name', 'en') }))}
+				options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name') }))}
 			/>
 		</div>
 		{#if queues.length > 1}
 			<div class="w-full sm:w-56">
 				<Select
-					label="Queue"
+					label={t('Queue')}
 					bind:value={selectedQueueId}
-					options={queues.map((q) => ({ value: q.id, label: pickBilingual(q, 'name', 'en') }))}
+					options={queues.map((q) => ({ value: q.id, label: pickBilingual(q, 'name') }))}
 				/>
 			</div>
 		{/if}
@@ -394,14 +389,14 @@
 		<div class="flex justify-center py-8"><Spinner /></div>
 	{:else if queues.length === 0}
 		<EmptyState
-			title="No queue at this location yet"
-			description="Create one to start taking walk-ins and issuing tickets."
+			title={t('No queue at this location yet')}
+			description={t('Create one to start taking walk-ins and issuing tickets.')}
 		>
 			{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
 			{#snippet action()}
 				<Button loading={creatingQueue} onclick={handleCreateQueue}>
 					<Icon name="plus" class="size-4" />
-					Create queue
+					{t('Create queue')}
 				</Button>
 			{/snippet}
 		</EmptyState>
@@ -422,19 +417,19 @@
 					</span>
 					<div>
 						<p class="font-semibold text-fg">
-							{selectedQueue ? pickBilingual(selectedQueue, 'name', 'en') : 'Queue'}
+							{selectedQueue ? pickBilingual(selectedQueue, 'name') : t('Queue')}
 						</p>
 						<p class="text-xs text-fg-muted">
 							{selectedQueue?.is_open
-								? 'Open — accepting walk-ins'
-								: 'Closed — not accepting walk-ins'}
+								? t('Open — accepting walk-ins')
+								: t('Closed — not accepting walk-ins')}
 						</p>
 					</div>
 				</div>
 				<div class="flex flex-wrap gap-2">
 					{#if selectedQueue}
 						<Button size="sm" variant="ghost" loading={togglingOpen} onclick={toggleOpen}>
-							{selectedQueue.is_open ? 'Close queue' : 'Open queue'}
+							{selectedQueue.is_open ? t('Close queue') : t('Open queue')}
 						</Button>
 					{/if}
 					<Button
@@ -444,7 +439,7 @@
 						onclick={openAddModal}
 					>
 						<Icon name="plus" class="size-4" />
-						Add walk-in
+						{t('Add walk-in')}
 					</Button>
 					<Button
 						size="sm"
@@ -452,7 +447,7 @@
 						disabled={!selectedQueue?.is_open}
 						onclick={handleCallNext}
 					>
-						Call next
+						{t('Call next')}
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
 				</div>
@@ -460,7 +455,7 @@
 			<dl
 				class="grid grid-cols-3 divide-x divide-line border-t border-line bg-surface-sunken rtl:divide-x-reverse"
 			>
-				{#each [{ label: 'Waiting', value: counts.waiting }, { label: 'Called', value: counts.called }, { label: 'In service', value: counts.serving }] as stat (stat.label)}
+				{#each [{ label: t('Waiting'), value: counts.waiting }, { label: t('Called'), value: counts.called }, { label: t('In service'), value: counts.serving }] as stat (stat.label)}
 					<div class="px-5 py-3">
 						<dt class="text-xs text-fg-muted">{stat.label}</dt>
 						<dd class="text-xl font-semibold text-fg tabular-nums">
@@ -477,8 +472,8 @@
 			<Alert tone="error">{entriesErrorMessage}</Alert>
 		{:else if entries.length === 0}
 			<EmptyState
-				title="The line is empty"
-				description="Walk-ins you add, or who join online, appear here."
+				title={t('The line is empty')}
+				description={t('Walk-ins you add, or who join online, appear here.')}
 			>
 				{#snippet icon()}<Icon name="users" class="size-6" />{/snippet}
 			</EmptyState>
@@ -500,19 +495,19 @@
 									<div class="flex flex-wrap items-center gap-2">
 										<span class="text-sm font-semibold text-fg">
 											{entry.place_in_line
-												? `#${entry.place_in_line} in line`
-												: `Position ${entry.position}`}
+												? t('#{place} in line', { place: entry.place_in_line })
+												: t('Position {position}', { position: entry.position })}
 										</span>
 										<Badge tone={STATUS_TONE[entry.status] ?? 'neutral'} size="sm" dot>
-											{STATUS_LABEL[entry.status] ?? entry.status}
+											{queueStatusLabel(entry.status)}
 										</Badge>
 									</div>
 									<p class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-muted">
 										{#if entry.joined_at}
-											<span>Joined {formatRelative(entry.joined_at, 'en')}</span>
+											<span>{t('Joined {when}', { when: formatRelative(entry.joined_at) })}</span>
 										{/if}
 										{#if entry.party_size > 1}
-											<span>Party of {entry.party_size}</span>
+											<span>{t('Party of {count}', { count: entry.party_size })}</span>
 										{/if}
 									</p>
 								</div>
@@ -525,10 +520,10 @@
 											loading={actingId === entry.id}
 											onclick={() => handleCheckIn(entry)}
 										>
-											Check in
+											{t('Check in')}
 										</Button>
 									{:else}
-										<span class="text-xs text-fg-subtle">Scan their ticket to check in</span>
+										<span class="text-xs text-fg-subtle">{t('Scan their ticket to check in')}</span>
 									{/if}
 									<Button
 										size="sm"
@@ -536,7 +531,7 @@
 										loading={actingId === entry.id}
 										onclick={() => runEntryAction(entry.id, () => markMissed(tenantId, entry.id))}
 									>
-										Missed
+										{t('Missed')}
 									</Button>
 								{/if}
 								{#if entry.status === 'checked_in'}
@@ -546,7 +541,7 @@
 										onclick={() =>
 											runEntryAction(entry.id, () => startQueueService(tenantId, entry.id))}
 									>
-										Start service
+										{t('Start service')}
 									</Button>
 								{/if}
 								{#if entry.status === 'in_service'}
@@ -556,7 +551,7 @@
 										onclick={() =>
 											runEntryAction(entry.id, () => completeQueueEntry(tenantId, entry.id))}
 									>
-										Complete
+										{t('Complete')}
 									</Button>
 								{/if}
 								{#if entry.status === 'missed'}
@@ -566,7 +561,7 @@
 										loading={actingId === entry.id}
 										onclick={() => runEntryAction(entry.id, () => requeue(tenantId, entry.id))}
 									>
-										Requeue
+										{t('Requeue')}
 									</Button>
 								{/if}
 								{#if entry.status === 'waiting' || entry.status === 'called'}
@@ -577,7 +572,7 @@
 										onclick={() =>
 											runEntryAction(entry.id, () => cancelQueueEntry(tenantId, entry.id))}
 									>
-										Remove
+										{t('Remove')}
 									</Button>
 								{/if}
 							</div>
@@ -589,7 +584,7 @@
 	{/if}
 {/if}
 
-<Modal bind:open={addModalOpen} title="Add walk-in">
+<Modal bind:open={addModalOpen} title={t('Add walk-in')}>
 	{#if addError}
 		<Alert tone="error" class="mb-4">{addError}</Alert>
 	{/if}
@@ -598,12 +593,12 @@
 			<div class="flex gap-2">
 				<div class="flex-1">
 					<Input
-						placeholder="Search by name or phone"
+						placeholder={t('Search by name or phone')}
 						bind:value={customerQuery}
 						onkeydown={handleCustomerQueryKeydown}
 					/>
 				</div>
-				<Button loading={searchingCustomers} onclick={searchCustomers}>Search</Button>
+				<Button loading={searchingCustomers} onclick={searchCustomers}>{t('Search')}</Button>
 			</div>
 			{#if customerResults.length > 0}
 				<div class="flex flex-col gap-1">
@@ -624,12 +619,12 @@
 				</div>
 			{/if}
 			<div class="mt-2 border-t border-line pt-4">
-				<p class="mb-3 text-sm font-semibold text-fg">Or add a new customer</p>
+				<p class="mb-3 text-sm font-semibold text-fg">{t('Or add a new customer')}</p>
 				<form class="flex flex-col gap-3" onsubmit={handleCreateCustomer}>
-					<Input label="Full name" required bind:value={newCustomerForm.fullName} />
-					<Input type="tel" label="Phone" required bind:value={newCustomerForm.phone} />
+					<Input label={t('Full name')} required bind:value={newCustomerForm.fullName} />
+					<Input type="tel" label={t('Phone')} required bind:value={newCustomerForm.phone} />
 					<Button type="submit" variant="outline" loading={creatingCustomer}>
-						Add and continue
+						{t('Add and continue')}
 					</Button>
 				</form>
 			</div>
@@ -637,32 +632,38 @@
 	{:else if selectedCustomer}
 		<form class="flex flex-col gap-4" onsubmit={handleJoin}>
 			<p class="text-sm text-fg-secondary">
-				Adding <strong>{selectedCustomer.full_name}</strong> to the line.
+				{t('Adding {name} to the line.', { name: selectedCustomer.full_name })}
 				<button
 					type="button"
 					class="text-accent hover:underline"
 					onclick={() => (addStep = 'customer')}
 				>
-					Change
+					{t('Change')}
 				</button>
 			</p>
 			<Select
-				label="Service"
+				label={t('Service')}
 				required
 				bind:value={joinForm.serviceId}
-				options={services.map((s) => ({ value: s.id, label: pickBilingual(s, 'name', 'en') }))}
+				options={services.map((s) => ({ value: s.id, label: pickBilingual(s, 'name') }))}
 			/>
 			{#if providers.length > 0}
 				<Select
-					label="Preferred provider"
-					hint="Optional — leave unset for the next available."
+					label={t('Preferred provider')}
+					hint={t('Optional — leave unset for the next available.')}
 					bind:value={joinForm.providerId}
-					options={providers.map((p) => ({ value: p.id, label: pickBilingual(p, 'name', 'en') }))}
+					options={providers.map((p) => ({ value: p.id, label: pickBilingual(p, 'name') }))}
 				/>
 			{/if}
-			<Input type="number" label="Party size" min="1" max="20" bind:value={joinForm.partySize} />
+			<Input
+				type="number"
+				label={t('Party size')}
+				min="1"
+				max="20"
+				bind:value={joinForm.partySize}
+			/>
 			<Button type="submit" loading={joining} fullWidth disabled={!joinForm.serviceId}>
-				Add to queue
+				{t('Add to queue')}
 			</Button>
 		</form>
 	{/if}

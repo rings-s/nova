@@ -9,9 +9,11 @@ import pytest
 
 from app.core.exceptions import ValidationDomainError
 from app.modules.identity.domain import (
+    ConsentSource,
     MembershipRole,
     StaffPermission,
     generate_slug,
+    may_grant_consent,
     may_manage_role,
     require_bilingual_text,
     role_allows,
@@ -141,3 +143,16 @@ class TestRoleAllows:
         for permission in StaffPermission:
             assert not role_allows(None, permission)
             assert role_allows(None, permission, actor_is_service=True)
+
+
+class TestWhoMayTurnConsentOn:
+    """PDPL: marketing consent is the customer's to give; WhatsApp consent,
+    which the confirmations need, reception may record for a walk-in."""
+
+    def test_only_the_customer_opts_in_to_marketing(self) -> None:
+        assert may_grant_consent(ConsentSource.CUSTOMER, marketing=True)
+        assert not may_grant_consent(ConsentSource.STAFF, marketing=True)
+
+    def test_staff_may_record_whatsapp_consent(self) -> None:
+        assert may_grant_consent(ConsentSource.STAFF, marketing=False)
+        assert may_grant_consent(ConsentSource.CUSTOMER, marketing=False)

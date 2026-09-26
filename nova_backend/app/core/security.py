@@ -45,7 +45,8 @@ from enum import StrEnum
 from hashlib import sha256
 from uuid import UUID
 
-from fastapi import Depends, Path, Request
+from fastapi import Depends, Path, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -402,8 +403,21 @@ async def _assert_token_is_current(
         raise AuthenticationError("Token has been revoked.")
 
 
+#: Declares bearer auth in the OpenAPI document, so `/docs` has an Authorize
+#: button and marks every route that depends on `get_principal`. It decides
+#: nothing: with `auto_error=False` it never refuses a request, and
+#: `get_principal` reads and verifies the header itself.
+_bearer = HTTPBearer(
+    auto_error=False,
+    bearerFormat="JWT",
+    description="The `access_token` from `POST /api/v1/auth/login` or `/auth/refresh`.",
+)
+
+
 async def get_principal(
-    request: Request, token_state: TokenStateLookup = Depends(get_token_state_lookup)
+    request: Request,
+    token_state: TokenStateLookup = Depends(get_token_state_lookup),
+    _documented: HTTPAuthorizationCredentials | None = Security(_bearer),
 ) -> Principal:
     """Authenticates the request. Fails closed.
 

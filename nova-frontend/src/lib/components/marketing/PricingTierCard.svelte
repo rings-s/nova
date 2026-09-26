@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { formatMoney } from '$lib/utils/money.js';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -17,7 +18,7 @@
 	 *   description: string,
 	 *   features: string[],
 	 *   featured?: boolean,
-	 *   ctaLabel?: string,
+	 *   ctaLabel?: string|null,
 	 *   ctaHref: string
 	 * }}
 	 */
@@ -28,7 +29,7 @@
 		description,
 		features,
 		featured = false,
-		ctaLabel = 'Get started',
+		ctaLabel = null,
 		ctaHref
 	} = $props();
 </script>
@@ -44,7 +45,7 @@
 	{#if featured}
 		<GradientBlob variant="corner" />
 		<div class="absolute end-4 top-4">
-			<Badge tone="accent">Most popular</Badge>
+			<Badge tone="accent">{t('Most popular')}</Badge>
 		</div>
 	{/if}
 
@@ -53,9 +54,9 @@
 
 	<p class="mt-6 flex items-baseline gap-1">
 		<span class="text-display-md font-semibold tracking-tight text-fg">
-			{formatMoney(priceMonthly, currency, 'en')}
+			{formatMoney(priceMonthly, currency)}
 		</span>
-		<span class="text-sm text-fg-muted">/month</span>
+		<span class="text-sm text-fg-muted">{t('/month')}</span>
 	</p>
 
 	<ul class="mt-6 flex-1 space-y-3">
@@ -68,6 +69,6 @@
 	</ul>
 
 	<Button href={ctaHref} variant={featured ? 'primary' : 'outline'} class="mt-8" fullWidth>
-		{ctaLabel}
+		{ctaLabel ?? t('Get started')}
 	</Button>
 </div>

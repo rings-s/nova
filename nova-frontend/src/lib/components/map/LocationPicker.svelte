@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	// Leaflet's own stylesheet. Safe to import here: it is CSS, not the library,
 	// and the library itself is only ever loaded in the browser (see onMount).
 	import 'leaflet/dist/leaflet.css';
@@ -68,7 +69,7 @@
 		latitude != null && longitude != null ? formatCoordinates(latitude, longitude) : ''
 	);
 	let parsed = $derived(parseCoordinates(text));
-	let problem = $derived(parsed.status === 'invalid' ? parsed.message : null);
+	let problem = $derived(parsed.status === 'invalid' ? t(parsed.message) : null);
 
 	$effect(() => {
 		onvalidity?.(problem !== null);
@@ -160,7 +161,7 @@
 		// The owner took over, or cancelled, while this was on its way.
 		if (!detection) return;
 		fixed = true;
-		const outcome = explainFix(fix);
+		const outcome = explainFix(fix, t);
 		notice = { tone: outcome.tone, text: outcome.text };
 		if (outcome.pin) setPin(fix.latitude, fix.longitude);
 
@@ -193,7 +194,7 @@
 		finding = true;
 		notice = {
 			tone: 'info',
-			text: 'Finding your location. On a computer this can take up to half a minute.'
+			text: t('Finding your location. On a computer this can take up to half a minute.')
 		};
 		try {
 			await locate({ signal: controller.signal, onfix: applyFix });
@@ -203,10 +204,14 @@
 			const ua = navigator.userAgent;
 			notice = {
 				tone: 'error',
-				text: explainLocateError(failure, {
-					origin: window.location.origin,
-					linux: /linux/i.test(ua) && !/android/i.test(ua)
-				}),
+				text: explainLocateError(
+					failure,
+					{
+						origin: window.location.origin,
+						linux: /linux/i.test(ua) && !/android/i.test(ua)
+					},
+					t
+				),
 				// What the browser itself said, for the owner and for whoever they ask.
 				detail: failure.detail || undefined
 			};
@@ -301,7 +306,7 @@
 				icon: pinIcon(L),
 				draggable: true,
 				// Leaflet sets this as a property, not markup.
-				title: 'Branch position. Drag to move it.'
+				title: t('Branch position. Drag to move it.')
 			}).addTo(map);
 			dropped.on('dragend', () => {
 				const moved = dropped.getLatLng().wrap();
@@ -352,8 +357,8 @@
 
 <div class={['flex flex-col gap-2', className]}>
 	<div class="flex items-baseline justify-between gap-2">
-		<span class="text-sm font-medium text-fg-secondary">Map position</span>
-		<span class="text-xs text-fg-muted">Optional</span>
+		<span class="text-sm font-medium text-fg-secondary">{t('Map position')}</span>
+		<span class="text-xs text-fg-muted">{t('Optional')}</span>
 	</div>
 
 	<!-- `isolate` keeps Leaflet's z-indexes (up to 1000) from escaping this box. -->
@@ -363,13 +368,16 @@
 		<div
 			bind:this={container}
 			class="absolute inset-0"
+			dir="ltr"
 			role="region"
-			aria-label="Map for placing the branch pin. Click it to place the pin, or type coordinates below."
+			aria-label={t(
+				'Map for placing the branch pin. Click it to place the pin, or type coordinates below.'
+			)}
 		></div>
 		{#if failed}
 			<div class="absolute inset-0 flex items-center justify-center p-6 text-center">
 				<p class="text-sm text-fg-muted">
-					The map could not be loaded. You can still type coordinates below.
+					{t('The map could not be loaded. You can still type coordinates below.')}
 				</p>
 			</div>
 		{/if}
@@ -378,14 +386,14 @@
 	<div class="flex flex-wrap items-center gap-2">
 		{#if canLocate}
 			<Button variant="outline" size="sm" onclick={useMyLocation} disabled={finding}>
-				{finding ? 'Finding your location…' : 'Use my location'}
+				{finding ? t('Finding your location…') : t('Use my location')}
 			</Button>
 			{#if finding}
-				<Button variant="ghost" size="sm" onclick={cancelDetecting}>Cancel</Button>
+				<Button variant="ghost" size="sm" onclick={cancelDetecting}>{t('Cancel')}</Button>
 			{/if}
 		{/if}
 		{#if latitude != null && longitude != null}
-			<Button variant="ghost" size="sm" onclick={removePin}>Remove pin</Button>
+			<Button variant="ghost" size="sm" onclick={removePin}>{t('Remove pin')}</Button>
 		{/if}
 	</div>
 	{#if notice}
@@ -394,20 +402,25 @@
 			class={['rounded-control border px-3 py-2 text-sm', noticeTone[notice.tone]]}
 		>
 			<p>
-				{notice.text}{#if finding && fixed}<span class="ms-1">Refining…</span>{/if}
+				{notice.text}{#if finding && fixed}<span class="ms-1">{t('Refining…')}</span>{/if}
 			</p>
 			{#if notice.detail}
-				<p class="mt-1 text-xs opacity-75">Your browser said: {notice.detail}</p>
+				<p class="mt-1 text-xs opacity-75">
+					{t('Your browser said: {detail}', { detail: notice.detail })}
+				</p>
 			{/if}
 		</div>
 	{/if}
 
 	<Input
-		label="Coordinates"
+		label={t('Coordinates')}
 		placeholder="24.7136, 46.6753"
+		dir="ltr"
 		value={text}
 		oninput={handleInput}
 		error={problem}
-		hint="Click the map, drag the pin, or paste coordinates. A branch without a pin does not appear on the map when customers browse."
+		hint={t(
+			'Click the map, drag the pin, or paste coordinates. A branch without a pin does not appear on the map when customers browse.'
+		)}
 	/>
 </div>

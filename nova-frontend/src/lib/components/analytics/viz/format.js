@@ -1,3 +1,4 @@
+import { t, i18n, intlLocale } from '$lib/i18n/index.svelte.js';
 /**
  * Number and label formatting shared by the analytics chart kit. Values keep
  * their unit end to end (`chartData.js::Unit`), so a tooltip, an axis tick
@@ -7,7 +8,7 @@
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** @param {'en'|'ar'} locale */
-const tag = (locale) => (locale === 'ar' ? 'ar-SA' : 'en-US');
+const tag = (locale) => intlLocale(locale);
 
 /**
  * A value in full, for tooltips, direct labels and tables.
@@ -15,7 +16,7 @@ const tag = (locale) => (locale === 'ar' ? 'ar-SA' : 'en-US');
  * @param {import('../../../utils/chartData.js').Unit} unit
  * @param {{ currency?: string, locale?: 'en'|'ar' }} [options]
  */
-export function formatValue(value, unit, { currency = 'SAR', locale = 'en' } = {}) {
+export function formatValue(value, unit, { currency = 'SAR', locale = i18n.locale } = {}) {
 	if (value === null || value === undefined || Number.isNaN(value)) return '—';
 	switch (unit) {
 		case 'money':
@@ -27,7 +28,9 @@ export function formatValue(value, unit, { currency = 'SAR', locale = 'en' } = {
 		case 'percent':
 			return `${new Intl.NumberFormat(tag(locale), { maximumFractionDigits: 1 }).format(value)}%`;
 		case 'minutes':
-			return `${new Intl.NumberFormat(tag(locale), { maximumFractionDigits: 1 }).format(value)} min`;
+			return t('{minutes} min', {
+				minutes: new Intl.NumberFormat(tag(locale), { maximumFractionDigits: 1 }).format(value)
+			});
 		default:
 			return new Intl.NumberFormat(tag(locale), { maximumFractionDigits: 1 }).format(value);
 	}
@@ -40,7 +43,7 @@ export function formatValue(value, unit, { currency = 'SAR', locale = 'en' } = {
  * @param {import('../../../utils/chartData.js').Unit} unit
  * @param {'en'|'ar'} [locale]
  */
-export function formatTick(value, unit, locale = 'en') {
+export function formatTick(value, unit, locale = i18n.locale) {
 	const number = new Intl.NumberFormat(tag(locale), {
 		notation: 'compact',
 		maximumFractionDigits: 1
@@ -53,7 +56,7 @@ export function formatTick(value, unit, locale = 'en') {
  * @param {string} category
  * @param {{ locale?: 'en'|'ar', long?: boolean }} [options]
  */
-export function formatCategory(category, { locale = 'en', long = false } = {}) {
+export function formatCategory(category, { locale = i18n.locale, long = false } = {}) {
 	if (!ISO_DATE_RE.test(category)) return category;
 	const [y, m, d] = category.split('-').map(Number);
 	return new Intl.DateTimeFormat(tag(locale), {
@@ -62,6 +65,21 @@ export function formatCategory(category, { locale = 'en', long = false } = {}) {
 		...(long ? { weekday: 'short', year: 'numeric' } : {}),
 		timeZone: 'UTC'
 	}).format(Date.UTC(y, m - 1, d));
+}
+
+/**
+ * A month (for cohorts, which the backend names by their first day).
+ * @param {string} category
+ * @param {'en'|'ar'} [locale]
+ */
+export function formatMonth(category, locale = i18n.locale) {
+	if (!ISO_DATE_RE.test(category)) return category;
+	const [y, m] = category.split('-').map(Number);
+	return new Intl.DateTimeFormat(tag(locale), {
+		month: 'short',
+		year: 'numeric',
+		timeZone: 'UTC'
+	}).format(Date.UTC(y, m - 1, 1));
 }
 
 /**

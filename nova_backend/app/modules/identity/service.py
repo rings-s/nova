@@ -19,10 +19,12 @@ from app.core.security import AuthorizationError, Principal, PrincipalKind
 from app.core.validators import validate_email
 from app.db.session import bypass_tenant_scope, set_tenant_scope
 from app.modules.identity.domain import (
+    ConsentSource,
     MembershipRole,
     StaffPermission,
     generate_slug,
     manageable_roles,
+    may_grant_consent,
     may_manage_role,
     permissions_for,
     require_bilingual_text,
@@ -39,6 +41,7 @@ from app.modules.identity.exceptions import (
     InsufficientRoleError,
     InvalidInviteError,
     LastOwnerError,
+    MarketingConsentByCustomerOnlyError,
     MembershipNotFoundError,
     PhoneVerificationRequiredError,
     TenantNotFoundError,
@@ -189,7 +192,12 @@ class CustomerService:
         whatsapp_consent: bool = False,
         notes: str | None = None,
         user_id: UUID | None = None,
+        consent_source: ConsentSource = ConsentSource.STAFF,
+        consent_by: UUID | None = None,
     ) -> Customer:
+        """A new customer record. Consent given here is recorded like any later
+        change, and staff cannot open a record already opted in to marketing
+        (`may_grant_consent`)."""
         validate_gcc_phone(phone, self.allowed_phone_country_codes)
         if email is not None:
             email = validate_email(email)
@@ -204,9 +212,15 @@ class CustomerService:
             phone=phone,
             email=email,
             preferred_language=preferred_language or self.default_locale,
+            notes=notes,
+        )
+        self._apply_consent(
+            customer,
             marketing_consent=marketing_consent,
             whatsapp_consent=whatsapp_consent,
-            notes=notes,
+            source=consent_source,
+            by=consent_by,
+            now=datetime.now(UTC),
         )
         self.repository.add(customer)
         await self.repository.session.flush()
@@ -238,17 +252,79 @@ class CustomerService:
         self,
         customer_id: UUID,
         *,
+        source: ConsentSource,
+        by: UUID | None,
+        marketing_consent: bool | None = None,
+        whatsapp_consent: bool | None = None,
+        now: datetime | None = None,
+    ) -> Customer:
+        """PDPL: consent must be revocable as easily as it was given.
+
+        Every flag that actually changes records who changed it, in what
+        capacity, and when. Re-sending a value that is already set changes
+        nothing — including its provenance, so a staff form that saves both
+        flags does not overwrite a customer's own opt-in with "staff".
+        """
+        customer = await self.get(customer_id)
+        self._apply_consent(
+            customer,
+            marketing_consent=marketing_consent,
+            whatsapp_consent=whatsapp_consent,
+            source=source,
+            by=by,
+            now=now or datetime.now(UTC),
+        )
+        await self.repository.session.flush()
+        return customer
+
+    async def update_own_consent(
+        self,
+        user_id: UUID,
+        *,
         marketing_consent: bool | None = None,
         whatsapp_consent: bool | None = None,
     ) -> Customer:
-        """PDPL: consent must be revocable as easily as it was given."""
-        customer = await self.get(customer_id)
-        if marketing_consent is not None:
+        """A signed-in customer changing their own consent at this salon.
+
+        The only way marketing consent is ever turned on. Found, never
+        provisioned (`find_for_user`): someone with no record here has nothing
+        to consent about.
+        """
+        customer = await self.find_for_user(user_id)
+        if customer is None:
+            raise CustomerNotFoundError("me")
+        return await self.update_consent(
+            customer.id,
+            source=ConsentSource.CUSTOMER,
+            by=user_id,
+            marketing_consent=marketing_consent,
+            whatsapp_consent=whatsapp_consent,
+        )
+
+    @staticmethod
+    def _apply_consent(
+        customer: Customer,
+        *,
+        marketing_consent: bool | None,
+        whatsapp_consent: bool | None,
+        source: ConsentSource,
+        by: UUID | None,
+        now: datetime,
+    ) -> None:
+        # Checked before either flag is written, so a refused request changes nothing.
+        granting_marketing = bool(marketing_consent) and not customer.marketing_consent
+        if granting_marketing and not may_grant_consent(source, marketing=True):
+            raise MarketingConsentByCustomerOnlyError()
+        if marketing_consent is not None and marketing_consent != bool(customer.marketing_consent):
             customer.marketing_consent = marketing_consent
-        if whatsapp_consent is not None:
+            customer.marketing_consent_source = source.value
+            customer.marketing_consent_by = by
+            customer.marketing_consent_at = now
+        if whatsapp_consent is not None and whatsapp_consent != bool(customer.whatsapp_consent):
             customer.whatsapp_consent = whatsapp_consent
-        await self.repository.session.flush()
-        return customer
+            customer.whatsapp_consent_source = source.value
+            customer.whatsapp_consent_by = by
+            customer.whatsapp_consent_at = now
 
     async def resolve_for_booking(self, reference_id: UUID, *, self_service: bool) -> Customer:
         """Turns the authorization decision into an actual customer record.

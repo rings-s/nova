@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	/**
 	 * The public landing page. It speaks to both audiences NOVA serves — salons
 	 * and spas that run their day on it, and customers who book through the
@@ -24,34 +25,36 @@
 	const features = [
 		{
 			icon: 'calendar',
-			title: 'Bookings that never collide',
-			body: 'Availability is calculated per provider, service and branch, and a slot is held the moment checkout starts.',
+			title: m('Bookings that never collide'),
+			body: m(
+				'Availability is calculated per provider, service and branch, and a slot is held the moment checkout starts.'
+			),
 			span: 2
 		},
 		{
 			icon: 'users',
-			title: 'One line for walk-ins',
-			body: 'Tickets, live positions and one-click call-next, side by side with appointments.'
+			title: m('One line for walk-ins'),
+			body: m('Tickets, live positions and one-click call-next, side by side with appointments.')
 		},
 		{
 			icon: 'chat-bubble',
-			title: 'WhatsApp, built in',
-			body: 'Confirmations, reminders and receipts arrive where customers already are.'
+			title: m('WhatsApp, built in'),
+			body: m('Confirmations, reminders and receipts arrive where customers already are.')
 		},
 		{
 			icon: 'credit-card',
-			title: 'Deposits that stop no-shows',
-			body: 'Take a Mada or Apple Pay deposit through Moyasar before a booking is confirmed.'
+			title: m('Deposits that stop no-shows'),
+			body: m('Take a Mada or Apple Pay deposit through Moyasar before a booking is confirmed.')
 		},
 		{
 			icon: 'globe',
-			title: 'Arabic and English',
-			body: 'Every service, branch and message is bilingual from the first record.'
+			title: m('Arabic and English'),
+			body: m('Every service, branch and message is bilingual from the first record.')
 		},
 		{
 			icon: 'chart-bar',
-			title: 'Numbers you can act on',
-			body: 'Revenue, utilization, retention and busiest hours — per branch, per provider.',
+			title: m('Numbers you can act on'),
+			body: m('Revenue, utilization, retention and busiest hours — per branch, per provider.'),
 			span: 2
 		}
 	];
@@ -59,16 +62,20 @@
 	/** @type {{ title: string, body: string }[]} */
 	const steps = [
 		{
-			title: 'Set up your storefront',
-			body: 'Add your branches, bilingual service menu and team. It takes minutes, not a project.'
+			title: m('Set up your storefront'),
+			body: m(
+				'Add your branches, bilingual service menu and team. It takes minutes, not a project.'
+			)
 		},
 		{
-			title: 'Open your calendar and queue',
-			body: 'Customers book held slots online or join the walk-in line from their phone.'
+			title: m('Open your calendar and queue'),
+			body: m('Customers book held slots online or join the walk-in line from their phone.')
 		},
 		{
-			title: 'Run the day from one screen',
-			body: 'Check in, start service, complete and get paid — with every customer kept in the loop.'
+			title: m('Run the day from one screen'),
+			body: m(
+				'Check in, start service, complete and get paid — with every customer kept in the loop.'
+			)
 		}
 	];
 
@@ -79,67 +86,73 @@
 	const sampleDay = [
 		{
 			time: '10:00',
-			name: 'Noura A.',
-			service: 'Signature facial',
-			status: 'Checked in',
+			name: m('Noura A.'),
+			service: m('Signature facial'),
+			status: m('Checked in'),
 			tone: 'info'
 		},
-		{ time: '10:30', name: 'Sara M.', service: 'Balayage', status: 'In service', tone: 'accent' },
+		{
+			time: '10:30',
+			name: m('Sara M.'),
+			service: m('Balayage'),
+			status: m('In service'),
+			tone: 'accent'
+		},
 		{
 			time: '11:15',
-			name: 'Reem K.',
-			service: 'Hot stone massage',
-			status: 'Confirmed',
+			name: m('Reem K.'),
+			service: m('Hot stone massage'),
+			status: m('Confirmed'),
 			tone: 'success'
 		},
 		{
 			time: '12:00',
-			name: 'Huda S.',
-			service: 'Classic manicure',
-			status: 'Deposit due',
+			name: m('Huda S.'),
+			service: m('Classic manicure'),
+			status: m('Deposit due'),
 			tone: 'warning'
 		}
 	];
 
 	/** @type {{ icon: IconName, label: string }[]} */
 	const trust = [
-		{ icon: 'credit-card', label: 'Payments by Moyasar' },
-		{ icon: 'chat-bubble', label: 'WhatsApp messaging' },
-		{ icon: 'shield-check', label: 'PDPL-aware consent' },
-		{ icon: 'globe', label: 'Arabic & English' }
+		{ icon: 'credit-card', label: m('Payments by Moyasar') },
+		{ icon: 'chat-bubble', label: m('WhatsApp messaging') },
+		{ icon: 'shield-check', label: m('PDPL-aware consent') },
+		{ icon: 'globe', label: m('Arabic & English') }
 	];
 
 	/** @type {{ eyebrow: string, icon: IconName, title: string, points: string[], cta: string, href: '/register'|'/discover' }[]} */
 	const audiences = [
 		{
-			eyebrow: 'For salons & spas',
+			eyebrow: m('For salons & spas'),
 			icon: 'building',
-			title: 'Run the whole day from one screen',
+			title: m('Run the whole day from one screen'),
 			points: [
-				'Calendar, walk-in queue and day sheet together',
-				'Deposits and payouts without spreadsheets',
-				'Roles and permissions for every team member'
+				m('Calendar, walk-in queue and day sheet together'),
+				m('Deposits and payouts without spreadsheets'),
+				m('Roles and permissions for every team member')
 			],
-			cta: 'Start free trial',
+			cta: m('Start free trial'),
 			href: '/register'
 		},
 		{
-			eyebrow: 'For customers',
+			eyebrow: m('For customers'),
 			icon: 'sparkles',
-			title: 'Book a real slot in seconds',
+			title: m('Book a real slot in seconds'),
 			points: [
-				'Live availability — no call-backs',
-				'Confirmation and reminders on WhatsApp',
-				'Pay a deposit with Mada or Apple Pay'
+				m('Live availability — no call-backs'),
+				m('Confirmation and reminders on WhatsApp'),
+				m('Pay a deposit with Mada or Apple Pay')
 			],
-			cta: 'Find a salon',
+			cta: m('Find a salon'),
 			href: '/discover'
 		}
 	];
 </script>
 
 <svelte:head>
-	<title>NOVA — Bookings, queues and payments for GCC salons and spas</title>
+	<title>{t('NOVA — Bookings, queues and payments for GCC salons and spas')}</title>
 </svelte:head>
 
 <!-- Hero -->
@@ -154,40 +167,41 @@
 				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
 				<span class="size-1.5 rounded-full bg-brand-500"></span>
-				Built for salons and spas in the GCC
+				{t('Built for salons and spas in the GCC')}
 			</p>
 			<h1 class="mt-6 text-display-2xl font-semibold tracking-tight text-fg">
-				Everything your salon needs.
+				{t('Everything your salon needs.')}
 				<span
 					class="text-transparent"
 					style="background-image: var(--gradient-hero); -webkit-background-clip: text; background-clip: text;"
 				>
-					One operating system.
+					{t('One operating system.')}
 				</span>
 			</h1>
 			<p class="mt-6 max-w-xl text-body-lg text-fg-muted">
-				Bookings, walk-ins, staff, payments and customer messages — synchronized in one place, in
-				Arabic and English.
+				{t(
+					'Bookings, walk-ins, staff, payments and customer messages — synchronized in one place, in Arabic and English.'
+				)}
 			</p>
 			<div class="mt-9 flex flex-wrap gap-3">
 				{#if authStore.isAuthenticated && authStore.isStaff}
 					<Button size="lg" href={resolve('/app')}>
-						Go to dashboard
+						{t('Go to dashboard')}
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
 				{:else}
 					<Button size="lg" href={`${resolve('/register')}?as=business`}>
-						Start free trial
+						{t('Start free trial')}
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
 				{/if}
 				<Button size="lg" variant="outline" href={resolve('/discover')}>
 					<Icon name="search" class="size-4" />
-					Find a salon
+					{t('Find a salon')}
 				</Button>
 			</div>
 			<p class="mt-5 text-xs text-fg-muted">
-				14-day free trial · No card required · Cancel anytime
+				{t('14-day free trial · No card required · Cancel anytime')}
 			</p>
 		</div>
 
@@ -201,16 +215,16 @@
 				>
 					<div class="flex items-center justify-between border-b border-line-subtle px-5 py-4">
 						<div>
-							<p class="text-xs text-fg-muted">Today · Olaya branch</p>
-							<p class="font-semibold text-fg">Day sheet</p>
+							<p class="text-xs text-fg-muted">{t('Today · Olaya branch')}</p>
+							<p class="font-semibold text-fg">{t('Day sheet')}</p>
 						</div>
 						<div class="flex gap-4 text-end">
 							<div>
-								<p class="text-[11px] text-fg-muted">Booked</p>
+								<p class="text-[11px] text-fg-muted">{t('Booked')}</p>
 								<p class="text-lg font-semibold text-fg tabular-nums">24</p>
 							</div>
 							<div>
-								<p class="text-[11px] text-fg-muted">Waiting</p>
+								<p class="text-[11px] text-fg-muted">{t('Waiting')}</p>
 								<p class="text-lg font-semibold text-fg tabular-nums">3</p>
 							</div>
 						</div>
@@ -220,10 +234,10 @@
 							<li class="flex items-center gap-4 px-5 py-3">
 								<span class="w-12 text-sm font-semibold text-accent tabular-nums">{row.time}</span>
 								<div class="min-w-0 flex-1">
-									<p class="truncate text-sm font-medium text-fg">{row.name}</p>
-									<p class="truncate text-xs text-fg-muted">{row.service}</p>
+									<p class="truncate text-sm font-medium text-fg">{t(row.name)}</p>
+									<p class="truncate text-xs text-fg-muted">{t(row.service)}</p>
 								</div>
-								<Badge tone={row.tone} size="sm" dot>{row.status}</Badge>
+								<Badge tone={row.tone} size="sm" dot>{t(row.status)}</Badge>
 							</li>
 						{/each}
 					</ul>
@@ -238,8 +252,8 @@
 					<Icon name="chat-bubble" class="size-4" />
 				</span>
 				<div>
-					<p class="text-xs font-semibold text-fg">Confirmation sent</p>
-					<p class="text-[11px] text-fg-muted">WhatsApp · just now</p>
+					<p class="text-xs font-semibold text-fg">{t('Confirmation sent')}</p>
+					<p class="text-[11px] text-fg-muted">{t('WhatsApp · just now')}</p>
 				</div>
 			</div>
 		</div>
@@ -252,7 +266,7 @@
 		{#each trust as item (item.label)}
 			<span class="inline-flex items-center gap-2 text-sm font-medium text-fg-muted">
 				<Icon name={item.icon} class="size-4 text-fg-subtle" />
-				{item.label}
+				{t(item.label)}
 			</span>
 		{/each}
 	</Container>
@@ -263,8 +277,8 @@
 	<Container size="xl">
 		<SectionHeading
 			align="center"
-			eyebrow="One platform, two sides"
-			title="Built for the business and the people it serves"
+			eyebrow={t('One platform, two sides')}
+			title={t('Built for the business and the people it serves')}
 		/>
 		<div class="mt-14 grid gap-5 lg:grid-cols-2">
 			{#each audiences as side (side.eyebrow)}
@@ -277,9 +291,9 @@
 						<Icon name={side.icon} class="size-5" />
 					</span>
 					<p class="mt-6 text-xs font-semibold tracking-wider text-fg-muted uppercase">
-						{side.eyebrow}
+						{t(side.eyebrow)}
 					</p>
-					<h3 class="mt-2 text-display-md font-semibold tracking-tight text-fg">{side.title}</h3>
+					<h3 class="mt-2 text-display-md font-semibold tracking-tight text-fg">{t(side.title)}</h3>
 					<ul class="mt-6 flex flex-col gap-3">
 						{#each side.points as point (point)}
 							<li class="flex items-start gap-3 text-fg-secondary">
@@ -288,7 +302,7 @@
 								>
 									<Icon name="check" class="size-3" />
 								</span>
-								{point}
+								{t(point)}
 							</li>
 						{/each}
 					</ul>
@@ -299,7 +313,7 @@
 								? `${resolve('/register')}?as=business`
 								: resolve(side.href)}
 						>
-							{side.cta}
+							{t(side.cta)}
 							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 						</Button>
 					</div>
@@ -314,12 +328,12 @@
 	<Container size="xl">
 		<div class="flex flex-wrap items-end justify-between gap-6">
 			<SectionHeading
-				eyebrow="What's inside"
-				title="The tools a front desk actually uses"
-				subtitle="Each piece works on its own, and better together."
+				eyebrow={t("What's inside")}
+				title={t('The tools a front desk actually uses')}
+				subtitle={t('Each piece works on its own, and better together.')}
 			/>
 			<Button variant="ghost" href={resolve('/features')}>
-				All features
+				{t('All features')}
 				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 			</Button>
 		</div>
@@ -331,8 +345,8 @@
 					>
 						<Icon name={feature.icon} class="size-5" />
 					</span>
-					<h3 class="mt-5 font-semibold text-fg">{feature.title}</h3>
-					<p class="mt-2 text-sm text-fg-muted">{feature.body}</p>
+					<h3 class="mt-5 font-semibold text-fg">{t(feature.title)}</h3>
+					<p class="mt-2 text-sm text-fg-muted">{t(feature.body)}</p>
 				</BentoCard>
 			{/each}
 		</BentoGrid>
@@ -342,7 +356,7 @@
 <!-- How it works -->
 <Section>
 	<Container size="xl">
-		<SectionHeading align="center" eyebrow="How it works" title="Live in an afternoon" />
+		<SectionHeading align="center" eyebrow={t('How it works')} title={t('Live in an afternoon')} />
 		<ol class="mt-14 grid gap-8 md:grid-cols-3">
 			{#each steps as item, index (item.title)}
 				<li class="relative">
@@ -357,8 +371,8 @@
 							aria-hidden="true"
 						></span>
 					{/if}
-					<h3 class="mt-5 font-semibold text-fg">{item.title}</h3>
-					<p class="mt-2 text-sm text-fg-muted">{item.body}</p>
+					<h3 class="mt-5 font-semibold text-fg">{t(item.title)}</h3>
+					<p class="mt-2 text-sm text-fg-muted">{t(item.body)}</p>
 				</li>
 			{/each}
 		</ol>
@@ -374,16 +388,18 @@
 	<GradientBlob variant="corner" />
 	<Container size="lg" class="relative py-8 text-center sm:py-12">
 		<h2 class="text-display-lg font-semibold tracking-tight text-white">
-			Your next customer is already looking.
+			{t('Your next customer is already looking.')}
 		</h2>
 		<p class="mx-auto mt-4 max-w-xl text-body-lg text-white/80">
-			Give them a faster way to find you, book and stay connected.
+			{t('Give them a faster way to find you, book and stay connected.')}
 		</p>
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
 			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}
-				>Start free trial</Button
+				>{t('Start free trial')}</Button
 			>
-			<Button size="lg" variant="outline-inverse" href={resolve('/pricing')}>See pricing</Button>
+			<Button size="lg" variant="outline-inverse" href={resolve('/pricing')}
+				>{t('See pricing')}</Button
+			>
 		</div>
 	</Container>
 </Section>

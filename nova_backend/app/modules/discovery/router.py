@@ -53,6 +53,7 @@ from app.modules.catalog.service import ListingCard
 from app.modules.discovery.dependencies import get_discovery_service
 from app.modules.discovery.domain import SearchSort
 from app.modules.discovery.schemas import (
+    CategoryOut,
     ListingCardOut,
     ListingFeature,
     ListingFeatureCollection,
@@ -132,6 +133,20 @@ def _listing_card(card: ListingCard, covers: dict[UUID, Any] | None = None) -> L
             else None
         ),
     )
+
+
+@router.get(
+    "/categories",
+    response_model=list[CategoryOut],
+    dependencies=[Depends(discovery_read_rate_limit)],
+)
+async def list_categories(
+    service: DiscoveryService = Depends(get_discovery_service),
+) -> list[CategoryOut]:
+    """Every service category, by English name. Filter `GET /discovery/businesses`
+    by a category's `slug`; a salon files each service under one. Only a NOVA
+    administrator can add or change them (`/admin/catalog/categories`)."""
+    return [CategoryOut.model_validate(row) for row in await service.list_categories()]
 
 
 @router.get(

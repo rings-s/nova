@@ -1,4 +1,10 @@
+import { dev } from '$app/environment';
 import { json } from '@sveltejs/kit';
+
+// A development stand-in for the FastAPI backend, used when PUBLIC_API_BASE_URL
+// is empty. It signs anyone in as an owner, so it must never answer outside
+// `vite dev`: a production server answers 404 and the API is expected behind a
+// reverse proxy on the same origin, or at PUBLIC_API_BASE_URL.
 
 // In-memory mock database for NOVA platform
 const nowIso = new Date().toISOString();
@@ -33,6 +39,23 @@ const mockData = {
 			updated_at: '2026-01-15T09:00:00Z'
 		}
 	],
+	categories: [
+		{
+			id: 'cat-1',
+			slug: 'skincare',
+			name_en: 'Skincare',
+			name_ar: 'العناية بالبشرة',
+			is_active: true
+		},
+		{
+			id: 'cat-2',
+			slug: 'spa-body',
+			name_en: 'Spa & Body',
+			name_ar: 'السبا والجسم',
+			is_active: true
+		},
+		{ id: 'cat-3', slug: 'hair', name_en: 'Hair', name_ar: 'الشعر', is_active: true }
+	],
 	locations: [
 		{
 			id: 'loc-1',
@@ -41,7 +64,6 @@ const mockData = {
 			name_en: 'Al Olaya Flagship',
 			name_ar: 'فرع العليا الرئيسي',
 			slug: 'olaya-flagship',
-			phone: '+966501234567',
 			timezone: 'Asia/Riyadh',
 			city: 'Riyadh',
 			latitude: 24.7136,
@@ -89,7 +111,7 @@ const mockData = {
 			description_en:
 				'Deep cleansing, gentle exfoliation, and intense hydration with nourishing peptides.',
 			description_ar: 'تنظيف عميق وتقشير لطيف وترطيب مكثف مع سيروم الببتيدات المغذية.',
-			category: 'Skincare',
+			category_id: 'cat-1',
 			duration_minutes: 60,
 			price: '450.00',
 			currency: 'SAR',
@@ -106,7 +128,7 @@ const mockData = {
 			description_en:
 				'Authentic Moroccan hammam ritual with herbal steam and black soap treatment.',
 			description_ar: 'جلسة حمام مغربي أصيل بالبخار بالأعشاب والصابون البلدي.',
-			category: 'Spa & Body',
+			category_id: 'cat-2',
 			duration_minutes: 75,
 			price: '380.00',
 			currency: 'SAR',
@@ -122,7 +144,7 @@ const mockData = {
 			name_ar: 'قص شعر وتصفيف احترافي',
 			description_en: 'Custom precision haircut and luxury botanical blowout styling.',
 			description_ar: 'قص شعر بتنسيق مخصص وتصفيف فاخر باستخدام مستحضرات طبيعية.',
-			category: 'Hair',
+			category_id: 'cat-3',
 			duration_minutes: 45,
 			price: '220.00',
 			currency: 'SAR',
@@ -352,13 +374,23 @@ async function handleRequest(request, params, url, method) {
 		}
 	}
 
+	/** A category as a service carries it: `{ id, slug, name_en, name_ar }`, or null. @param {string|null|undefined} id */
+	const categoryOf = (id) => {
+		const found = mockData.categories.find((c) => c.id === id);
+		return found
+			? { id: found.id, slug: found.slug, name_en: found.name_en, name_ar: found.name_ar }
+			: null;
+	};
+	/** @param {(typeof mockData.services)[number]} service */
+	const withCategory = (service) => ({ ...service, category: categoryOf(service.category_id) });
+
 	// 1. Auth routes
 	if (path === 'auth/login') {
 		const email = body?.email || 'admin@nova.sa';
 		const token = createMockJwt(email, 'owner', 'tenant-1');
 		return json({
 			access_token: token,
-			refresh_token: 'mock-refresh-token-' + Date.now(),
+			refresh_token: null, // the real API sets it as an httpOnly cookie
 			token_type: 'bearer',
 			expires_in: 86400 * 30
 		});
@@ -368,10 +400,14 @@ async function handleRequest(request, params, url, method) {
 		const token = createMockJwt('admin@nova.sa', 'owner', 'tenant-1');
 		return json({
 			access_token: token,
-			refresh_token: 'mock-refresh-token-' + Date.now(),
+			refresh_token: null,
 			token_type: 'bearer',
 			expires_in: 86400 * 30
 		});
+	}
+
+	if (path === 'auth/logout') {
+		return new Response(null, { status: 204 });
 	}
 
 	if (path === 'auth/register') {
@@ -380,6 +416,51 @@ async function handleRequest(request, params, url, method) {
 			email: body?.email || 'new@nova.sa',
 			full_name: body?.full_name || 'New User'
 		});
+	}
+
+	// The mock's signed-in account is an administrator, so the admin pages can be seen.
+	if (path === 'auth/me') {
+		return json({
+			id: 'usr-1',
+			email: 'admin@nova.sa',
+			full_name: 'Mock Admin',
+			is_superuser: true
+		});
+	}
+
+	if (path === 'admin/catalog/categories') {
+		if (method === 'POST') {
+			const created = {
+				id: 'cat-' + (mockData.categories.length + 1),
+				slug: String(body?.name_en || 'category')
+					.toLowerCase()
+					.replace(/[^a-z0-9]+/g, '-')
+					.replace(/^-|-$/g, ''),
+				name_en: body?.name_en || 'Category',
+				name_ar: body?.name_ar || 'فئة',
+				is_active: true,
+				created_at: nowIso,
+				updated_at: nowIso
+			};
+			mockData.categories.push(created);
+			return json(created);
+		}
+		return json(mockData.categories);
+	}
+
+	if (path.startsWith('admin/catalog/categories/') && method === 'PATCH') {
+		const found = mockData.categories.find((c) => c.id === path.split('/')[3]);
+		if (!found)
+			return json(
+				{ error: { code: 'category_not_found', message: 'Not found.' } },
+				{ status: 404 }
+			);
+		Object.assign(found, body || {});
+		return json(found);
+	}
+
+	if (path === 'discovery/categories') {
+		return json(mockData.categories.filter((c) => c.is_active).map((c) => categoryOf(c.id)));
 	}
 
 	if (path === 'auth/logout-everywhere') {
@@ -493,7 +574,6 @@ async function handleRequest(request, params, url, method) {
 				name_en: l.name_en,
 				name_ar: l.name_ar,
 				city: l.city,
-				phone: l.phone,
 				timezone: l.timezone,
 				latitude: l.latitude,
 				longitude: l.longitude
@@ -505,7 +585,7 @@ async function handleRequest(request, params, url, method) {
 				name_ar: s.name_ar,
 				description_en: s.description_en,
 				description_ar: s.description_ar,
-				category: s.category,
+				category: categoryOf(s.category_id),
 				duration_minutes: s.duration_minutes,
 				price: s.price,
 				currency: s.currency
@@ -558,6 +638,28 @@ async function handleRequest(request, params, url, method) {
 		if (section === 'catalog') {
 			const sub = parts[3]; // businesses, locations, services, providers
 			const itemId = parts[4];
+
+			// PATCH or DELETE one branch, service or provider. The real API
+			// soft-deletes and refuses when a booking is still to come; the mock
+			// just drops the row.
+			const collections = /** @type {Record<string, any[]>} */ ({
+				locations: mockData.locations,
+				services: mockData.services,
+				providers: mockData.providers
+			});
+			if (itemId && !parts[5] && collections[sub] && (method === 'PATCH' || method === 'DELETE')) {
+				const rows = collections[sub];
+				const row = rows.find((x) => x.id === itemId);
+				if (!row) {
+					return json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 });
+				}
+				if (method === 'DELETE') {
+					rows.splice(rows.indexOf(row), 1);
+					return new Response(null, { status: 204 });
+				}
+				Object.assign(row, body || {}, { updated_at: nowIso });
+				return json(sub === 'services' ? withCategory(row) : row);
+			}
 
 			if (sub === 'businesses') {
 				if (itemId) {
@@ -625,7 +727,6 @@ async function handleRequest(request, params, url, method) {
 						name_en: body?.name_en || 'New Branch',
 						name_ar: body?.name_ar || 'فرع جديد',
 						slug: (body?.name_en || 'branch').toLowerCase().replace(/\s+/g, '-'),
-						phone: body?.phone || '',
 						timezone: body?.timezone || 'Asia/Riyadh',
 						city: body?.city ?? null,
 						latitude: body?.latitude ?? null,
@@ -653,7 +754,7 @@ async function handleRequest(request, params, url, method) {
 						name_ar: body?.name_ar || 'خدمة',
 						description_en: body?.description_en || null,
 						description_ar: body?.description_ar || null,
-						category: body?.category || 'General',
+						category_id: body?.category_id ?? null,
 						duration_minutes: body?.duration_minutes || 60,
 						price: String(body?.price || '200.00'),
 						currency: body?.currency || 'SAR',
@@ -662,9 +763,12 @@ async function handleRequest(request, params, url, method) {
 						updated_at: nowIso
 					};
 					mockData.services.push(newSrv);
-					return json(newSrv);
+					return json(withCategory(newSrv));
 				}
-				return json({ items: mockData.services, total: mockData.services.length });
+				return json({
+					items: mockData.services.map(withCategory),
+					total: mockData.services.length
+				});
 			}
 
 			if (sub === 'providers') {
@@ -1127,9 +1231,20 @@ async function handleRequest(request, params, url, method) {
 	);
 }
 
-export const GET = ({ request, params, url }) => handleRequest(request, params, url, 'GET');
-export const POST = ({ request, params, url }) => handleRequest(request, params, url, 'POST');
-export const PUT = ({ request, params, url }) => handleRequest(request, params, url, 'PUT');
-export const PATCH = ({ request, params, url }) => handleRequest(request, params, url, 'PATCH');
-export const DELETE = ({ request, params, url }) => handleRequest(request, params, url, 'DELETE');
-export const OPTIONS = () => new Response(null, { status: 204 });
+/**
+ * @param {'GET'|'POST'|'PUT'|'PATCH'|'DELETE'} method
+ * @returns {import('./$types').RequestHandler}
+ */
+const mocked =
+	(method) =>
+	({ request, params, url }) =>
+		dev
+			? handleRequest(request, params, url, method)
+			: json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 });
+
+export const GET = mocked('GET');
+export const POST = mocked('POST');
+export const PUT = mocked('PUT');
+export const PATCH = mocked('PATCH');
+export const DELETE = mocked('DELETE');
+export const OPTIONS = () => new Response(null, { status: dev ? 204 : 404 });

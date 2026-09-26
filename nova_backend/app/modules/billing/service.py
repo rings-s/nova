@@ -16,15 +16,23 @@ The billing cycle, docs/11 section 7, is implemented across three entry points:
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID, uuid4
 
 from app.core.events import publish_event
 from app.core.values import Money
+from app.integrations.payments.moyasar import (
+    MIN_INVOICE_AMOUNT_MINOR,
+    NotConfiguredPaymentGateway,
+    PaymentGateway,
+)
 from app.modules.billing.domain import (
     PLANS,
     BillingPeriod,
+    CheckoutStatus,
     CommissionClass,
     CommissionLine,
     Invoice,
@@ -33,11 +41,14 @@ from app.modules.billing.domain import (
     PlanFeatureRequiredError,
     PlanTier,
     Subscription,
+    SubscriptionCheckout,
     SubscriptionStatus,
     build_commission_line,
     build_payout,
     build_reversal,
+    checkout_for,
     percentage_of,
+    requires_payment,
     to_fils,
 )
 from app.modules.billing.events import (
@@ -52,8 +63,10 @@ from app.modules.billing.events import (
     SubscriptionCancelled,
 )
 from app.modules.billing.exceptions import (
+    CheckoutNotFoundError,
     InvoiceNotFoundError,
     SubscriptionAlreadyExistsError,
+    SubscriptionNotAwaitingPaymentError,
     SubscriptionNotFoundError,
 )
 from app.modules.billing.repository import (
@@ -61,7 +74,17 @@ from app.modules.billing.repository import (
     FirstBookingRepository,
     InvoiceRepository,
     PayoutRepository,
+    SubscriptionCheckoutRepository,
     SubscriptionRepository,
+)
+from app.modules.payment.domain import (
+    CheckoutAmountTooSmallError,
+    PaymentAmountMismatchError,
+    PaymentCheckoutMismatchError,
+    assert_return_url_allowed,
+    paid_amount_matches,
+    to_minor_units,
+    with_query,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +97,20 @@ LISTING_HIDDEN_AFTER_DAYS = 21
 #: How long after issue an invoice is due. Dunning days are measured from here.
 INVOICE_DUE_DAYS = 7
 
+#: Moyasar statuses: money arrived, an attempt failed, a checkout can no longer
+#: be paid. The same readings `payment.service` uses for a booking's deposit.
+_PAID_STATUSES = frozenset({"paid", "captured"})
+_FAILED_STATUSES = frozenset({"failed", "voided"})
+_CLOSED_CHECKOUT_STATUSES = frozenset({"expired", "canceled", "voided", "failed"})
+
+
+@dataclass(frozen=True)
+class CheckoutStart:
+    """A checkout, and the Moyasar page the owner is sent to to pay it."""
+
+    checkout: SubscriptionCheckout
+    redirect_url: str | None
+
 
 class BillingService:
     def __init__(
@@ -85,6 +122,10 @@ class BillingService:
         first_bookings: FirstBookingRepository,
         payouts: PayoutRepository,
         tenant_id: UUID,
+        checkouts: SubscriptionCheckoutRepository | None = None,
+        gateway: PaymentGateway | None = None,
+        public_app_url: str = "",
+        checkout_ttl_minutes: int = 30,
     ) -> None:
         self.subscriptions = subscriptions
         self.lines = lines
@@ -92,6 +133,12 @@ class BillingService:
         self.first_bookings = first_bookings
         self.payouts = payouts
         self.tenant_id = tenant_id
+        self.checkouts = checkouts or SubscriptionCheckoutRepository(
+            subscriptions.session, tenant_id
+        )
+        self.gateway: PaymentGateway = gateway or NotConfiguredPaymentGateway()
+        self.public_app_url = public_app_url
+        self.checkout_ttl_minutes = checkout_ttl_minutes
 
     @property
     def session(self):
@@ -168,7 +215,15 @@ class BillingService:
             tenant_id=self.tenant_id,
             business_id=business_id,
             tier=tier,
-            status=SubscriptionStatus.TRIALING if trial_days else SubscriptionStatus.ACTIVE,
+            # A paid plan is paid for before it applies (`start_checkout`),
+            # unless it starts with a trial; a free one applies at once.
+            status=(
+                SubscriptionStatus.TRIALING
+                if trial_days
+                else SubscriptionStatus.PENDING_PAYMENT
+                if requires_payment(tier)
+                else SubscriptionStatus.ACTIVE
+            ),
             current_period_start=period.period_start,
             current_period_end=period.period_end,
             seats=seats,
@@ -179,6 +234,9 @@ class BillingService:
         # Validates seats/locations against the tier before anything is stored.
         subscription.change_plan(tier, annual=annual)
         saved = await self.subscriptions.add_subscription(subscription)
+        if saved.awaiting_payment:
+            # Activated by `_activate_paid_plan` once the payment is verified.
+            return saved
 
         await publish_event(
             self.session,
@@ -229,6 +287,153 @@ class BillingService:
             ),
         )
         return saved
+
+    # --- paying for a plan ---------------------------------------------------
+
+    async def start_checkout(
+        self, business_id: UUID, *, return_url: str, now: datetime | None = None
+    ) -> CheckoutStart:
+        """Opens Moyasar's hosted page to pay for the chosen plan.
+
+        Only for a subscription waiting on payment. The owner comes back to
+        `return_url` with `?checkout=<id>`, and that page calls `sync_checkout`;
+        the webhook does the same thing independently.
+        """
+        assert_return_url_allowed(return_url, app_url=self.public_app_url)
+        now = now or datetime.now(UTC)
+        subscription = await self.get_subscription(business_id)
+        if not subscription.awaiting_payment:
+            raise SubscriptionNotAwaitingPaymentError()
+
+        checkout = checkout_for(subscription, today=now.date(), checkout_id=uuid4())
+        amount_minor = to_minor_units(checkout.total)
+        if amount_minor < MIN_INVOICE_AMOUNT_MINOR:
+            raise CheckoutAmountTooSmallError(checkout.total)
+        checkout = await self.checkouts.add_checkout(checkout)
+
+        landing = with_query(return_url, checkout=str(checkout.id))
+        invoice = await self.gateway.create_invoice(
+            amount_minor=amount_minor,
+            currency=checkout.total.currency,
+            description=f"NOVA {checkout.tier} plan" + (" (annual)" if checkout.annual else ""),
+            success_url=landing,
+            back_url=landing,
+            expired_at=now + timedelta(minutes=self.checkout_ttl_minutes),
+            metadata={
+                "purpose": "subscription",
+                "tenant_id": str(self.tenant_id),
+                "business_id": str(business_id),
+                "checkout_id": str(checkout.id),
+            },
+        )
+        if invoice.get("id"):
+            checkout.gateway_invoice_id = str(invoice["id"])
+            checkout = await self.checkouts.save(checkout)
+        return CheckoutStart(checkout=checkout, redirect_url=invoice.get("url"))
+
+    async def get_checkout(self, checkout_id: UUID) -> SubscriptionCheckout:
+        checkout = await self.checkouts.get_checkout(checkout_id)
+        if checkout is None:
+            raise CheckoutNotFoundError(checkout_id)
+        return checkout
+
+    async def sync_checkout(self, checkout_id: UUID) -> SubscriptionCheckout:
+        """Asks Moyasar how a checkout went, on the owner's return from it.
+
+        The redirect proves nothing (anyone can type the URL), so this reads
+        Moyasar's own record and checks it before activating anything. Safe to
+        call any number of times.
+        """
+        checkout = await self.get_checkout(checkout_id)
+        if checkout.status is not CheckoutStatus.PENDING or not checkout.gateway_invoice_id:
+            return checkout
+        invoice = await self.gateway.fetch_invoice(checkout.gateway_invoice_id)
+        paid = next(
+            (
+                attempt
+                for attempt in invoice.get("payments") or []
+                if str(attempt.get("status") or "").lower() in _PAID_STATUSES
+            ),
+            None,
+        )
+        if paid is not None and paid.get("id"):
+            # The payment itself, not the invoice's summary of it, is what the
+            # amount is checked against.
+            remote = await self.gateway.fetch_payment(str(paid["id"]))
+            return await self._apply_remote_payment(checkout, remote)
+        status = str(invoice.get("status") or "").lower()
+        if status in _CLOSED_CHECKOUT_STATUSES:
+            checkout.mark_failed(code=f"checkout_{status}")
+            return await self.checkouts.save(checkout)
+        return checkout
+
+    async def apply_gateway_payment(
+        self, *, gateway_payment_id: str, gateway_invoice_id: str, gateway_status: str
+    ) -> SubscriptionCheckout | None:
+        """The webhook's half: applies Moyasar's own record of a payment on a
+        checkout. Returns None when no checkout here opened that invoice."""
+        checkout = await self.checkouts.find_by_gateway_invoice(gateway_invoice_id)
+        if checkout is None:
+            return None
+        if gateway_status.lower() not in _PAID_STATUSES | _FAILED_STATUSES:
+            return checkout
+        remote = await self.gateway.fetch_payment(gateway_payment_id)
+        return await self._apply_remote_payment(checkout, remote)
+
+    async def _apply_remote_payment(
+        self, checkout: SubscriptionCheckout, remote: dict[str, Any], *, now: datetime | None = None
+    ) -> SubscriptionCheckout:
+        """The single place a Moyasar payment becomes a paid plan."""
+        if checkout.status is CheckoutStatus.PAID:
+            return checkout
+        actual = str(remote.get("status") or "").lower()
+        if actual in _PAID_STATUSES:
+            if str(remote.get("invoice_id") or "") != checkout.gateway_invoice_id:
+                raise PaymentCheckoutMismatchError(
+                    expected_invoice_id=checkout.gateway_invoice_id or "",
+                    invoice_id=remote.get("invoice_id"),
+                )
+            amount_minor, currency = remote.get("amount"), remote.get("currency")
+            if not paid_amount_matches(
+                checkout.total, amount_minor=amount_minor, currency=currency
+            ):
+                raise PaymentAmountMismatchError(
+                    expected=checkout.total, amount_minor=amount_minor, currency=currency
+                )
+            now = now or datetime.now(UTC)
+            checkout.mark_paid(now=now, gateway_payment_id=str(remote.get("id") or "") or None)
+            saved = await self.checkouts.save(checkout)
+            await self._activate_paid_plan(saved)
+            return saved
+        if actual in _FAILED_STATUSES and checkout.gateway_invoice_id:
+            # A declined card is not a failed checkout: the owner may still be
+            # on Moyasar's page trying another. Only a closed one has failed.
+            invoice = await self.gateway.fetch_invoice(checkout.gateway_invoice_id)
+            status = str(invoice.get("status") or "").lower()
+            if status in _CLOSED_CHECKOUT_STATUSES:
+                checkout.mark_failed(code=f"checkout_{status}")
+                return await self.checkouts.save(checkout)
+        return checkout
+
+    async def _activate_paid_plan(self, checkout: SubscriptionCheckout) -> None:
+        subscription = await self.get_subscription(checkout.business_id)
+        # The plan paid for is the plan that applies, even if the owner picked
+        # another while this checkout was open.
+        subscription.tier = checkout.tier
+        subscription.annual = checkout.annual
+        subscription.activate()
+        subscription.current_period_start = checkout.covers_from
+        subscription.current_period_end = checkout.covers_until
+        saved = await self.subscriptions.save(subscription)
+        await publish_event(
+            self.session,
+            SubscriptionActivated(
+                tenant_id=self.tenant_id,
+                subscription_id=saved.id,
+                business_id=saved.business_id,
+                tier=str(saved.tier),
+            ),
+        )
 
     # --- commission -------------------------------------------------------
 
@@ -423,8 +628,14 @@ class BillingService:
             period=period,
             currency=currency,
         )
+        # A month already paid for up front (`start_checkout`) is not charged again.
+        prepaid = await self.checkouts.is_period_prepaid(business_id, period.period_start)
         invoice.set_charges(
-            subscription=subscription.subscription_amount(),
+            subscription=(
+                Money(amount=Decimal("0.00"), currency=currency)
+                if prepaid
+                else subscription.subscription_amount()
+            ),
             commission=commission_net,
             processing=processing,
         )

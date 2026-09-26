@@ -6,8 +6,6 @@ twice, or an event that is written and never delivered so a customer is simply
 never told anything.
 """
 
-import hashlib
-import hmac
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -33,7 +31,7 @@ PAID = {"status": "paid", "amount": 15000, "currency": "SAR"}
 
 @pytest.fixture(autouse=True)
 def _configure_moyasar(monkeypatch):
-    """Gives the gateway a webhook secret so signatures can verify at all."""
+    """Gives the gateway a webhook secret so webhooks can verify at all."""
     get_settings.cache_clear()
     monkeypatch.setenv("MOYASAR_API_KEY", "sk_test_x")
     monkeypatch.setenv("MOYASAR_WEBHOOK_SECRET", WEBHOOK_SECRET)
@@ -42,18 +40,24 @@ def _configure_moyasar(monkeypatch):
 
 
 class FakeMoyasar(MoyasarGateway):
-    """The real signature check, with Moyasar's payment API answered from a dict.
+    """The real webhook check, with Moyasar's API answered from dicts.
 
     A payment it has no record of is `initiated`, as Moyasar reports one the
-    customer has not paid.
+    customer has not paid; an invoice it has no record of is still open.
     """
 
     def __init__(self) -> None:
         super().__init__(api_key="sk_test_x", webhook_secret=WEBHOOK_SECRET)
         self.payments: dict[str, dict[str, Any]] = {}
+        self.invoices: dict[str, dict[str, Any]] = {}
 
     async def fetch_payment(self, payment_id: str) -> dict[str, Any]:
         return self.payments.get(payment_id, {"id": payment_id, "status": "initiated"})
+
+    async def fetch_invoice(self, invoice_id: str) -> dict[str, Any]:
+        return self.invoices.get(
+            invoice_id, {"id": invoice_id, "status": "initiated", "payments": []}
+        )
 
 
 @pytest.fixture
@@ -63,19 +67,44 @@ def moyasar(app) -> FakeMoyasar:
     return gateway
 
 
-def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
-    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+def _event(
+    data: dict[str, Any],
+    *,
+    event_id: str | None = None,
+    type: str = "payment_paid",
+    secret_token: str | None = WEBHOOK_SECRET,
+    live: bool = False,
+) -> dict[str, Any]:
+    """A webhook body as Moyasar documents it: the payment rides in `data`."""
+    body: dict[str, Any] = {
+        "id": event_id or f"evt_{uuid4().hex[:12]}",
+        "type": type,
+        "created_at": datetime.now(UTC).isoformat(),
+        "account_name": "NOVA test",
+        "live": live,
+        "data": data,
+    }
+    if secret_token is not None:
+        body["secret_token"] = secret_token
+    return body
 
 
-async def _deliver(client, payload: dict[str, Any], *, sign: bool = True):
-    body = json.dumps(payload).encode()
-    headers = {"Content-Type": "application/json"}
-    if sign:
-        headers["X-Moyasar-Signature"] = _sign(body)
-    return await client.post("/api/v1/webhooks/moyasar", content=body, headers=headers)
+async def _deliver(client, payload: dict[str, Any]):
+    return await client.post(
+        "/api/v1/webhooks/moyasar",
+        content=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
 
 
-async def _payment(db_session, tenant, *, gateway_id: str, booking_id=None) -> PaymentRecord:
+async def _payment(
+    db_session,
+    tenant,
+    *,
+    gateway_id: str | None = None,
+    invoice_id: str | None = None,
+    booking_id=None,
+) -> PaymentRecord:
     # In the tenant's own scope, as the request that opened the payment was.
     await set_tenant_scope(db_session, tenant.id)
     payment = PaymentRecord(
@@ -87,6 +116,7 @@ async def _payment(db_session, tenant, *, gateway_id: str, booking_id=None) -> P
         status="pending",
         gateway="moyasar",
         gateway_payment_id=gateway_id,
+        gateway_invoice_id=invoice_id,
         webhook_verified=False,
     )
     db_session.add(payment)
@@ -102,31 +132,83 @@ async def _stored_event(db_session, external_id: str) -> WebhookEventRecord:
     ).scalar_one()
 
 
+async def _pending_booking(
+    db_session,
+    tenant,
+    business_factory,
+    location_factory,
+    service_factory,
+    provider_factory,
+    qualify,
+    customer_factory,
+) -> BookingRecord:
+    business = await business_factory(tenant)
+    location = await location_factory(business)
+    service = await service_factory(location)
+    provider = await provider_factory(location)
+    await qualify(provider, service)
+    customer = await customer_factory(tenant)
+    # In the tenant's own scope, as the request that made the booking was.
+    await set_tenant_scope(db_session, tenant.id)
+    booking = BookingRecord(
+        tenant_id=tenant.id,
+        business_id=business.id,
+        location_id=location.id,
+        service_id=service.id,
+        provider_id=provider.id,
+        customer_id=customer.id,
+        starts_at=datetime.now(UTC) + timedelta(days=2),
+        ends_at=datetime.now(UTC) + timedelta(days=2, hours=1),
+        price=Decimal("150.00"),
+        currency="SAR",
+        status="pending_payment",
+        source="direct_link",
+    )
+    db_session.add(booking)
+    await db_session.flush()
+    return booking
+
+
 class TestWebhookVerification:
-    async def test_an_unsigned_webhook_is_refused(self, client, db_session, tenant_factory):
+    async def test_a_webhook_without_its_secret_token_is_refused(
+        self, client, db_session, tenant_factory
+    ):
         tenant = await tenant_factory()
         await _payment(db_session, tenant, gateway_id="pay_unsigned")
 
-        body = json.dumps({"id": "pay_unsigned", "status": "paid"}).encode()
-        response = await client.post(
-            "/api/v1/webhooks/moyasar", content=body, headers={"Content-Type": "application/json"}
+        response = await _deliver(
+            client, _event({"id": "pay_unsigned", "status": "paid"}, secret_token=None)
         )
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "invalid_webhook_signature"
 
-    async def test_a_wrongly_signed_webhook_is_refused(self, client, db_session, tenant_factory):
+    async def test_a_webhook_with_the_wrong_secret_token_is_refused(
+        self, client, db_session, tenant_factory
+    ):
         tenant = await tenant_factory()
         await _payment(db_session, tenant, gateway_id="pay_forged")
 
-        body = json.dumps({"id": "pay_forged", "status": "paid"}).encode()
+        response = await _deliver(
+            client,
+            _event({"id": "pay_forged", "status": "paid"}, secret_token="not-the-secret"),
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_signature_header_is_not_a_substitute_for_the_token(
+        self, client, db_session, tenant_factory
+    ):
+        """Moyasar documents one scheme, the body's `secret_token`. A header
+        scheme it never sends is only another way in."""
+        tenant = await tenant_factory()
+        await _payment(db_session, tenant, gateway_id="pay_header")
+
+        body = json.dumps(_event({"id": "pay_header", "status": "paid"}, secret_token=None))
         response = await client.post(
             "/api/v1/webhooks/moyasar",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Moyasar-Signature": _sign(body, "not-the-secret"),
-            },
+            content=body.encode(),
+            headers={"Content-Type": "application/json", "X-Moyasar-Signature": "anything"},
         )
 
         assert response.status_code == 422
@@ -138,10 +220,7 @@ class TestWebhookVerification:
         tenant = await tenant_factory()
         payment = await _payment(db_session, tenant, gateway_id="pay_untouched")
 
-        body = json.dumps({"id": "pay_untouched", "status": "paid"}).encode()
-        await client.post(
-            "/api/v1/webhooks/moyasar", content=body, headers={"Content-Type": "application/json"}
-        )
+        await _deliver(client, _event({"id": "pay_untouched", "status": "paid"}, secret_token=None))
 
         await db_session.refresh(payment)
         assert payment.status == "pending"
@@ -163,38 +242,20 @@ class TestWebhookProcessing:
         customer_factory,
     ):
         tenant = await tenant_factory()
-        business = await business_factory(tenant)
-        location = await location_factory(business)
-        service = await service_factory(location)
-        provider = await provider_factory(location)
-        await qualify(provider, service)
-        customer = await customer_factory(tenant)
-        # In the tenant's own scope, as the request that made the booking was.
-        await set_tenant_scope(db_session, tenant.id)
-
-        booking = BookingRecord(
-            tenant_id=tenant.id,
-            business_id=business.id,
-            location_id=location.id,
-            service_id=service.id,
-            provider_id=provider.id,
-            customer_id=customer.id,
-            starts_at=datetime.now(UTC) + timedelta(days=2),
-            ends_at=datetime.now(UTC) + timedelta(days=2, hours=1),
-            price=Decimal("150.00"),
-            currency="SAR",
-            status="pending_payment",
-            source="direct_link",
+        booking = await _pending_booking(
+            db_session,
+            tenant,
+            business_factory,
+            location_factory,
+            service_factory,
+            provider_factory,
+            qualify,
+            customer_factory,
         )
-        db_session.add(booking)
-        await db_session.flush()
-
         payment = await _payment(db_session, tenant, gateway_id="pay_ok", booking_id=booking.id)
         moyasar.payments["pay_ok"] = {"id": "pay_ok", **PAID}
 
-        response = await _deliver(
-            client, {"id": "pay_ok", "type": "payment_paid", "status": "paid"}
-        )
+        response = await _deliver(client, _event({"id": "pay_ok", "status": "paid"}))
 
         assert response.status_code == 200
         assert response.json()["status"] == "processed"
@@ -206,6 +267,90 @@ class TestWebhookProcessing:
         # Payment state drives booking state — but only through the domain.
         assert booking.status == "confirmed"
 
+    async def test_a_paid_checkout_is_found_by_its_invoice_and_learns_its_payment_id(
+        self,
+        client,
+        db_session,
+        moyasar,
+        tenant_factory,
+        business_factory,
+        location_factory,
+        service_factory,
+        provider_factory,
+        qualify,
+        customer_factory,
+    ):
+        """The usual case: NOVA opened an invoice, and the first it hears of the
+        payment that paid it is this webhook."""
+        tenant = await tenant_factory()
+        booking = await _pending_booking(
+            db_session,
+            tenant,
+            business_factory,
+            location_factory,
+            service_factory,
+            provider_factory,
+            qualify,
+            customer_factory,
+        )
+        payment = await _payment(db_session, tenant, invoice_id="inv_1", booking_id=booking.id)
+        moyasar.payments["pay_new"] = {"id": "pay_new", "invoice_id": "inv_1", **PAID}
+
+        response = await _deliver(
+            client, _event({"id": "pay_new", "invoice_id": "inv_1", "status": "paid"})
+        )
+
+        assert response.json()["status"] == "processed"
+        await db_session.refresh(payment)
+        await db_session.refresh(booking)
+        assert payment.status == "captured"
+        # Kept, because a refund is made against it.
+        assert payment.gateway_payment_id == "pay_new"
+        assert booking.status == "confirmed"
+
+    async def test_a_paid_payment_for_another_checkout_does_not_capture_this_one(
+        self, client, db_session, moyasar, tenant_factory
+    ):
+        """Signed with the shared secret, naming our invoice, and pointing at a
+        real paid payment of the same amount — for somebody else's invoice."""
+        tenant = await tenant_factory()
+        payment = await _payment(db_session, tenant, invoice_id="inv_ours")
+        moyasar.payments["pay_theirs"] = {"id": "pay_theirs", "invoice_id": "inv_other", **PAID}
+
+        response = await _deliver(
+            client, _event({"id": "pay_theirs", "invoice_id": "inv_ours", "status": "paid"})
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "checkout_mismatch"
+        await db_session.refresh(payment)
+        assert payment.status == "pending"
+        assert payment.gateway_payment_id is None
+
+    async def test_a_declined_card_on_an_open_checkout_does_not_fail_the_payment(
+        self, client, db_session, moyasar, tenant_factory
+    ):
+        """The payer is still on Moyasar's page and can try another card."""
+        tenant = await tenant_factory()
+        payment = await _payment(db_session, tenant, invoice_id="inv_open")
+        moyasar.payments["pay_declined"] = {
+            "id": "pay_declined",
+            "invoice_id": "inv_open",
+            "status": "failed",
+        }
+
+        response = await _deliver(
+            client,
+            _event(
+                {"id": "pay_declined", "invoice_id": "inv_open", "status": "failed"},
+                type="payment_failed",
+            ),
+        )
+
+        assert response.json()["status"] == "processed"
+        await db_session.refresh(payment)
+        assert payment.status == "pending"
+
     async def test_a_redelivered_webhook_is_a_no_op(
         self, client, db_session, moyasar, tenant_factory
     ):
@@ -213,49 +358,39 @@ class TestWebhookProcessing:
         tenant = await tenant_factory()
         await _payment(db_session, tenant, gateway_id="pay_retry")
         moyasar.payments["pay_retry"] = {"id": "pay_retry", **PAID}
+        event = _event({"id": "pay_retry", "status": "paid"}, event_id="evt_retry")
 
-        first = await _deliver(client, {"id": "pay_retry", "status": "paid"})
-        second = await _deliver(client, {"id": "pay_retry", "status": "paid"})
+        first = await _deliver(client, event)
+        second = await _deliver(client, event)
 
         assert first.json()["status"] == "processed"
         assert second.json()["status"] == "duplicate"
 
         # Exactly one stored event, which is what makes the dedupe real.
         stored = await db_session.execute(
-            select(WebhookEventRecord).where(WebhookEventRecord.external_event_id == "pay_retry")
+            select(WebhookEventRecord).where(WebhookEventRecord.external_event_id == "evt_retry")
         )
         assert len(list(stored.scalars().all())) == 1
 
-    async def test_the_raw_payload_is_stored_for_audit(
+    async def test_the_payload_is_stored_for_audit_without_its_secret(
         self, client, db_session, moyasar, tenant_factory
     ):
+        """Stored, the secret would let anyone who can read the table send the
+        next webhook."""
         tenant = await tenant_factory()
-        await _payment(db_session, tenant, gateway_id="pay_audit")
+        payment = await _payment(db_session, tenant, gateway_id="pay_audit")
         moyasar.payments["pay_audit"] = {"id": "pay_audit", **PAID}
 
-        await _deliver(client, {"id": "pay_audit", "status": "paid", "extra": "kept"})
-
-        stored = await _stored_event(db_session, "pay_audit")
-        assert stored.payload["extra"] == "kept"
-        assert stored.signature_verified is True
-
-    async def test_the_shared_secret_is_never_stored(
-        self, client, db_session, moyasar, tenant_factory
-    ):
-        """Stored, it would let anyone who can read the table sign the next webhook."""
-        tenant = await tenant_factory()
-        payment = await _payment(db_session, tenant, gateway_id="pay_token")
-        moyasar.payments["pay_token"] = {"id": "pay_token", **PAID}
-
-        # The body-token scheme: no signature header, the secret in the payload.
         response = await _deliver(
             client,
-            {"id": "pay_token", "status": "paid", "secret_token": WEBHOOK_SECRET},
-            sign=False,
+            _event({"id": "pay_audit", "status": "paid", "extra": "kept"}, event_id="evt_audit"),
         )
 
         assert response.json()["status"] == "processed"
-        stored = await _stored_event(db_session, "pay_token")
+        stored = await _stored_event(db_session, "evt_audit")
+        assert stored.event_type == "payment_paid"
+        assert stored.payload["data"]["extra"] == "kept"
+        assert stored.signature_verified is True
         assert "secret_token" not in stored.payload
         assert WEBHOOK_SECRET not in json.dumps(stored.payload)
         await db_session.refresh(payment)
@@ -264,11 +399,11 @@ class TestWebhookProcessing:
     async def test_a_forged_capture_is_not_applied(
         self, client, db_session, moyasar, tenant_factory
     ):
-        """Signed with a leaked secret, but Moyasar's record says nobody has paid."""
+        """Sent with a leaked secret, but Moyasar's record says nobody has paid."""
         tenant = await tenant_factory()
         payment = await _payment(db_session, tenant, gateway_id="pay_not_paid")
 
-        response = await _deliver(client, {"id": "pay_not_paid", "status": "paid"})
+        response = await _deliver(client, _event({"id": "pay_not_paid", "status": "paid"}))
 
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "payment_not_confirmed"
@@ -279,12 +414,7 @@ class TestWebhookProcessing:
     async def test_a_webhook_for_an_unknown_payment_is_acknowledged_not_retried(self, client):
         # A 5xx would make the gateway retry forever for a payment that will
         # never exist here.
-        body = json.dumps({"id": "pay_never_seen", "status": "paid"}).encode()
-        response = await client.post(
-            "/api/v1/webhooks/moyasar",
-            content=body,
-            headers={"Content-Type": "application/json", "X-Moyasar-Signature": _sign(body)},
-        )
+        response = await _deliver(client, _event({"id": "pay_never_seen", "status": "paid"}))
         assert response.status_code == 200
         assert response.json()["status"] == "unknown_payment"
 
@@ -295,7 +425,9 @@ class TestWebhookProcessing:
         payment = await _payment(db_session, tenant, gateway_id="pay_failed")
         moyasar.payments["pay_failed"] = {"id": "pay_failed", "status": "failed"}
 
-        await _deliver(client, {"id": "pay_failed", "status": "failed"})
+        await _deliver(
+            client, _event({"id": "pay_failed", "status": "failed"}, type="payment_failed")
+        )
 
         await db_session.refresh(payment)
         assert payment.status == "failed"
@@ -317,14 +449,17 @@ class TestWebhookProcessing:
         payment = await _payment(db_session, tenant, gateway_id=gateway_id)
         moyasar.payments[gateway_id] = {"id": gateway_id, "status": "paid", **recorded}
 
-        response = await _deliver(client, {"id": gateway_id, "status": "paid"})
+        event_id = f"evt_{gateway_id}"
+        response = await _deliver(
+            client, _event({"id": gateway_id, "status": "paid"}, event_id=event_id)
+        )
 
         assert response.status_code == 200, why
         assert response.json()["status"] == "amount_mismatch", why
         await db_session.refresh(payment)
         assert payment.status == "pending", why
 
-        stored = await _stored_event(db_session, gateway_id)
+        stored = await _stored_event(db_session, event_id)
         assert stored.processed_at is not None
         assert "not captured" in (stored.error or "")
 

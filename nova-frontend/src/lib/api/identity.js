@@ -27,6 +27,10 @@ import { http, tenantPath } from './client.js';
  * @property {string} preferred_language
  * @property {boolean} marketing_consent
  * @property {boolean} whatsapp_consent
+ * @property {'customer'|'staff'|null} [marketing_consent_source] who last changed it
+ * @property {string|null} [marketing_consent_at]
+ * @property {'customer'|'staff'|null} [whatsapp_consent_source]
+ * @property {string|null} [whatsapp_consent_at]
  * @property {string|null} notes
  * @property {string} created_at
  * @property {string} updated_at
@@ -143,7 +147,9 @@ export function getCustomer(tenantId, customerId) {
 }
 
 /**
- * PDPL: withdrawing consent must be as easy as giving it.
+ * PDPL: withdrawing consent must be as easy as giving it. Staff may record
+ * WhatsApp consent and withdraw either, but only the customer can opt in to
+ * marketing: turning it on here answers 403 `marketing_consent_customer_only`.
  * @param {string} tenantId @param {string} customerId
  * @param {{ marketingConsent?: boolean|null, whatsappConsent?: boolean|null }} params
  * @returns {Promise<Customer>}

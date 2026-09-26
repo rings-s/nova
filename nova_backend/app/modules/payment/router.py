@@ -16,15 +16,17 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import get_db_session
 from app.core.idempotency import IdempotencyGuard, idempotency_guard
 from app.core.schemas import Page
 from app.core.security import Principal, get_principal
 from app.core.throttling import write_rate_limit
 from app.db.session import bypass_tenant_scope, set_tenant_scope
+from app.modules.billing.dependencies import build_billing_service, subscription_checkout_tenant
 from app.modules.identity.dependencies import RequirePermission
 from app.modules.identity.domain import StaffPermission
 from app.modules.payment.dependencies import (
@@ -34,7 +36,12 @@ from app.modules.payment.dependencies import (
     get_webhook_processor,
     refuse_customer_amount,
 )
-from app.modules.payment.domain import Payment, PaymentAmountMismatchError, WebhookSignatureError
+from app.modules.payment.domain import (
+    Payment,
+    PaymentAmountMismatchError,
+    PaymentVerificationError,
+    WebhookSignatureError,
+)
 from app.modules.payment.exceptions import UnknownWebhookPaymentError
 from app.modules.payment.schemas import (
     CreatePaymentIntentRequest,
@@ -165,6 +172,38 @@ async def refund_payment(
     return out
 
 
+@router.post(
+    "/{payment_id}/sync",
+    response_model=PaymentOut,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def sync_payment(
+    tenant_id: UUID,
+    payment_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    service: PaymentService = Depends(get_payment_service),
+    principal: Principal = Depends(get_principal),
+) -> PaymentOut:
+    """Asks Moyasar where this payment stands, and records it.
+
+    Called by the page a payer returns to from checkout. The redirect itself
+    proves nothing — anyone can type the URL — so this reads Moyasar's own
+    record of the payment and checks status, amount and currency before
+    capturing, exactly as a webhook would. Visible to whoever may see the
+    booking; idempotent, so a refreshed page does no harm.
+    """
+    await service.get_for_principal(payment_id, principal)
+    try:
+        payment = await service.reconcile(payment_id)
+    except PaymentVerificationError:
+        # Nothing captured; the payer sees the payment still pending, and the
+        # mismatch is in the logs for a person to look at.
+        logger.error("payment_sync_verification_failed", extra={"payment_id": str(payment_id)})
+        payment = await service.get(payment_id)
+    await session.commit()
+    return _payment_out(payment)
+
+
 # --- webhooks -------------------------------------------------------------
 
 webhook_router = APIRouter(prefix="/webhooks", tags=["payment"])
@@ -173,19 +212,20 @@ webhook_router = APIRouter(prefix="/webhooks", tags=["payment"])
 @webhook_router.post("/moyasar", response_model=WebhookAckOut)
 async def moyasar_webhook(
     request: Request,
-    x_signature: str | None = Header(default=None, alias="X-Moyasar-Signature"),
     session: AsyncSession = Depends(get_db_session),
     processor: PaymentWebhookProcessor = Depends(get_webhook_processor),
     gateway=Depends(get_payment_gateway),
 ) -> WebhookAckOut:
-    """Receives a Moyasar payment notification.
+    """Receives a Moyasar webhook (https://docs.moyasar.com/api/other/webhooks/webhook-reference/).
 
-    Order is deliberate and each step protects the next:
+    The body is `{id, type, created_at, secret_token, account_name, live,
+    data}`, with the payment in `data`. Order is deliberate and each step
+    protects the next:
 
-      1. Read the RAW body. Re-serialising a parsed dict changes the bytes and
-         the signature would never match.
-      2. Verify the signature. Nothing before this point is trusted, and an
-         unverified payload never reaches a service.
+      1. Parse the body, refusing anything that is not a JSON object.
+      2. Check `secret_token` against the webhook's shared secret. Nothing
+         before this point is trusted, and an unverified payload never reaches
+         a service.
       3. Record the event, less its shared secret, and stop if it is a
          duplicate — Moyasar retries, and applying a capture twice
          double-confirms a booking.
@@ -207,7 +247,7 @@ async def moyasar_webhook(
     if not isinstance(payload, dict):
         raise WebhookSignatureError()
 
-    processor.verify(raw_body=raw_body, signature=x_signature, payload=payload)
+    processor.verify(payload=payload)
 
     # Cross-tenant reads and writes: this connection has no tenant yet, and
     # RLS would otherwise (correctly) show it nothing.
@@ -218,9 +258,21 @@ async def moyasar_webhook(
         await session.commit()
         return WebhookAckOut(status="duplicate")
 
-    data = payload.get("data") or payload
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
     gateway_payment_id = str(data.get("id") or "")
+    gateway_invoice_id = str(data.get("invoice_id") or "") or None
     gateway_status = str(data.get("status") or "")
+
+    if payload.get("live") is False and get_settings().env == "production":
+        # A test-mode event reaching production: someone pointed a test
+        # webhook here. Nothing a test card "paid" may confirm a real booking.
+        await processor.events.mark_processed(
+            event, now=datetime.now(UTC), error="test-mode event on a live deployment"
+        )
+        await session.commit()
+        return WebhookAckOut(status="ignored")
 
     if not gateway_payment_id:
         await processor.events.mark_processed(
@@ -229,8 +281,43 @@ async def moyasar_webhook(
         await session.commit()
         return WebhookAckOut(status="ignored")
 
+    # A payment on a plan checkout: NOVA's own revenue, which billing owns,
+    # not a salon's takings. The same verification applies (billing checks
+    # Moyasar's record of the payment before activating anything).
+    plan_tenant = (
+        await subscription_checkout_tenant(session, gateway_invoice_id)
+        if gateway_invoice_id
+        else None
+    )
+    if plan_tenant is not None and gateway_invoice_id:
+        await set_tenant_scope(session, plan_tenant)
+        billing = build_billing_service(session, plan_tenant, gateway=gateway)
+        try:
+            await billing.apply_gateway_payment(
+                gateway_payment_id=gateway_payment_id,
+                gateway_invoice_id=gateway_invoice_id,
+                gateway_status=gateway_status,
+            )
+        except PaymentVerificationError as exc:
+            await processor.events.mark_processed(
+                event, now=datetime.now(UTC), tenant_id=plan_tenant, error=exc.message
+            )
+            await session.commit()
+            logger.error(
+                "webhook_plan_payment_not_verified",
+                extra={"gateway_payment_id": gateway_payment_id, "reason": exc.code},
+            )
+            return WebhookAckOut(
+                status="amount_mismatch"
+                if isinstance(exc, PaymentAmountMismatchError)
+                else "checkout_mismatch"
+            )
+        await processor.events.mark_processed(event, now=datetime.now(UTC), tenant_id=plan_tenant)
+        await session.commit()
+        return WebhookAckOut(status="processed")
+
     try:
-        tenant_id = await processor.resolve_tenant(gateway_payment_id)
+        tenant_id = await processor.resolve_tenant(gateway_payment_id, gateway_invoice_id)
     except UnknownWebhookPaymentError:
         # Recorded, acknowledged, and not retried. A payment we have never
         # seen will not appear later, so making the gateway retry forever
@@ -253,10 +340,11 @@ async def moyasar_webhook(
     try:
         await payment_service.apply_gateway_status(
             gateway_payment_id=gateway_payment_id,
+            gateway_invoice_id=gateway_invoice_id,
             gateway_status=gateway_status,
             webhook_verified=True,
         )
-    except PaymentAmountMismatchError as exc:
+    except PaymentVerificationError as exc:
         # Recorded, acknowledged and left uncaptured for a person to look at. A
         # non-2xx would make the gateway retry a payment that will never match.
         await processor.events.mark_processed(
@@ -264,10 +352,18 @@ async def moyasar_webhook(
         )
         await session.commit()
         logger.error(
-            "webhook_amount_mismatch",
-            extra={"gateway_payment_id": gateway_payment_id, "tenant_id": str(tenant_id)},
+            "webhook_payment_not_verified",
+            extra={
+                "gateway_payment_id": gateway_payment_id,
+                "tenant_id": str(tenant_id),
+                "reason": exc.code,
+            },
         )
-        return WebhookAckOut(status="amount_mismatch")
+        return WebhookAckOut(
+            status="amount_mismatch"
+            if isinstance(exc, PaymentAmountMismatchError)
+            else "checkout_mismatch"
+        )
     await processor.events.mark_processed(event, now=datetime.now(UTC), tenant_id=tenant_id)
     await session.commit()
     return WebhookAckOut(status="processed")

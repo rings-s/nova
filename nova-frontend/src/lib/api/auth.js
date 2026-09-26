@@ -11,7 +11,8 @@ import { http } from './client.js';
 /**
  * @typedef {Object} TokenPair
  * @property {string} access_token
- * @property {string} refresh_token
+ * @property {string|null} refresh_token Always null here: the web app signs in with
+ *   `refresh_cookie`, so the refresh token is an httpOnly cookie no script can read.
  * @property {string} token_type
  * @property {number} expires_in Access token lifetime, in seconds.
  */
@@ -21,6 +22,7 @@ import { http } from './client.js';
  * @property {string} id
  * @property {string} email
  * @property {string} full_name
+ * @property {boolean} [is_superuser] A NOVA administrator; only `me` says so.
  */
 
 /**
@@ -41,12 +43,21 @@ export function register({ email, password, fullName, phone = null }) {
  * @returns {Promise<TokenPair>}
  */
 export function login({ email, password }) {
-	return http.post('/auth/login', { email, password }, { skipAuth: true });
+	return http.post('/auth/login', { email, password, refresh_cookie: true }, { skipAuth: true });
 }
 
-/** @param {string} refreshToken @returns {Promise<TokenPair>} */
-export function refresh(refreshToken) {
-	return http.post('/auth/refresh', { refresh_token: refreshToken }, { skipAuth: true });
+/**
+ * A new token pair, from the refresh cookie `login` set. The new refresh token
+ * replaces the cookie; it is never returned.
+ * @returns {Promise<TokenPair>}
+ */
+export function refresh() {
+	return http.post('/auth/refresh', {}, { skipAuth: true });
+}
+
+/** Deletes this browser's refresh cookie, which only the server can. */
+export function logout() {
+	return http.post('/auth/logout', undefined, { skipAuth: true });
 }
 
 /** Revokes every outstanding access/refresh token for the caller. */
@@ -62,4 +73,13 @@ export function requestPhoneVerification() {
 /** @param {string} token The token WhatsApp delivered, not a typed-in code. */
 export function confirmPhoneVerification(token) {
 	return http.post('/auth/phone/verify/confirm', { token });
+}
+
+/**
+ * The signed-in account, and whether it is a NOVA administrator. That flag only
+ * decides which pages to show; every admin route checks it for itself.
+ * @returns {Promise<RegisteredUser>}
+ */
+export function me() {
+	return http.get('/auth/me');
 }

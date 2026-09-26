@@ -3,6 +3,7 @@ title: Backend FastAPI DDD Structure
 created: 2026-08-11
 project: NOVA
 type: backend
+status: design
 tags: [fastapi, ddd, python, pydantic]
 ---
 
@@ -41,19 +42,22 @@ nova_backend/
 │   │
 │   ├── modules/            # 📦 One folder per bounded context
 │   │   ├── registry.py     #    The single wiring point
-│   │   ├── identity/       #    Tenant
-│   │   ├── catalog/        #    Business, Location, Service, Provider
+│   │   ├── identity/       #    Tenant, User, Membership, Customer
+│   │   ├── catalog/        #    Business, Location, Service, Provider, BusinessPhoto
+│   │   ├── discovery/      #    Public marketplace (read-only, cross-tenant)
 │   │   ├── booking/        #    Booking  ← reference implementation
 │   │   ├── queue/
+│   │   ├── review/         #    Verified 1-5 ratings of completed bookings
 │   │   ├── payment/
 │   │   ├── billing/
-│   │   ├── media/
+│   │   ├── analytics/      #    Owns no tables; metrics + charts
 │   │   ├── notification/
 │   │   └── ai_agents/
 │   │
 │   ├── integrations/       # 🔌 Outbound adapters
 │   │   ├── payments/       #    Moyasar
-│   │   ├── storage/        #    Nextcloud WebDAV
+│   │   ├── storage/        #    ImageStore protocol, LocalImageStore (MEDIA_ROOT)
+│   │   ├── images.py       #    Pillow decode/re-encode of uploaded photos
 │   │   └── whatsapp/       #    WhatsApp BSP
 │   └── worker/             # 🔄 Background tasks (ARQ)
 │
@@ -64,9 +68,10 @@ nova_backend/
 The live map with the dependency-rule table is `nova_backend/README.md`.
 
 > [!note] Implemented differences
-> The tree above predates two changes. `discovery/` is the public, cross-tenant marketplace
-> (ADR-0010), and `identity/` owns `User`, `Membership` and `Customer` as well as `Tenant`
-> (ADR-0007). `core/` also holds `security.py` (bearer auth and `require_staff`),
+> The module list above is current as of 2026-09-23. `discovery/` is the public, cross-tenant
+> marketplace (ADR-0010); `identity/` owns `User`, `Membership` and `Customer` as well as `Tenant`
+> (ADR-0007); `review/` was added by ADR-0014; the Nextcloud `media/` module was removed by
+> ADR-0013. `core/` also holds `security.py` (bearer auth and `require_staff`),
 > `throttling.py`, `idempotency.py`, and the correlation-id `context.py` and `middleware.py`
 > (ADR-0006).
 
@@ -82,7 +87,7 @@ The live map with the dependency-rule table is `nova_backend/README.md`.
    - Calls Domain methods, saves state, and publishes Domain Events.
 3. **Infrastructure Layer:**
    - Implements the interfaces defined by the Domain/Application layers.
-   - Handles the messy reality of Nextcloud WebDAV, Cloudflare headers, and Ollama API calls.
+   - Handles the messy reality of Moyasar, WhatsApp, image decoding, Cloudflare headers, and Ollama API calls.
 
 ## 2. Anatomy of a Vertical Slice (e.g., `modules/booking/`)
 
@@ -235,18 +240,17 @@ Even inside a vertical slice, dependencies point **inward**: `router.py` ➡️ 
     3. Nextcloud triggers a webhook to `modules/catalog/router.py`.
     4. The `CatalogService` updates the `Business` aggregate in Postgres with the new Nextcloud file path.
 
-
-
 > [!note] Implemented differences
 > Both integrations are laid out differently:
 >
 > - **Agents** live in `ai_agents/service.py` (the tools, the allowlist and `AgentDeps`) and
 >   `runtime.py` (the guarded PydanticAI import). They are served at
 >   `/api/v1/tenants/{tenant_id}/ai/*` (docs/10).
-> - **Media** is its own `media` module, not part of `catalog`, and there is no Nextcloud webhook.
->   The client confirms an upload with `POST .../media/uploads/{asset_id}/complete`, which checks
->   the bytes with Nextcloud through `app/integrations/storage/nextcloud.py` before marking the
->   asset ready (ADR-0007).
+> - **Media**: Nextcloud is gone (ADR-0013). Business photos are part of `catalog` after all, but
+>   the browser uploads the file to the API (`POST .../catalog/businesses/{id}/photos`), which
+>   re-encodes it with `app/integrations/images.py` and stores it through
+>   `app/integrations/storage`. There is no signed direct-to-storage upload and no webhook.
+>   Photos are served by `GET /api/v1/discovery/photos/{photo_id}/{variant}`.
 
 ## 5. Why this structure wins for NOVA
 

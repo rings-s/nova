@@ -5,7 +5,13 @@ import { expect, test } from '@playwright/test';
 // that page — but only a page on this site.
 
 const TENANT = 'tenant-landing';
-const cors = { 'access-control-allow-origin': '*' };
+// As the real API answers: `/auth/*` is fetched with credentials (the refresh
+// cookie), and a browser refuses a credentialed response to a wildcard origin.
+const cors = {
+	'access-control-allow-origin': new URL(process.env.E2E_BASE_URL ?? 'http://localhost:5173')
+		.origin,
+	'access-control-allow-credentials': 'true'
+};
 
 /** @param {object} value */
 const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');

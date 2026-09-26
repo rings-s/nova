@@ -45,6 +45,7 @@ os.environ.setdefault("ENV", "test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret-not-used-outside-tests")
 
+from app.core import rate_limit  # noqa: E402
 from app.core.deps import get_db_session  # noqa: E402
 from app.core.security import Principal, PrincipalKind, get_principal  # noqa: E402
 from app.db.session import APP_DB_ROLE  # noqa: E402
@@ -60,10 +61,24 @@ from app.modules.catalog.models import (  # noqa: E402
     Provider,
     ProviderService,
     Service,
+    ServiceCategory,
 )
 from app.modules.identity.models import Customer, Tenant  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts with empty rate-limit buckets.
+
+    The process-wide limiter keeps its windows in Redis, and every test client
+    shares one address, so buckets used to carry over from test to test: the
+    discovery limit (60 a minute) was spent by the suite as a whole, and
+    whichever test crossed it failed with a 429 that had nothing to do with it.
+    The in-process fallback, fresh per test, keeps each test's counts its own.
+    """
+    monkeypatch.setattr(rate_limit, "_limiter", rate_limit.RateLimiter())
 
 
 @pytest.fixture(scope="session")
@@ -228,7 +243,6 @@ async def location_factory(db_session: AsyncSession):
             "name_en": "Main Branch",
             "name_ar": "الفرع الرئيسي",
             "slug": f"main-{uuid4().hex[:8]}",
-            "phone": "+966500000001",
             "timezone": "Asia/Riyadh",
         }
         defaults.update(overrides)
@@ -237,6 +251,27 @@ async def location_factory(db_session: AsyncSession):
             db_session.add(location)
             await db_session.flush()
         return location
+
+    return _create
+
+
+@pytest_asyncio.fixture
+async def category_factory(db_session: AsyncSession):
+    """A platform service category. Not tenant-owned, so no owner role needed."""
+
+    async def _create(**overrides: object) -> ServiceCategory:
+        suffix = uuid4().hex[:8]
+        defaults = {
+            "slug": f"hair-{suffix}",
+            "name_en": f"Hair {suffix}",
+            "name_ar": "شعر",
+            "is_active": True,
+        }
+        defaults.update(overrides)
+        category = ServiceCategory(**defaults)
+        db_session.add(category)
+        await db_session.flush()
+        return category
 
     return _create
 

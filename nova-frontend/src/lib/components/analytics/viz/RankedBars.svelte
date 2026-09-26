@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * A ranked comparison (revenue by service, by provider...): one row per
 	 * item, largest first, the label above a thin bar and the value at its
@@ -22,14 +23,16 @@
 		return [
 			...model.rows.slice(0, limit - 1),
 			{
-				label: `Other (${rest.length})`,
+				label: t('Other ({count})', { count: rest.length }),
 				value: rest.reduce((sum, row) => sum + row.value, 0),
 				other: true
 			}
 		];
 	});
-	let max = $derived(Math.max(1, ...rows.map((row) => row.value)));
-	let total = $derived(model.rows.reduce((sum, row) => sum + row.value, 0));
+	// A percentage is already on a 0–100 scale, and its "share of the total" means nothing.
+	let isPercent = $derived(model.unit === 'percent');
+	let max = $derived(isPercent ? 100 : Math.max(1, ...rows.map((row) => row.value)));
+	let total = $derived(isPercent ? 0 : model.rows.reduce((sum, row) => sum + row.value, 0));
 </script>
 
 <ol class="flex flex-col gap-3.5">
@@ -49,7 +52,12 @@
 					{/if}
 				</span>
 			</div>
-			<div class="ms-6 h-2.5 overflow-hidden rounded-e-[4px]">
+			<div
+				class={[
+					'ms-6 h-2.5 overflow-hidden rounded-e-[4px]',
+					isPercent ? 'bg-surface-muted' : ''
+				].join(' ')}
+			>
 				<div
 					class="h-full rounded-e-[4px] transition-[width,opacity] duration-slow ease-out-premium group-hover:opacity-85"
 					style:width={`${Math.max(row.value > 0 ? 1 : 0, (row.value / max) * 100)}%`}

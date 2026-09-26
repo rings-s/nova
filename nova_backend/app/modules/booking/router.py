@@ -135,6 +135,7 @@ async def hold_slot(
     await session.commit()
     return HoldSlotResult(
         hold_token=hold.hold_token,
+        location_id=hold.location_id,
         provider_id=hold.provider_id,
         service_id=hold.service_id,
         starts_at=hold.starts_at,
@@ -178,6 +179,11 @@ async def set_provider_schedule(
     session: AsyncSession = Depends(get_db_session),
     service: BookingService = Depends(get_booking_service),
 ) -> ScheduleOut:
+    """Replaces a provider's weekly working hours. Staff only.
+
+    Send every window: any left out are removed. `weekday` runs from 0 (Monday) to
+    6 (Sunday), and minutes count from midnight, local time at the provider's
+    branch."""
     windows = await service.set_provider_schedule(
         provider_id=provider_id,
         windows=[
@@ -201,6 +207,7 @@ async def get_provider_schedule(
     provider_id: UUID,
     service: BookingService = Depends(get_booking_service),
 ) -> ScheduleOut:
+    """A provider's weekly working hours."""
     windows = await service.get_provider_schedule(provider_id)
     return ScheduleOut(
         provider_id=provider_id,
@@ -308,6 +315,8 @@ async def list_customer_bookings(
     service: BookingService = Depends(get_booking_service),
     principal: Principal = Depends(get_principal),
 ) -> Page[BookingOut]:
+    """Bookings at this business. A customer gets their own; staff pass
+    `customer_id` to read one customer's."""
     # Same rule as creation: a customer sees only their own bookings. Without
     # this, `?customer_id=<anyone>` was a full read of another person's history.
     reference_id = resolve_booking_customer(customer_id, principal)
@@ -374,6 +383,11 @@ async def cancel_booking(
     service: BookingService = Depends(get_booking_service),
     principal: Principal = Depends(get_principal),
 ) -> dict:
+    """Cancels a booking: a customer their own, staff any.
+
+    A customer is held to the free-cancellation window (409
+    `cancellation_too_late` once it has closed). Staff waive it with
+    `?by_staff=true`, for when the salon cancels."""
     # `by_staff` waives the cancellation deadline, so it has to be *proved*,
     # not asserted: as a bare query parameter any customer could set it and
     # cancel a same-day booking for free.
@@ -428,6 +442,9 @@ async def check_in_booking(
     service: BookingService = Depends(get_booking_service),
     _: Principal = Depends(require_staff),
 ) -> dict:
+    """Marks a confirmed booking's customer as arrived. Staff only.
+
+    Scanning their QR ticket at `POST /tickets/check-in` does the same."""
     booking = await service.check_in(booking_id)
     await session.commit()
     return _as_out(booking)
@@ -445,6 +462,7 @@ async def start_booking_service(
     service: BookingService = Depends(get_booking_service),
     _: Principal = Depends(require_staff),
 ) -> dict:
+    """Starts the service for a checked-in booking. Staff only."""
     booking = await service.start_service(booking_id)
     await session.commit()
     return _as_out(booking)
@@ -462,6 +480,10 @@ async def complete_booking(
     service: BookingService = Depends(get_booking_service),
     _: Principal = Depends(require_staff),
 ) -> dict:
+    """Completes a booking that is in service. Staff only.
+
+    The customer can then review the visit, and the worker accrues any marketplace
+    commission."""
     booking = await service.complete(booking_id)
     await session.commit()
     return _as_out(booking)
@@ -479,6 +501,7 @@ async def mark_booking_no_show(
     service: BookingService = Depends(get_booking_service),
     _: Principal = Depends(require_staff),
 ) -> dict:
+    """Marks a confirmed booking whose customer never came. Staff only."""
     booking = await service.mark_no_show(booking_id)
     await session.commit()
     return _as_out(booking)

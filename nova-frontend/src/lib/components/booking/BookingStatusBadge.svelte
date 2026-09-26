@@ -1,4 +1,5 @@
 <script>
+	import { bookingStatusLabel } from '$lib/i18n/labels.js';
 	import Badge from '../ui/Badge.svelte';
 
 	/** @type {{ status: import('../../api/booking.js').BookingStatus }} */
@@ -19,4 +20,4 @@
 	let entry = $derived(map[status] ?? { tone: 'neutral', label: status });
 </script>
 
-<Badge tone={entry.tone} dot>{entry.label}</Badge>
+<Badge tone={entry.tone} dot>{bookingStatusLabel(status)}</Badge>

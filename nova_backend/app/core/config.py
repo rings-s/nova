@@ -90,9 +90,17 @@ class Settings(BaseSettings):
     queue_walk_in_penalty_minutes: int = 15
 
     # --- Payments ---
+    #: The account's *secret* key (`sk_test_…` or `sk_live_…`), from the
+    #: Moyasar dashboard under Settings > API Keys. Unset, payments answer 503
+    #: `integration_not_configured` and the rest of the app runs as normal.
     moyasar_api_key: str | None = None
+    #: The shared secret set on the webhook in the Moyasar dashboard (Settings >
+    #: Webhooks). Moyasar sends it back as `secret_token` in every webhook body.
     moyasar_webhook_secret: str | None = None
     moyasar_base_url: str = "https://api.moyasar.com/v1"
+    #: How long a customer has to pay on Moyasar's checkout page before the
+    #: invoice expires.
+    moyasar_checkout_ttl_minutes: int = 30
     #: Deposit required to confirm a booking, as a percentage of service price.
     #: 0 means bookings confirm without payment (docs/11 allows both).
     default_deposit_percent: int = 0
@@ -107,10 +115,23 @@ class Settings(BaseSettings):
     quiet_hours_end: int = 8
 
     # --- AI agents (docs/04, docs/10) ---
+    #: Which local model server answers. Both speak the OpenAI chat protocol at
+    #: /v1; the provider only decides the defaults and how replies are read
+    #: (`ai_agents/runtime.py`).
+    ai_provider: Literal["ollama", "lmstudio"] = "ollama"
     #: OpenAI-compatible endpoint. Ollama exposes one at /v1.
     ollama_base_url: str = "http://localhost:11434/v1"
+    #: Overrides `ollama_base_url` for any provider, e.g. LM Studio's
+    #: `http://host.docker.internal:1234/v1`.
+    ai_base_url: str | None = None
+    #: Local servers ignore it; set it if the server is started with auth on.
+    ai_api_key: str | None = None
     ai_routing_model: str = "llama3.1:8b"
     ai_reasoning_model: str = "llama3.1:70b"
+    #: Let a hybrid reasoning model (Qwen3) think before it answers. Off by
+    #: default: on a CPU or small GPU thinking multiplies a turn's time (about
+    #: 5x for qwen3-8b in LM Studio) for little gain on these narrow tool tasks.
+    ai_thinking: bool = False
     #: docs/10 section 12: abort the turn and hand off past this.
     ai_tool_timeout_seconds: float = 5.0
     ai_request_timeout_seconds: float = 30.0
@@ -186,6 +207,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "CLIENT_IP_HEADER cannot be X-Forwarded-For: its first entry is whatever the "
                 "client sent. Name the header your proxy writes itself, such as CF-Connecting-IP."
+            )
+        if self.moyasar_api_key and not self.moyasar_api_key.startswith(("sk_test_", "sk_live_")):
+            # A publishable key can neither open a checkout nor read a payment
+            # back, so every payment would fail at the first request.
+            raise ValueError(
+                "MOYASAR_API_KEY must be the account's secret key (sk_test_… or sk_live_…), "
+                "not the publishable key (pk_…)."
+            )
+        if self.env == "production" and (self.moyasar_api_key or "").startswith("sk_test_"):
+            raise ValueError(
+                "MOYASAR_API_KEY is a test key in production: no payer would ever be charged."
             )
         refusal = dev_bypass_refusal(self)
         if refusal is not None:

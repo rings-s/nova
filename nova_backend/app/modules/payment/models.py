@@ -48,6 +48,15 @@ class PaymentRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
             unique=True,
             postgresql_where=text("gateway_payment_id IS NOT NULL"),
         ),
+        # Found the same way: a `payment_paid` webhook names the invoice its
+        # payment paid, and that is the only link back to a checkout whose
+        # payment id NOVA has not seen yet.
+        Index(
+            "uq_payments_gateway_invoice_id",
+            "gateway_invoice_id",
+            unique=True,
+            postgresql_where=text("gateway_invoice_id IS NOT NULL"),
+        ),
         # The daily payout job (docs/11 section 8) asks for one day's captures
         # across every tenant. Partial, because the rows it never wants — every
         # pending and failed payment ever attempted — are exactly the ones with
@@ -79,6 +88,7 @@ class PaymentRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     )
     gateway: Mapped[str] = mapped_column(String(50), nullable=False, default="moyasar")
     gateway_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gateway_invoice_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     #: True only once a *signature-verified* webhook moved this payment. A
     #: client-side redirect claiming success never sets it.

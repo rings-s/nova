@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * A 2px line over an ordered category axis, with a crosshair: the pointer
 	 * anywhere over the plot snaps to the nearest category and reads out every
@@ -122,13 +123,17 @@
 		const top = Math.max(...model.series.map((series) => series.values[i] ?? 0));
 		const isForecast = model.forecastFrom !== null && i > model.forecastFrom;
 		const rows = model.series.map((series) => ({
-			label: isForecast ? `${series.label} (trend)` : series.label,
+			label: isForecast ? `${series.label} ${t('(trend)')}` : series.label,
 			value: fmt(series.values[i]),
 			color: series.color
 		}));
 		const b = model.band?.[i];
 		if (isForecast && b && Number.isFinite(b.upper)) {
-			rows.push({ label: 'Likely range', value: `${fmt(b.lower)} – ${fmt(b.upper)}`, color: '' });
+			rows.push({
+				label: t('Likely range'),
+				value: `${fmt(b.lower)} – ${fmt(b.upper)}`,
+				color: ''
+			});
 		}
 		return {
 			x: M.left + cx(i),
@@ -142,6 +147,7 @@
 <div class="relative w-full" bind:clientWidth={width} style:height={`${height}px`}>
 	{#if width > 0}
 		<svg
+			direction="ltr"
 			{width}
 			{height}
 			role="img"
@@ -178,20 +184,13 @@
 						height={innerH}
 						class="fill-surface-sunken"
 					/>
-					<text
-						x={cx(model.forecastFrom) + 6}
-						y="10"
-						class="fill-fg-subtle text-[11px] font-medium">Trend</text
+					<text x={cx(model.forecastFrom) + 6} y="10" class="fill-fg-subtle text-[11px] font-medium"
+						>{t('Trend')}</text
 					>
 				{/if}
 
 				{#if bandPath}
-					<path
-						d={bandPath}
-						fill={model.series[0]?.color}
-						opacity="0.14"
-						stroke="none"
-					/>
+					<path d={bandPath} fill={model.series[0]?.color} opacity="0.14" stroke="none" />
 				{/if}
 
 				{#if hover !== null}

@@ -12,9 +12,10 @@ from app.modules.catalog.repository import (
     LocationRepository,
     ProviderRepository,
     PublicCatalogRepository,
+    ServiceCategoryRepository,
     ServiceRepository,
 )
-from app.modules.catalog.service import CatalogService, PublicCatalogService
+from app.modules.catalog.service import CatalogService, CategoryService, PublicCatalogService
 
 
 def get_image_store() -> ImageStore:
@@ -31,14 +32,13 @@ def build_catalog_service(session: AsyncSession, tenant_id: UUID) -> CatalogServ
     those places is how two constructions of "the same" service silently drift
     apart.
     """
-    settings = get_settings()
     return CatalogService(
         businesses=BusinessRepository(session, tenant_id),
         locations=LocationRepository(session, tenant_id),
         services=ServiceRepository(session, tenant_id),
         providers=ProviderRepository(session, tenant_id),
+        categories=ServiceCategoryRepository(session),
         tenant_id=tenant_id,
-        allowed_phone_country_codes=settings.allowed_phone_country_codes,
         photos=BusinessPhotoRepository(session, tenant_id),
         images=get_image_store(),
     )
@@ -69,4 +69,13 @@ def build_public_catalog_service(session: AsyncSession) -> PublicCatalogService:
     The caller must open the RLS window first (`set_discovery_scope`), or every
     method on the returned service correctly finds nothing.
     """
-    return PublicCatalogService(listings=PublicCatalogRepository(session), images=get_image_store())
+    return PublicCatalogService(
+        listings=PublicCatalogRepository(session),
+        categories=ServiceCategoryRepository(session),
+        images=get_image_store(),
+    )
+
+
+def get_category_service(session: AsyncSession = Depends(get_db_session)) -> CategoryService:
+    """The platform's category list. No tenant: it is shared by all of them."""
+    return CategoryService(categories=ServiceCategoryRepository(session))

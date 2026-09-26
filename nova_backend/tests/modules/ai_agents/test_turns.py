@@ -155,7 +155,9 @@ async def add_bookings(
 async def subscribe_to_studio(client: AsyncClient, salon: dict) -> None:
     response = await client.post(
         f"/api/v1/tenants/{salon['tenant'].id}/billing/subscriptions",
-        json={"business_id": str(salon["business"].id), "tier": "studio"},
+        # A trial, because a paid plan without one waits on its first payment
+        # (billing's checkout) and is gated as Solo until then.
+        json={"business_id": str(salon["business"].id), "tier": "studio", "trial_days": 14},
     )
     assert response.status_code == 201, response.text
 
@@ -169,8 +171,11 @@ async def chat(
     customer_id: UUID | None = None,
     message: str = "How is business?",
     session_id: str = "turn-test",
+    confirm_hold_token: str | None = None,
 ) -> Response:
     body: dict[str, Any] = {"session_id": session_id, "message": message, "locale": "en"}
+    if confirm_hold_token is not None:
+        body["confirm_hold_token"] = confirm_hold_token
     if with_business:
         body["business_id"] = str(salon["business"].id)
     if customer_id is not None:
@@ -459,8 +464,12 @@ async def test_a_place_in_the_queue_is_kept_returned_and_not_taken_twice_when_th
 async def test_a_held_slot_reaches_the_client_with_its_token_and_the_model_never_sees_it(
     app: FastAPI, client: AsyncClient, salon, qualify
 ):
+    from tests.modules.ai_agents.test_booking_turns import open_all_week
+
     await qualify(salon["provider"], salon["service"])
-    starts_at = (datetime.now(UTC) + timedelta(days=2)).replace(microsecond=0)
+    await open_all_week(client, salon)
+    # On the booking grid: the hold tool holds only a time that is really free.
+    starts_at = (datetime.now(UTC) + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
     slot = {
         "provider_id": str(salon["provider"].id),
         "service_id": str(salon["service"].id),

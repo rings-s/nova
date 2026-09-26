@@ -17,8 +17,8 @@ Real Postgres, not SQLite — a second logical database (`nova_test`) alongside 
 - The engine/connection are created **per test function**, not shared across the session — an
   earlier session-scoped engine caused "attached to a different loop" failures because
   pytest-asyncio gives each test its own event loop by default while `asyncio_mode = "auto"`'s
-  fixture loop scope didn't match. Documented in [[../operations/testing-strategy]] so this
-  isn't rediscovered the hard way again.
+  fixture loop scope didn't match. Documented at the `db_session` fixture in
+  `nova_backend/tests/conftest.py` so this isn't rediscovered the hard way again.
 
 ## Consequences
 

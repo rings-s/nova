@@ -1,4 +1,6 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
+	import { pickBilingual } from '$lib/utils/bilingual.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
@@ -25,10 +27,14 @@
 	 */
 	function handleSuccess(user, details) {
 		if (details.intent === 'business_owner') {
-			toastStore.success(`${details.tenant?.name_en || 'Your salon'} is on NOVA.`);
+			toastStore.success(
+				t('{name} is on NOVA.', {
+					name: (details.tenant && pickBilingual(details.tenant, 'name')) || t('Your salon')
+				})
+			);
 			goto(resolve('/app'));
 		} else {
-			toastStore.success('Account created successfully.');
+			toastStore.success(t('Account created successfully.'));
 			goto(resolve('/'));
 		}
 	}
@@ -41,7 +47,7 @@
 </script>
 
 <svelte:head>
-	<title>Create account — NOVA</title>
+	<title>{t('Create account')} — NOVA</title>
 </svelte:head>
 
 <div class="animate-scale-in rounded-panel border border-line bg-surface p-7 shadow-overlay sm:p-9">
@@ -49,19 +55,19 @@
 	<div class="flex items-center justify-between gap-4">
 		<Logo />
 
-		<Badge tone="success" size="sm">14-Day Free Trial</Badge>
+		<Badge tone="success" size="sm">{t('14-Day Free Trial')}</Badge>
 	</div>
 
 	<!-- Intro -->
 	<div class="mt-8">
-		<p class="text-xs font-semibold tracking-wider text-accent uppercase">Get started</p>
+		<p class="text-xs font-semibold tracking-wider text-accent uppercase">{t('Get started')}</p>
 
 		<h1 class="mt-2 text-display-md font-semibold tracking-tight text-fg">
-			Create your NOVA account
+			{t('Create your NOVA account')}
 		</h1>
 
 		<p class="mt-2 max-w-sm text-sm leading-6 text-fg-muted">
-			Book appointments as a customer, or set up your salon on NOVA.
+			{t('Book appointments as a customer, or set up your salon on NOVA.')}
 		</p>
 	</div>
 
@@ -73,9 +79,9 @@
 	<!-- Login -->
 	<div class="mt-8 border-t border-line-subtle pt-6 text-center">
 		<p class="text-sm text-fg-muted">
-			Already have an account?
+			{t('Already have an account?')}
 			<a href={resolve('/login')} class="ms-1 font-semibold text-accent hover:underline">
-				Sign in
+				{t('Sign in')}
 			</a>
 		</p>
 	</div>

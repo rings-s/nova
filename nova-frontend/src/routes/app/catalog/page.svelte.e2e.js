@@ -47,7 +47,6 @@ function branch(id, name, at) {
 		name_en: name,
 		name_ar: 'فرع',
 		slug: id,
-		phone: '+966500000001',
 		timezone: 'Asia/Riyadh',
 		city: 'Riyadh',
 		latitude: at?.lat ?? null,
@@ -192,7 +191,6 @@ async function openAddLocation(page) {
 async function fillRequired(dialog) {
 	await dialog.getByLabel('Name (English)').fill('Olaya Branch');
 	await dialog.getByLabel('Name (Arabic)').fill('فرع العليا');
-	await dialog.getByLabel('Phone').fill('+966500000001');
 }
 
 test.describe('adding a location', () => {

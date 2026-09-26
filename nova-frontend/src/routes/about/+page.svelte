@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -16,31 +17,32 @@
 
 	/** @type {{ id: LayerId, label: string }[]} */
 	const layerTabs = [
-		{ id: 'holds', label: 'Slot holds' },
-		{ id: 'bilingual', label: 'Bilingual data' },
-		{ id: 'whatsapp', label: 'WhatsApp' },
-		{ id: 'banking', label: 'Payments' }
+		{ id: 'holds', label: m('Slot holds') },
+		{ id: 'bilingual', label: m('Bilingual data') },
+		{ id: 'whatsapp', label: m('WhatsApp') },
+		{ id: 'banking', label: m('Payments') }
 	];
 
 	/** @type {Record<LayerId, { title: string, tag: string, highlight: string, codeSnippet: string, description: string }>} */
 	const architectureLayers = {
 		holds: {
-			title: 'Deterministic slot holds',
-			tag: 'Concurrency control',
-			highlight: 'A short-lived lock, held per slot',
+			title: m('Deterministic slot holds'),
+			tag: m('Concurrency control'),
+			highlight: m('A short-lived lock, held per slot'),
 			codeSnippet: `// Simplified example
 await redis.set(
   \`hold:\${tenantId}:\${slotId}\`,
   JSON.stringify({ clientId, expiresAt: Date.now() + 600000 }),
   'EX', 600, 'NX'
 );`,
-			description:
+			description: m(
 				'The moment a customer starts checkout, that slot is held for a few minutes in distributed memory. If a walk-in at reception and an online customer reach for the same slot, the first hold wins — never a double-booking.'
+			)
 		},
 		bilingual: {
-			title: 'Bilingual by design',
-			tag: 'Regional data model',
-			highlight: 'Arabic and English on every record',
+			title: m('Bilingual by design'),
+			tag: m('Regional data model'),
+			highlight: m('Arabic and English on every record'),
 			codeSnippet: `// Simplified example
 type Service = {
   name_ar: 'قص شعر وتصفيف سشوار',
@@ -48,13 +50,14 @@ type Service = {
   price: 180.00,
   currency: 'SAR'
 };`,
-			description:
+			description: m(
 				'Every business, service and provider name is stored in Arabic and English from the first record — not translated after the fact by a client-side overlay that breaks layout or number formatting.'
+			)
 		},
 		whatsapp: {
-			title: 'WhatsApp messaging',
-			tag: 'Direct messaging',
-			highlight: 'Confirmations sent where customers already are',
+			title: m('WhatsApp messaging'),
+			tag: m('Direct messaging'),
+			highlight: m('Confirmations sent where customers already are'),
 			codeSnippet: `// Simplified example
 POST /v1/messages/template
 {
@@ -62,13 +65,14 @@ POST /v1/messages/template
   "to": customerPhone,
   "vars": [customerName, startsAt]
 }`,
-			description:
+			description: m(
 				'Booking confirmations, reminders and receipts are sent on WhatsApp — built into the booking flow itself, not a separate app a customer has to download.'
+			)
 		},
 		banking: {
-			title: 'Deposits & payments',
-			tag: 'Financial infrastructure',
-			highlight: 'Card details handled by Moyasar, not NOVA',
+			title: m('Deposits & payments'),
+			tag: m('Financial infrastructure'),
+			highlight: m('Card details handled by Moyasar, not NOVA'),
 			codeSnippet: `// Simplified example
 POST /v1/payments
 {
@@ -76,8 +80,9 @@ POST /v1/payments
   "currency": "SAR",
   "source": { "type": "applepay" }
 }`,
-			description:
+			description: m(
 				'A deposit can be required to confirm a booking. Card and Mada details are captured directly by Moyasar — they never pass through or get stored on NOVA servers.'
+			)
 		}
 	};
 
@@ -87,61 +92,77 @@ POST /v1/payments
 	const pillars = [
 		{
 			icon: 'globe',
-			title: 'Arabic-native data core',
-			subtitle: 'Bilingual by design',
-			body: 'Every business, service, provider profile, and confirmation message stores Arabic and English data natively from the first record — not a client-side translation layer bolted on afterward.'
+			title: m('Arabic-native data core'),
+			subtitle: m('Bilingual by design'),
+			body: m(
+				'Every business, service, provider profile, and confirmation message stores Arabic and English data natively from the first record — not a client-side translation layer bolted on afterward.'
+			)
 		},
 		{
 			icon: 'calendar',
-			title: 'Deterministic slot holds',
-			subtitle: 'No double-booking',
-			body: 'When a walk-in at reception and an online customer reach for the same slot, NOVA holds it for the first checkout to complete — so the same appointment is never sold twice.'
+			title: m('Deterministic slot holds'),
+			subtitle: m('No double-booking'),
+			body: m(
+				'When a walk-in at reception and an online customer reach for the same slot, NOVA holds it for the first checkout to complete — so the same appointment is never sold twice.'
+			)
 		},
 		{
 			icon: 'chat-bubble',
-			title: 'WhatsApp as core infrastructure',
-			subtitle: 'No forced app downloads',
-			body: "Rather than asking clients to install a separate app, NOVA sends confirmations and reminders on WhatsApp — the channel they're already using."
+			title: m('WhatsApp as core infrastructure'),
+			subtitle: m('No forced app downloads'),
+			body: m(
+				"Rather than asking clients to install a separate app, NOVA sends confirmations and reminders on WhatsApp — the channel they're already using."
+			)
 		},
 		{
 			icon: 'credit-card',
-			title: 'GCC financial integration',
-			subtitle: 'Moyasar, Mada & Apple Pay',
-			body: 'Deposits and payments run through Moyasar, supporting Mada, Apple Pay and card payments. NOVA never holds customer funds or touches card details directly.'
+			title: m('GCC financial integration'),
+			subtitle: m('Moyasar, Mada & Apple Pay'),
+			body: m(
+				'Deposits and payments run through Moyasar, supporting Mada, Apple Pay and card payments. NOVA never holds customer funds or touches card details directly.'
+			)
 		}
 	];
 
 	const comparisons = [
 		{
-			label: 'Client booking experience',
-			legacy:
-				'Forces clients to create another account, install a separate mobile app, and set a password.',
-			nova: 'A web storefront with card/Apple Pay checkout and automatic confirmations sent via WhatsApp.'
+			label: m('Client booking experience'),
+			legacy: m(
+				'Forces clients to create another account, install a separate mobile app, and set a password.'
+			),
+			nova: m(
+				'A web storefront with card/Apple Pay checkout and automatic confirmations sent via WhatsApp.'
+			)
 		},
 		{
-			label: 'Walk-in & appointment queue',
-			legacy:
-				'A paper notebook on the reception counter that gets out of sync with phone bookings and online slots.',
-			nova: 'One unified line for walk-ins and bookings, with a ticket and live queue position.'
+			label: m('Walk-in & appointment queue'),
+			legacy: m(
+				'A paper notebook on the reception counter that gets out of sync with phone bookings and online slots.'
+			),
+			nova: m('One unified line for walk-ins and bookings, with a ticket and live queue position.')
 		},
 		{
-			label: 'Language & locale',
-			legacy: 'English-only software, with translation overlays that break layout in RTL.',
-			nova: 'Arabic and English stored natively on every record, not translated after the fact.'
+			label: m('Language & locale'),
+			legacy: m('English-only software, with translation overlays that break layout in RTL.'),
+			nova: m('Arabic and English stored natively on every record, not translated after the fact.')
 		},
 		{
-			label: 'Deposit & no-show protection',
-			legacy: 'No deposits, or manual bank transfers coordinated over WhatsApp screenshots.',
-			nova: 'A deposit collected at booking time through Moyasar, credited automatically to the bill.'
+			label: m('Deposit & no-show protection'),
+			legacy: m('No deposits, or manual bank transfers coordinated over WhatsApp screenshots.'),
+			nova: m(
+				'A deposit collected at booking time through Moyasar, credited automatically to the bill.'
+			)
 		}
 	];
 </script>
 
 <svelte:head>
-	<title>About — NOVA</title>
+	<title>{t('About')} — NOVA</title>
 	<meta
 		name="description"
-		content="Learn about NOVA's mission: replacing fragmented salon software with a unified, bilingual operating system engineered for Saudi Arabia and the GCC."
+		content={t(
+			"Learn about NOVA's mission: replacing fragmented salon software with a unified, bilingual operating system engineered for Saudi Arabia and the GCC."
+		)}
 	/>
 </svelte:head>
 
@@ -155,25 +176,27 @@ POST /v1/payments
 				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
 				<span class="size-1.5 rounded-full bg-brand-500"></span>
-				Built for the GCC · Riyadh, Jeddah, Dubai
+				{t('Built for the GCC · Riyadh, Jeddah, Dubai')}
 			</p>
 		</div>
 
 		<!-- Core Headline -->
 		<div class="mx-auto mt-6 max-w-4xl text-center">
 			<h1 class="text-display-2xl font-semibold tracking-tight text-fg">
-				Built for the reality of GCC salons &amp; spas
+				{t('Built for the reality of GCC salons & spas')}
 			</h1>
 			<p class="mx-auto mt-6 max-w-2xl text-body-lg text-fg-muted">
-				Booking, walk-ins, WhatsApp and payments are usually four disconnected tools stitched
-				together by hand. NOVA brings them into one platform, built around how a salon actually runs
-				its day.
+				{t(
+					'Booking, walk-ins, WhatsApp and payments are usually four disconnected tools stitched together by hand. NOVA brings them into one platform, built around how a salon actually runs its day.'
+				)}
 			</p>
 			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
 				<Button size="lg" href={`${resolve('/register')}?as=business`}
-					>Start 14-day free trial</Button
+					>{t('Start 14-day free trial')}</Button
 				>
-				<Button size="lg" variant="outline" href={resolve('/features')}>Explore features</Button>
+				<Button size="lg" variant="outline" href={resolve('/features')}
+					>{t('Explore features')}</Button
+				>
 			</div>
 		</div>
 
@@ -185,30 +208,33 @@ POST /v1/payments
 			>
 				<div>
 					<p class="text-xs font-semibold tracking-wider text-fg-subtle uppercase">
-						Under the hood
+						{t('Under the hood')}
 					</p>
 					<p class="text-sm font-medium text-fg">
-						How NOVA solves the problems salons actually have
+						{t('How NOVA solves the problems salons actually have')}
 					</p>
 				</div>
-				<Tabs tabs={layerTabs} bind:active={activeLayer} />
+				<Tabs
+					tabs={layerTabs.map((tab) => ({ ...tab, label: t(tab.label) }))}
+					bind:active={activeLayer}
+				/>
 			</div>
 
 			<!-- Active architecture details -->
 			<div class="grid gap-8 p-6 lg:grid-cols-12">
 				<div class="space-y-4 lg:col-span-7">
 					<div class="flex items-center gap-2">
-						<Badge tone="accent" size="sm">{current.tag}</Badge>
+						<Badge tone="accent" size="sm">{t(current.tag)}</Badge>
 					</div>
 					<h3 class="text-xl font-semibold tracking-tight text-fg">
-						{current.title}
+						{t(current.title)}
 					</h3>
 					<p class="text-sm leading-relaxed text-fg-muted">
-						{current.description}
+						{t(current.description)}
 					</p>
 					<div class="rounded-card border border-line bg-surface-sunken p-4 text-sm">
-						<span class="font-semibold text-fg">In short</span>
-						<p class="mt-1 text-fg-muted">{current.highlight}</p>
+						<span class="font-semibold text-fg">{t('In short')}</span>
+						<p class="mt-1 text-fg-muted">{t(current.highlight)}</p>
 					</div>
 				</div>
 
@@ -219,9 +245,11 @@ POST /v1/payments
 						<div
 							class="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400"
 						>
-							<span>Illustrative example</span>
+							<span>{t('Illustrative example')}</span>
 						</div>
-						<pre class="mt-3 overflow-x-auto text-[11px] leading-relaxed text-emerald-400"><code
+						<pre
+							dir="ltr"
+							class="mt-3 overflow-x-auto text-[11px] leading-relaxed text-emerald-400"><code
 								>{current.codeSnippet}</code
 							></pre>
 					</div>
@@ -236,9 +264,11 @@ POST /v1/payments
 	<Container size="xl">
 		<SectionHeading
 			align="center"
-			eyebrow="Why NOVA exists"
-			title="A unified OS vs. a patchwork of foreign tools"
-			subtitle="Most salons run on 4 disconnected systems that don't speak to each other. NOVA replaces the chaos with a single source of truth."
+			eyebrow={t('Why NOVA exists')}
+			title={t('A unified OS vs. a patchwork of foreign tools')}
+			subtitle={t(
+				"Most salons run on 4 disconnected systems that don't speak to each other. NOVA replaces the chaos with a single source of truth."
+			)}
 		/>
 
 		<div class="mt-12 grid gap-6 md:grid-cols-2">
@@ -250,18 +280,18 @@ POST /v1/payments
 					>
 						<Icon name="x" class="size-4" />
 					</span>
-					<h3 class="text-lg font-semibold text-fg">The patchwork way</h3>
+					<h3 class="text-lg font-semibold text-fg">{t('The patchwork way')}</h3>
 				</div>
 				<p class="mt-3 text-sm text-fg-muted">
-					How salons traditionally manage their front desk operations:
+					{t('How salons traditionally manage their front desk operations:')}
 				</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
 						<li class="rounded-card border border-line bg-surface-sunken p-4">
 							<p class="text-xs font-semibold tracking-wider text-fg-subtle uppercase">
-								{item.label}
+								{t(item.label)}
 							</p>
-							<p class="mt-1 text-sm text-fg-muted">{item.legacy}</p>
+							<p class="mt-1 text-sm text-fg-muted">{t(item.legacy)}</p>
 						</li>
 					{/each}
 				</ul>
@@ -277,18 +307,18 @@ POST /v1/payments
 					>
 						<Icon name="check" class="size-4" />
 					</span>
-					<h3 class="text-lg font-semibold text-fg">The NOVA way</h3>
+					<h3 class="text-lg font-semibold text-fg">{t('The NOVA way')}</h3>
 				</div>
-				<p class="mt-3 text-sm text-fg-muted">How a salon operates with NOVA:</p>
+				<p class="mt-3 text-sm text-fg-muted">{t('How a salon operates with NOVA:')}</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
 						<li
 							class="rounded-card border border-brand-100 bg-accent-soft/60 p-4 dark:border-brand-500/20"
 						>
 							<p class="text-xs font-semibold tracking-wider text-accent uppercase">
-								{item.label}
+								{t(item.label)}
 							</p>
-							<p class="mt-1 text-sm text-fg">{item.nova}</p>
+							<p class="mt-1 text-sm text-fg">{t(item.nova)}</p>
 						</li>
 					{/each}
 				</ul>
@@ -302,9 +332,11 @@ POST /v1/payments
 	<Container size="xl">
 		<SectionHeading
 			align="center"
-			eyebrow="Engineering principles"
-			title="Built on four non-negotiable foundations"
-			subtitle="Every line of code and user experience decision is anchored in regional authenticity and computational rigor."
+			eyebrow={t('Engineering principles')}
+			title={t('Built on four non-negotiable foundations')}
+			subtitle={t(
+				'Every line of code and user experience decision is anchored in regional authenticity and computational rigor.'
+			)}
 		/>
 
 		<div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -319,13 +351,13 @@ POST /v1/payments
 							<Icon name={pillar.icon} class="size-5" />
 						</div>
 						<h3 class="mt-4 text-base font-semibold text-fg">
-							{pillar.title}
+							{t(pillar.title)}
 						</h3>
 						<p class="text-xs font-medium text-accent">
-							{pillar.subtitle}
+							{t(pillar.subtitle)}
 						</p>
 						<p class="mt-3 text-sm leading-relaxed text-fg-muted">
-							{pillar.body}
+							{t(pillar.body)}
 						</p>
 					</div>
 				</div>
@@ -339,13 +371,14 @@ POST /v1/payments
 	<Container size="xl">
 		<div class="grid items-center gap-10 lg:grid-cols-12">
 			<div class="space-y-4 lg:col-span-6">
-				<Badge tone="accent">Security &amp; privacy</Badge>
+				<Badge tone="accent">{t('Security & privacy')}</Badge>
 				<h2 class="text-display-md font-semibold tracking-tight text-fg">
-					Tenant isolation, built into the database
+					{t('Tenant isolation, built into the database')}
 				</h2>
 				<p class="text-body-lg text-fg-muted">
-					Your client list, pricing and financial reports are confidential. Every query is scoped to
-					the authenticated tenant at the database level, not just in application code.
+					{t(
+						'Your client list, pricing and financial reports are confidential. Every query is scoped to the authenticated tenant at the database level, not just in application code.'
+					)}
 				</p>
 				<ul class="space-y-3 pt-2">
 					<li class="flex items-start gap-3 text-sm text-fg-secondary">
@@ -354,8 +387,10 @@ POST /v1/payments
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
 						/>
 						<span
-							><strong>Row-level tenant isolation:</strong> Postgres enforces tenant boundaries with row-level
-							security, not application code alone.</span
+							><strong>{t('Row-level tenant isolation:')}</strong>
+							{t(
+								'Postgres enforces tenant boundaries with row-level security, not application code alone.'
+							)}</span
 						>
 					</li>
 					<li class="flex items-start gap-3 text-sm text-fg-secondary">
@@ -364,8 +399,10 @@ POST /v1/payments
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
 						/>
 						<span
-							><strong>Cards handled by Moyasar:</strong> Card and Mada details are captured directly
-							by Moyasar and never touch NOVA's servers.</span
+							><strong>{t('Cards handled by Moyasar:')}</strong>
+							{t(
+								"Card and Mada details are captured directly by Moyasar and never touch NOVA's servers."
+							)}</span
 						>
 					</li>
 					<li class="flex items-start gap-3 text-sm text-fg-secondary">
@@ -374,31 +411,38 @@ POST /v1/payments
 							class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
 						/>
 						<span
-							><strong>Role-based staff access:</strong> A provider sees their own schedule; front-desk
-							staff don't see owner-level financials.</span
+							><strong>{t('Role-based staff access:')}</strong>
+							{t(
+								"A provider sees their own schedule; front-desk staff don't see owner-level financials."
+							)}</span
 						>
 					</li>
 				</ul>
 			</div>
 			<div class="lg:col-span-6">
 				<div class="rounded-panel border border-line bg-surface-sunken p-8">
-					<h3 class="text-base font-semibold text-fg">Built with PDPL in mind</h3>
+					<h3 class="text-base font-semibold text-fg">{t('Built with PDPL in mind')}</h3>
 					<p class="mt-2 text-sm text-fg-muted">
-						Customer records carry explicit consent flags for marketing and communication,
-						reflecting the Saudi Personal Data Protection Law's consent requirements.
+						{t(
+							"Customer records carry explicit consent flags for marketing and communication, reflecting the Saudi Personal Data Protection Law's consent requirements."
+						)}
 					</p>
 					<div class="mt-6 space-y-3">
 						<div
 							class="flex items-center justify-between rounded-card border border-line bg-surface p-4 text-sm font-medium shadow-card"
 						>
-							<span class="text-fg-secondary">Tenant-scoped by row-level security</span>
-							<span class="font-semibold text-emerald-600 dark:text-emerald-400">Enforced</span>
+							<span class="text-fg-secondary">{t('Tenant-scoped by row-level security')}</span>
+							<span class="font-semibold text-emerald-600 dark:text-emerald-400"
+								>{t('Enforced')}</span
+							>
 						</div>
 						<div
 							class="flex items-center justify-between rounded-card border border-line bg-surface p-4 text-sm font-medium shadow-card"
 						>
-							<span class="text-fg-secondary">Per-customer consent tracking</span>
-							<span class="font-semibold text-emerald-600 dark:text-emerald-400">Built in</span>
+							<span class="text-fg-secondary">{t('Per-customer consent tracking')}</span>
+							<span class="font-semibold text-emerald-600 dark:text-emerald-400"
+								>{t('Built in')}</span
+							>
 						</div>
 					</div>
 				</div>
@@ -416,17 +460,17 @@ POST /v1/payments
 	<GradientBlob variant="corner" />
 	<Container size="md" class="relative py-8 text-center sm:py-12">
 		<h2 class="text-display-lg font-semibold tracking-tight text-white">
-			Bring your salon onto NOVA
+			{t('Bring your salon onto NOVA')}
 		</h2>
 		<p class="mt-4 text-body-lg text-white/80">
-			Set up your storefront, services and providers in minutes.
+			{t('Set up your storefront, services and providers in minutes.')}
 		</p>
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
 			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
-				Start 14-day free trial
+				{t('Start 14-day free trial')}
 			</Button>
 			<Button size="lg" variant="outline-inverse" href={resolve('/discover')}>
-				Find a salon near you
+				{t('Find a salon near you')}
 			</Button>
 		</div>
 	</Container>

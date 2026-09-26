@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * What customers said about their visits. The stars are public (they rank
 	 * the business on the marketplace); the comments are for staff only.
@@ -70,16 +71,18 @@
 	);
 </script>
 
-<svelte:head><title>Reviews — NOVA</title></svelte:head>
+<svelte:head><title>{t('Reviews')} — NOVA</title></svelte:head>
 
 <PageHeader
-	eyebrow="Business"
-	title="Reviews"
-	subtitle="Ratings from verified visits. Stars are public on the marketplace; comments are for your team only."
+	eyebrow={t('Business')}
+	title={t('Reviews')}
+	subtitle={t(
+		'Ratings from verified visits. Stars are public on the marketplace; comments are for your team only.'
+	)}
 />
 
 {#if !businessId}
-	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
+	<Alert tone="info">{t('Set up your storefront in Catalog first.')}</Alert>
 {:else if loadError}
 	<Alert tone="error">{loadError}</Alert>
 {:else if loading && !business}
@@ -92,7 +95,7 @@
 {:else}
 	<div class="grid items-start gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
 		<Card padding="lg" class="lg:sticky lg:top-8">
-			<p class="text-[13px] font-medium text-fg-muted">Overall rating</p>
+			<p class="text-[13px] font-medium text-fg-muted">{t('Overall rating')}</p>
 			{#if business?.rating_average != null}
 				<p class="mt-2 text-5xl font-semibold tracking-tight text-fg tabular-nums">
 					{business.rating_average.toFixed(1)}
@@ -101,7 +104,7 @@
 					<RatingStars average={business.rating_average} count={business.rating_count} />
 				</div>
 				{#if reviews.length > 0}
-					<ul class="mt-6 space-y-1.5" aria-label="Ratings on this page by stars">
+					<ul class="mt-6 space-y-1.5" aria-label={t('Ratings on this page by stars')}>
 						{#each distribution as row (row.stars)}
 							<li class="flex items-center gap-2 text-xs">
 								<span class="w-3 text-end text-fg-muted tabular-nums">{row.stars}</span>
@@ -119,16 +122,18 @@
 			{:else}
 				<p class="mt-2 text-3xl font-semibold text-fg-subtle">—</p>
 				<p class="mt-2 text-sm text-fg-muted">
-					No ratings yet. Customers can rate a visit once it's marked completed.
+					{t("No ratings yet. Customers can rate a visit once it's marked completed.")}
 				</p>
 			{/if}
 		</Card>
 
-		<section aria-label="Reviews">
+		<section aria-label={t('Reviews')}>
 			{#if reviews.length === 0}
 				<EmptyState
-					title="No reviews yet"
-					description="When customers rate their completed visits, their stars and comments appear here."
+					title={t('No reviews yet')}
+					description={t(
+						'When customers rate their completed visits, their stars and comments appear here.'
+					)}
 				>
 					{#snippet icon()}<Icon name="star" class="size-6" />{/snippet}
 				</EmptyState>
@@ -138,18 +143,18 @@
 						<li class="rounded-card border border-line bg-surface p-5 shadow-card">
 							<div class="flex flex-wrap items-center justify-between gap-2">
 								<RatingStars average={review.rating} count={1} size="sm" showCount={false} />
-								<span class="text-xs text-fg-muted">{formatDate(review.created_at, 'en')}</span>
+								<span class="text-xs text-fg-muted">{formatDate(review.created_at)}</span>
 							</div>
 							{#if review.comment}
 								<p class="mt-3 text-sm whitespace-pre-line text-fg-secondary">{review.comment}</p>
 							{:else}
-								<p class="mt-3 text-sm text-fg-subtle italic">No comment.</p>
+								<p class="mt-3 text-sm text-fg-subtle italic">{t('No comment.')}</p>
 							{/if}
 							<a
 								href={resolve('/app/customers/[id]', { id: review.customer_id })}
 								class="mt-3 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
 							>
-								View customer
+								{t('View customer')}
 								<Icon name="chevron-right" class="size-3.5 rtl:rotate-180" />
 							</a>
 						</li>

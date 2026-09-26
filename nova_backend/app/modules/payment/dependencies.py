@@ -51,6 +51,7 @@ def build_payment_service(
         tenant_id=tenant_id,
         public_app_url=settings.public_app_url,
         default_deposit_percent=settings.default_deposit_percent,
+        checkout_ttl_minutes=settings.moyasar_checkout_ttl_minutes,
     )
 
 

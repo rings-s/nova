@@ -1,7 +1,8 @@
 """Bounded context: CATALOG — where the business operates and what it sells.
 
-Aggregates      Business, Location, Service, Provider
-Tables          businesses, locations, services, providers, provider_services
+Aggregates      Business, Location, Service, Provider, ServiceCategory
+Tables          businesses, locations, services, providers, provider_services,
+                service_categories (platform-wide; superuser-edited, no tenant)
 Depends on      identity (tenant_id)
 Status          implemented
 

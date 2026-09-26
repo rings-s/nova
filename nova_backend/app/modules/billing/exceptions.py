@@ -35,3 +35,19 @@ class SubscriptionAlreadyExistsError(ConflictError):
 
     def __init__(self, business_id: object) -> None:
         super().__init__(f"Business '{business_id}' already has a subscription.")
+
+
+class CheckoutNotFoundError(NotFoundError):
+    code = "checkout_not_found"
+
+    def __init__(self, checkout_id: object) -> None:
+        super().__init__(f"Checkout '{checkout_id}' was not found.")
+
+
+class SubscriptionNotAwaitingPaymentError(ConflictError):
+    """Only a paid plan that has not been paid for yet has anything to pay."""
+
+    code = "subscription_not_awaiting_payment"
+
+    def __init__(self) -> None:
+        super().__init__("This subscription has nothing to pay right now.")

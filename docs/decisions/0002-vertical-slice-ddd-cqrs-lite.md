@@ -7,8 +7,8 @@
 >    docs 02/06/07 and the README. The handler-pair style was implemented in the old `tenants`
 >    module and collapsed into `TenantService` when that module became `identity`.
 > 2. **Rich domain entities are in, selectively.** This ADR rejected domain entities distinct
->    from ORM models outright. That still holds for `identity`, `catalog`, `media`, and
->    `notification` — but `booking`, `queue`, and `payment` own real state machines and define
+>    from ORM models outright. That still holds for `identity`, `catalog`, `discovery`,
+>    `review` and `notification` (`media` was removed, ADR-0013) — but `booking`, `queue`, and `payment` own real state machines and define
 >    their own entities in `domain.py`, with the repository mapping to the ORM row. See
 >    `nova_backend/README.md`, "Two styles of domain.py", for the test used to decide.
 >
@@ -34,7 +34,7 @@ FastAPI/SQLAlchemy imports.
 
 ## Consequences
 
-- Adding a module (see [[../domain/module-template]]) means creating one directory, not
+- Adding a module (see `nova_backend/README.md`, "Adding a module") means creating one directory, not
   editing five existing ones.
 - Domain rules are unit-testable without a database or HTTP layer.
 - No service layer to prematurely design — added only when a module's commands need shared

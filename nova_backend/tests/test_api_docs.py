@@ -50,3 +50,28 @@ async def test_an_app_with_docs_off_publishes_none_of_them(docs_switched_off) ->
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for path in DOC_PATHS:
             assert (await client.get(path)).status_code == 404, path
+
+
+def _operations() -> list[tuple[str, str, dict]]:
+    spec = create_app().openapi()
+    return [
+        (method.upper(), path, operation)
+        for path, item in spec["paths"].items()
+        for method, operation in item.items()
+    ]
+
+
+def test_every_operation_says_what_it_does() -> None:
+    """The route's docstring is its entry at `/docs`. Without one a client sees
+    a bare name like "Create Queue" and has to read the source."""
+    bare = [f"{method} {path}" for method, path, op in _operations() if not op.get("description")]
+    assert bare == []
+
+
+def test_the_routes_that_authenticate_carry_the_bearer_scheme() -> None:
+    """The lock icon, and the Authorize button, come from `get_principal`."""
+    spec = create_app().openapi()
+    assert "HTTPBearer" in spec["components"]["securitySchemes"]
+    locked = [f"{m} {p}" for m, p, op in _operations() if op.get("security")]
+    assert "POST /api/v1/tenants/{tenant_id}/bookings" in locked
+    assert "POST /api/v1/auth/login" not in locked

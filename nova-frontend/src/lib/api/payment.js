@@ -70,6 +70,17 @@ export function getPayment(tenantId, paymentId) {
 	return http.get(tenantPath(tenantId, `/payments/${paymentId}`));
 }
 
+/**
+ * Asks Moyasar where a payment stands and records it: what the page a payer
+ * returns to from checkout calls. The redirect proves nothing by itself; the
+ * server reads Moyasar's own record (status, amount, currency) before
+ * confirming anything. Safe to repeat.
+ * @param {string} tenantId @param {string} paymentId @returns {Promise<Payment>}
+ */
+export function syncPayment(tenantId, paymentId) {
+	return http.post(tenantPath(tenantId, `/payments/${paymentId}/sync`));
+}
+
 /** @param {string} tenantId @param {string} bookingId @returns {Promise<{ items: Payment[], total: number }>} */
 export function listPaymentsForBooking(tenantId, bookingId) {
 	return http.get(tenantPath(tenantId, '/payments'), { query: { booking_id: bookingId } });

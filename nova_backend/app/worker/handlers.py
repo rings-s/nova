@@ -240,3 +240,31 @@ async def on_payment_captured(
 
 
 __all__ = ["EventHandler", "handlers_for", "subscribe"]
+
+
+@subscribe("InvoiceOverdue")
+@subscribe("InvoicePaid")
+async def on_invoice_standing_changed(
+    session: AsyncSession, tenant_id: UUID, payload: dict[str, Any]
+) -> None:
+    """Hides or restores the marketplace listing (docs/11 section 8).
+
+    Billing decides at day 21 of dunning that the listing goes, and payment
+    brings it back; catalog owns what the marketplace shows. Until this handler
+    existed billing recorded the decision and nothing acted on it, so an unpaid
+    salon stayed listed.
+
+    Mirrors the subscription's current state rather than the event's own
+    fields. That makes it idempotent, and indifferent to order: an overdue
+    event redelivered after the invoice was paid reads the paid state and
+    leaves the listing up.
+    """
+    from app.modules.billing.dependencies import build_billing_service
+    from app.modules.catalog.dependencies import build_catalog_service
+
+    business_id = UUID(payload["business_id"])
+    billing = build_billing_service(session, tenant_id)
+    subscription = await billing.subscription_or_default(business_id)
+    await build_catalog_service(session, tenant_id).set_billing_visibility(
+        business_id, hidden=subscription.marketplace_listing_hidden
+    )

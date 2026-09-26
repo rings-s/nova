@@ -31,6 +31,27 @@ class ProviderNotFoundError(NotFoundError):
         super().__init__(f"Provider '{provider_id}' was not found.")
 
 
+class CategoryNotFoundError(NotFoundError):
+    """No such category, or it has been retired. Tenants choose from the
+    platform's list (`GET /discovery/categories`); they cannot add to it."""
+
+    code = "category_not_found"
+
+    def __init__(self, category_id: object) -> None:
+        super().__init__(f"Category '{category_id}' was not found.")
+
+
+class CatalogItemInUseError(ConflictError):
+    """A branch, service or provider still has an appointment to come."""
+
+    code = "catalog_item_in_use"
+
+    def __init__(self, what: str) -> None:
+        super().__init__(
+            f"This {what} has upcoming bookings. Cancel or move them before deleting it."
+        )
+
+
 class DuplicateSlugError(ConflictError):
     code = "duplicate_slug"
 

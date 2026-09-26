@@ -436,8 +436,10 @@ class QueueService:
         if booking_id is None and queue_entry_id is None:
             raise TicketInvalidError("A ticket needs a booking or a queue entry.")
 
+        appointment_ends_at: datetime | None = None
         if booking_id is not None:
-            await self.bookings.get(booking_id)
+            booking = await self.bookings.get(booking_id)
+            appointment_ends_at = booking.slot.ends_at
             existing = await self.tickets.find_active_for_booking(booking_id)
         else:
             await self.get_entry(queue_entry_id)  # type: ignore[arg-type]
@@ -457,7 +459,9 @@ class QueueService:
             ticket_code=generate_ticket_code(),
             qr_token_hash=hash_qr_token(qr_token),
             status=TicketStatus.ACTIVE,
-            expires_at=default_ticket_expiry(now=now, ttl_hours=self.ticket_ttl_hours),
+            expires_at=default_ticket_expiry(
+                now=now, ttl_hours=self.ticket_ttl_hours, appointment_ends_at=appointment_ends_at
+            ),
             booking_id=booking_id,
             queue_entry_id=queue_entry_id,
         )

@@ -40,7 +40,7 @@
 	{#if loading}
 		<Skeleton class="mt-3 h-8 w-16" />
 	{:else}
-		<p class="mt-2 text-3xl font-semibold tracking-tight text-fg tabular-nums">{value}</p>
+		<p class="mt-2 text-3xl font-semibold tracking-tight text-fg">{value}</p>
 	{/if}
 	{#if hint}
 		<p class="mt-1 text-xs text-fg-muted">{hint}</p>

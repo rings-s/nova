@@ -127,3 +127,12 @@ class InsufficientRoleError(AuthorizationError):
 
     def __init__(self, permission: object) -> None:
         super().__init__(f"Your role in this business does not allow '{permission}'.")
+
+
+class MarketingConsentByCustomerOnlyError(AuthorizationError):
+    """Staff tried to opt a customer in to marketing (`may_grant_consent`)."""
+
+    code = "marketing_consent_customer_only"
+
+    def __init__(self) -> None:
+        super().__init__("Only the customer can opt in to marketing messages.")

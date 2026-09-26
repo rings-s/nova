@@ -26,6 +26,8 @@ from app.core.security import (
     ACCESS_TOKEN_TTL_SECONDS,
     REFRESH_TOKEN_TTL_SECONDS,
     AuthenticationError,
+    AuthorizationError,
+    Principal,
     PrincipalKind,
     decode_purpose_token,
     decode_token,
@@ -217,6 +219,31 @@ class AuthService:
         if user is not None:
             user.token_version += 1
             await self.session.flush()
+
+    # --- the caller's own account -------------------------------------------
+
+    async def get_account(self, principal: Principal) -> User:
+        """The account behind a staff or customer token. A service principal
+        names none."""
+        user = None
+        if principal.kind is not PrincipalKind.SERVICE:
+            user = await self.session.get(User, principal.subject_id)
+        if user is None:
+            raise AuthorizationError("This token does not belong to an account.")
+        return user
+
+    async def require_superuser(self, principal: Principal) -> None:
+        """Refuses anyone but a NOVA administrator (`User.is_superuser`).
+
+        Read from the account row on every call, never from the token, so
+        clearing the flag takes effect at once. A service principal is platform
+        machinery and passes, as it does for `MembershipService.require_permission`.
+        """
+        if principal.kind is PrincipalKind.SERVICE:
+            return
+        user = await self.session.get(User, principal.subject_id)
+        if user is None or not user.is_superuser:
+            raise AuthorizationError("Only a NOVA administrator can do this.")
 
     # --- phone verification (docs/14 TM-01) --------------------------------
 

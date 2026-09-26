@@ -3,6 +3,7 @@ title: Threat Model
 created: 2026-09-15
 project: NOVA
 type: security
+status: current
 tags: [security, threat-model, stride, trust-boundaries, multi-tenancy, appsec]
 related_code:
   - app/core/security.py
@@ -10,8 +11,9 @@ related_code:
   - app/core/throttling.py
   - app/db/session.py
   - app/modules/identity/service.py
-  - app/modules/media/service.py
-  - app/integrations/storage/nextcloud.py
+  - app/modules/catalog/service.py
+  - app/integrations/images.py
+  - app/integrations/storage/local.py
   - app/worker/outbox.py
   - app/modules/ai_agents/runtime.py
   - infra/docker-compose.yml
@@ -36,6 +38,20 @@ related_code:
 > current code — with sharper detail than the original write-up — and then fixed the same session;
 > see their sections for what changed and how it was re-verified. TM-03 partially fixed — see its
 > section. TM-02 and TM-05 remain open on inspection (not re-run live this pass).
+>
+> **Update, 2026-09-23: the `media` module and Nextcloud are gone (ADR-0013).** TM-05, TM-06 and
+> TM-18, the media part of TM-16, SR-07 and SR-22 describe code that no longer exists. They are
+> closed by removal, and the rows below are kept for history. Business photos replaced the module,
+> and they bring a new surface that this model has **not** yet been through:
+>
+> - uploads to the API (`POST .../catalog/businesses/{id}/photos`, `manage_catalog`, 10 MB
+>   streaming cap, Pillow re-encode with a 40 MP decompression-bomb cap, EXIF stripped);
+> - a public, rate-limited photo route (`GET /discovery/photos/{id}/{variant}`) under a
+>   `public_discovery` RLS policy;
+> - HMAC-signed preview links that widen that route to one tenant's unlisted photo for an hour.
+>
+> Walk those through §5 on the next pass. TM-01 to TM-04 and the other findings are
+> unaffected.
 
 Method: STRIDE per trust boundary. Every finding is marked with how it was established:
 
@@ -212,7 +228,7 @@ E elevation of privilege. "Ref" points at §6 (TM-xx) or §8 (SR-xx).
 | E   | A token signed with `SECRET_KEY` and `kind=service` is admin on every tenant, never revoked, with whatever expiry its minter chose | a strong key and a public repository with rotated history                      | **open, high**                                                 | TM-03 |
 | E   | Pre-registered account granted staff by email                                                                                      | none                                                                           | **open, high**                                                 | TM-04 |
 | I   | A customer reads any tenant's phone (`GET /tenants/{id}`), unlisted or inactive catalog rows, and provider working hours           | tenant ids of listed salons are public; others are UUIDv4                      | low                                                            | TM-15 |
-| S   | Stolen refresh token used for 30 days                                                                                              | logout-everywhere only; no rotation or reuse detection                         | open                                                           | TM-09 |
+| S   | Stolen refresh token used for 30 days                                                                                              | logout-everywhere only; no rotation or reuse detection. The web app's refresh token is an httpOnly, `SameSite=Strict` cookie scoped to `/api/v1/auth` (2026-09-24), so page script cannot read it | open                                                           | TM-09 |
 | R   | A staff member denies a refund, role change, consent change or cancellation                                                        | app logs and domain events; no audit record naming the actor                   | open                                                           | TM-12 |
 | T   | A fake storefront impersonates a real salon and takes deposits                                                                     | none: any account can create tenants, and new businesses are listed by default | open                                                           | TM-11 |
 | E   | Staff role matrix (owner, manager, receptionist, provider)                                                                         | one table in `identity/domain.py`, enforced per tenant                         | the matrix was a default, never confirmed by the product owner | —     |
@@ -528,6 +544,10 @@ if user is None or user.email_verified_at is None:
 
 ### TM-05: Media upload authorisation cannot be enforced by storage
 
+> [!note] Closed by removal, 2026-09-23
+> The `media` module and the Nextcloud adapter were deleted (migration `a3b4c5d6e7f8`, ADR-0013).
+> Photos are now uploaded to the API itself, so no client ever receives storage credentials.
+
 - **Where:**
   - `NextcloudStorage.upload_url_for` returns `{NEXTCLOUD_URL}/remote.php/dav/files/{service user}/…`.
   - `sign_upload_authorisation` produces a token only `complete_upload` checks.
@@ -582,7 +602,7 @@ Each requirement names the test that proves it. "New" means that test does not e
 | SR-03 | A deployed process derives the client address only from a configured, proxy-written header, and refuses to start without one. The runtime image does not pass `--forwarded-allow-ips "*"`. | New: a `tests/test_throttling.py` case wrapping `client_ip_key` in `ProxyHeadersMiddleware` with the image's flags; a settings refusal test |
 | SR-04 | Tokens with `kind=service` are refused over HTTP outside local and test; tokens whose `exp - iat` exceeds the refresh TTL are refused.                                                     | New cases in `tests/test_security.py`                                                                                                       |
 | SR-05 | Tokens, slot ids, QR tickets and upload authorisations use distinct keys derived from `SECRET_KEY`, and tokens carry a `kid` so a rotation can overlap.                                    | New: `tests/test_security.py` (a slot-id MAC does not verify as a ticket MAC)                                                               |
-| SR-06 | A membership can be granted only to a verified email address or through an accepted invite.                                                                                                | New: `tests/modules/identity/test_memberships.py`                                                                                           |
+| SR-06 | A membership can be granted only to a verified email address or through an accepted invite.                                                                                                | `tests/modules/identity/test_membership_invites.py`                                                                                         |
 | SR-07 | Upload authorisation is enforced by the storage server, and no client ever receives storage credentials.                                                                                   | New: `tests/modules/media/test_service.py` asserts the upload URL is a share URL with an expiry                                             |
 | SR-08 | Every public share has an expiry; deleting an asset revokes its shares; soft-deleted binaries are purged within 7 days.                                                                    | New: adapter test for `expireDate`; worker test for the purge job                                                                           |
 | SR-09 | `backend` and `worker` receive no tunnel token.                                                                                                                                            | New: a CI step running `docker compose config` and asserting `CLOUDFLARE_TUNNEL_TOKEN` is empty for both                                    |
@@ -605,6 +625,12 @@ Each requirement names the test that proves it. "New" means that test does not e
 ## 9. Assumptions and out of scope
 
 - **The frontend is not in this repository.** XSS, CSP, token storage in the browser and clickjacking belong to the PWA's own threat model. Requirement for it: keep access tokens in memory, and send refresh tokens only over TLS.
+  > **Update, 2026-09-24:** the frontend is now in this repository (`nova-frontend/`). It sends a
+  > Content-Security-Policy with a nonce-only `script-src` and `frame-ancestors 'none'`
+  > (`vite.config.js`, `kit.csp`). The refresh token is an httpOnly, `SameSite=Strict`, Secure
+  > (outside local/test) cookie scoped to `/api/v1/auth`, set when `POST /auth/login` is sent with
+  > `refresh_cookie` and deleted by `POST /auth/logout`. The 15-minute access token is still in
+  > localStorage, not memory.
 - **Single host.** The compose network is treated as trusted. Moving Postgres, Redis or Ollama to another host needs TLS and authentication on each link, and a new version of §5.4 and §5.5.
 - **Out of scope:** Cloudflare account security, the host operating system, physical access to the server, and the security of Moyasar, Meta and Nextcloud themselves.
 - **Stale ADRs.** Their Consequences sections describe the code as it was when written; ADR-0006 lists rate limiting, idempotency and RLS as missing. Section 4 of this document is the current state.

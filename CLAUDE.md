@@ -4,15 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-NOVA is a multi-tenant booking and customer-operations platform for GCC beauty/wellness businesses: salons and spas, with walk-in queues, WhatsApp messaging and deposits. The tree currently holds only the backend.
+NOVA is a multi-tenant booking and customer-operations platform for GCC beauty/wellness businesses: salons and spas, with walk-in queues, WhatsApp messaging and deposits.
 
 - **`nova_backend/`**: FastAPI on Python 3.13, SQLAlchemy 2 async + asyncpg, Alembic, and an ARQ worker on Redis. Managed with `uv`.
-- **`infra/`**: a docker compose stack that reads `infra/.env`. Services: postgres 16, redis, a one-shot `migrate`, `backend`, `worker`, an on-demand `tools` container, and an optional `cloudflared` profile.
+- **`nova-frontend/`**: SvelteKit 2 + Svelte 5 (runes forced for all project files), JavaScript with JSDoc types (no TypeScript sources), Tailwind 4, `adapter-node`, pnpm. See "Frontend" below.
+- **`infra/`**: a docker compose stack that reads `infra/.env`. Services: postgres 16, redis, a one-shot `migrate`, `backend`, `worker`, `frontend` (Vite dev on http://localhost:5173), an on-demand `tools` container, and an optional `cloudflared` profile.
 - **`docs/`**: numbered design docs (Obsidian-style `[[links]]`) and ADRs in `docs/decisions/`. Code comments cite them as `docs/10 section 12` or `ADR-0010`.
   - `docs/12-Backend-Code-Walkthrough.md` is the onboarding guide.
+  - Each numbered doc declares `status: current | design | reference` (legend in `docs/00-Index.md`); `design` docs are the original plan, and the code wins where they disagree. `tests/test_doc_references.py` fails when a doc names a file that doesn't exist or a doc lacks a status; a deliberate miss goes in its `EXPECTED_MISSING` with a reason.
+  - Every route's docstring is its `/docs` description; `tests/test_api_docs.py` fails on a route without one.
   - `nova_backend/README.md` is the maintained code map.
 
-The SvelteKit frontend is not in the tree. CI's frontend jobs skip unless `frontend/package.json` exists.
+CI's frontend jobs are gated on `frontend/package.json`, but the app lives in `nova-frontend/`, so those jobs currently never run. Nothing in CI checks the frontend.
+
+The repo-root `package.json` is a thin npm-workspaces wrapper that delegates to `nova-frontend`. Dependencies belong in `nova-frontend/package.json`.
 
 `base-projects/` is a stray local virtualenv, not project code.
 
@@ -20,14 +25,14 @@ The SvelteKit frontend is not in the tree. CI's frontend jobs skip unless `front
 
 The Makefile is at the repo root.
 
-| Command                                     | What it does                                                                                                                                                                                                       |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `make dev`                                  | Starts the full stack via compose. Migrations run first in the `migrate` container. API docs at http://localhost:8000/docs. Creates `infra/.env` from the example if it is missing, generating every blank secret. |
-| `make test`                                 | Runs `pytest` in a one-off `tools` container, against the `nova_test` database.                                                                                                                                    |
-| `make check`                                | ruff, mypy, and a `create_app()` assembly smoke check. No database needed.                                                                                                                                         |
-| `make lint` / `make fmt` / `make typecheck` | `ruff check` / `ruff format` / `mypy app`, on the host via `uv run`.                                                                                                                                               |
-| `make revision m="add_x"`                   | `alembic revision --autogenerate` in a one-off `tools` container.                                                                                                                                                  |
-| `make migrate`                              | `alembic upgrade head` in a one-off `tools` container.                                                                                                                                                             |
+| Command                                     | What it does                                                                                                                                                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make dev`                                  | Starts the full stack via compose. Migrations run first in the `migrate` container. API docs at http://localhost:8000/docs; frontend at http://localhost:5173. Creates `infra/.env` from `infra/.env.example` if missing. |
+| `make test`                                 | Runs `pytest` in a one-off `tools` container, against the `nova_test` database.                                                                                                                                           |
+| `make check`                                | ruff, mypy, and a `create_app()` assembly smoke check. No database needed.                                                                                                                                                |
+| `make lint` / `make fmt` / `make typecheck` | `ruff check` / `ruff format` / `mypy app`, on the host via `uv run`.                                                                                                                                                      |
+| `make revision m="add_x"`                   | `alembic revision --autogenerate` in a one-off `tools` container.                                                                                                                                                         |
+| `make migrate`                              | `alembic upgrade head` in a one-off `tools` container.                                                                                                                                                                    |
 
 To run a single test:
 
@@ -47,6 +52,20 @@ DB-backed tests on the host:
   `docker compose -f infra/docker-compose.yml --env-file infra/.env exec postgres createdb -U nova nova_test`
   `make db-app-role`
 
+Frontend, from `nova-frontend/` (`pnpm-workspace.yaml` must keep `allowBuilds: esbuild: true`; a placeholder value there makes every `pnpm run` fail its pre-run check):
+
+```bash
+pnpm run check        # svelte-kit sync + svelte-check over the JSDoc
+pnpm run lint         # prettier --check . && eslint .
+pnpm run i18n:check   # fails on any t('…') string without an Arabic entry
+pnpm run i18n:audit   # lists English still hard-coded in markup
+```
+
+- **e2e tests** are Playwright specs named `*.e2e.js` next to the routes they test. `pnpm exec playwright test` runs them all against the dev server on `localhost:5173` (no `webServer`; results go to the OS temp dir). All 96 passed on 2026-09-23.
+  - Keep any scratch file, a one-off config included, **outside** `nova-frontend/`. Vite watches the directory, and creating or deleting a file there full-reloads every open page, including pages in the middle of a test.
+- **Frontend dependencies.** Add one with `docker compose … exec frontend pnpm add <pkg>` (the bind mount updates `package.json` and the lockfile), or after pulling a change run `… exec frontend pnpm install --frozen-lockfile`; then `restart frontend`. The container's `node_modules` is a named volume that a rebuild never refreshes.
+- Open the dev app at `localhost:5173`, not `127.0.0.1`: backend CORS allows only the former.
+
 CI (`.github/workflows/ci.yml`) runs:
 
 - ruff, mypy and pytest
@@ -57,7 +76,7 @@ CI (`.github/workflows/ci.yml`) runs:
 
 ### Vertical slices with enforced layering
 
-Each bounded context is a package under `app/modules/`: identity, catalog, discovery, booking, queue, review, payment, billing, analytics, media, notification, ai_agents. Every package has the same files: `router`, `schemas`, `service`, `domain`, `models`, `repository`, `events`, `exceptions`, `dependencies`. `booking` is the reference implementation.
+Each bounded context is a package under `app/modules/`: identity, catalog, discovery, booking, queue, review, payment, billing, analytics, notification, ai_agents. (`media` and Nextcloud were removed, ADR-0013; a stale `modules/media/__pycache__` may linger locally.) Every package has the same files: `router`, `schemas`, `service`, `domain`, `models`, `repository`, `events`, `exceptions`, `dependencies`. `booking` is the reference implementation.
 
 `analytics` (docs/13, ADR-0011) is the exception. It owns no tables, so it has no `models`, `repository` or `events`. It reads fact projections (`BookingFact`, `PaymentFact`, …) through the other modules' services, and adds `metrics.py` (pandas and numpy) and `charts.py` (Plotly JSON).
 
@@ -71,7 +90,7 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
   - Outside request DI (worker, webhooks, other services), use the `build_*_service(session, tenant_id)` factory in that module's `dependencies.py` rather than wiring repositories by hand.
   - For a reaction rather than a question, publish a domain event instead. Booking never imports notification or billing.
 - **`domain.py` comes in two styles.** Use a rich entity only when the thing can be in an invalid state.
-  - _Pure validator functions_, where the ORM model is the entity: identity, catalog, discovery, review, media, notification. `analytics` is pure too, with no ORM model at all.
+  - _Pure validator functions_, where the ORM model is the entity: identity, catalog, discovery, review, notification. `analytics` is pure too, with no ORM model at all.
   - _Rich entities with state machines_, kept separate from the ORM record, with the repository mapping between them (e.g. `domain.Booking` vs `models.BookingRecord`): booking, queue, payment, billing.
 - **`app/modules/registry.py` is the single wiring point.**
   - It imports every module's models, which Alembic autogenerate needs.
@@ -83,6 +102,7 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
   - Domain and service code raise `DomainError` subclasses (`app/core/exceptions.py`, each carrying `status_code` and `code`), never `HTTPException`.
   - `core/error_handlers.py` renders every error as the `{"error": {code, message, field, retryable}}` envelope, including `IntegrityError` and uncaught exceptions.
   - `app/db/errors.py` maps constraint names to domain errors, e.g. `ex_bookings_no_provider_overlap` → 409 `slot_unavailable`. The names come from the naming convention in `app/db/base.py`.
+  - A new error code must be added to `docs/15-API-Error-Codes.md` (with its HTTP status) and, for the web app, to `nova-frontend/src/lib/i18n/ar/errors.js`. `tests/test_error_catalog.py` fails until the doc matches; the `tools` container mounts `docs/` read-only at `/docs` for it.
 
 ### Multi-tenancy: three layers, keep all of them
 
@@ -117,6 +137,7 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
   - `kind=service` skips that account re-check — it names no account — so it is the one claim a leaked `SECRET_KEY` turns into permanent, unrevocable access (docs/14 TM-03). The app itself never puts it on a bearer token; a request bearing one is refused outside `local`/`test`. Every token's `exp - iat` is also capped at the refresh-token TTL, so a forged token cannot claim an unbounded lifetime either.
   - A customer may reach any tenant, because it is a marketplace. So operational routes need `Depends(require_staff)`, and customer reads need per-row ownership checks (see `BookingService.get_for_principal`).
   - Routes that move money, read what a business earns, or change the catalog (services, prices, locations, providers, marketplace listing: `manage_catalog`, owner and manager) need a role permission instead: `Depends(RequirePermission(StaffPermission.X))` from `identity/dependencies.py`. The role is read from this tenant's `memberships` row, never from `Principal.roles`, which is flattened across tenants. The policy is one table in `identity/domain.py`. `tests/test_route_guards.py` lists which routes need which permission.
+  - **Superuser** (`users.is_superuser`) is a NOVA administrator, not a salon role, for what every tenant shares: today, the service categories (`service_categories`, edited at `/admin/catalog/categories`, read at `GET /discovery/categories`; a service picks one by `category_id`, and salons cannot add their own). Routes depend on `require_superuser` (`identity/dependencies.py`), which re-reads the account row on every request. There is no API to grant it; use `make superuser email=…` (`revoke=1` removes it). The web app asks `GET /auth/me` whether to show `/admin/categories`.
   - The dashboard learns the caller's role and permissions for one business from `GET /tenants/{id}/memberships/me` (`accessStore` in the frontend), only to hide what they can't use; every route still checks for itself.
   - With `AUTH_DEV_BYPASS=true`, a request without an `Authorization` header becomes a SERVICE principal. `Settings` refuses to load with the flag set unless `ENV` is `local` or `test`, and whenever `CLOUDFLARE_TUNNEL_TOKEN` is set (`config.py::dev_bypass_refusal`).
 - **Rate limits.** Write endpoints declare `dependencies=[Depends(write_rate_limit)]` from `core/throttling.py`.
@@ -129,7 +150,9 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
 - **Payments.**
   - Only staff may set a payment intent's `amount` or `currency` (`payment/dependencies.py::refuse_customer_amount`).
   - `return_url` must be on `PUBLIC_APP_URL`'s origin.
-  - The webhook captures only when the reported amount and currency match the payment row. Otherwise it records the event, answers `amount_mismatch`, and leaves the payment uncaptured.
+  - Checkout is a Moyasar **invoice** (hosted page); `payments.gateway_invoice_id` links it, `gateway_payment_id` is learnt when paid. The payer's return calls `POST …/payments/{id}/sync`; both it and the webhook capture only after fetching Moyasar's own record.
+  - The webhook authenticates by the `secret_token` in its body (no signature header) and captures only when the reported amount, currency and invoice match the payment row. Otherwise it records the event, answers `amount_mismatch` or `checkout_mismatch`, and leaves the payment uncaptured.
+  - Setup (keys, webhook URL, test cards) is in `nova_backend/README.md` "Payments".
 - **Idempotency.** Retryable create-style POSTs take `idempotency_guard("<op>")` from `core/idempotency.py` (see `queue/router.py::join_queue`). A key is scoped to its endpoint, tenant and principal.
   1. Run every authorization check first. A replay skips the handler, so a check after `guard.begin` never runs for it.
   2. Call `guard.begin(...)`. If it returns a replay, return that.
@@ -155,10 +178,16 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
   - `SoftDeleteMixin` is **not** auto-filtered.
 - **Bilingual text** is stored as `name_en`/`name_ar` column pairs, both required (`core/validators.py::require_bilingual_text`, ADR-0004).
 - **Money** uses `core/values.Money`. The defaults are SAR and Asia/Riyadh.
+- **Business photos** (ADR-0013) belong to `catalog`. Uploads go to the API as the raw request body; `integrations/images.py` re-encodes them to WebP, and they are stored through the `ImageStore` protocol (`integrations/storage`, `LocalImageStore` under `MEDIA_ROOT`). Only `business_photos` rows live in Postgres. They are served by `GET /discovery/photos/{id}/{variant}`: publicly for a listed business, or through an HMAC-signed, expiring link for the owner's preview.
 - **Migrations.** `alembic/env.py` takes the database URL from `Settings.migration_database_url`, falling back to `Settings.database_url`, never from `alembic.ini`. Always read an autogenerated migration before keeping it.
-- **Settings** (`app/core/config.py`, `lru_cache`d) requires `DATABASE_URL`, `REDIS_URL` and `SECRET_KEY`. `ENV` defaults to `production`. An empty `SECRET_KEY` is refused everywhere, and outside `local`/`test` so is one under 32 characters or starting with "change". Integration credentials (Moyasar, Nextcloud, WhatsApp) are optional: without them the adapters raise `IntegrationNotConfiguredError`, a 503 `integration_not_configured`, and the app still boots. `/docs`, `/redoc` and `/openapi.json` are served only when `ENV` is local or test, unless `API_DOCS_ENABLED` says otherwise.
+- **Settings** (`app/core/config.py`, `lru_cache`d) requires `DATABASE_URL`, `REDIS_URL` and `SECRET_KEY`. `ENV` defaults to `production`. An empty `SECRET_KEY` is refused everywhere, and outside `local`/`test` so is one under 32 characters or starting with "change". Integration credentials (Moyasar, WhatsApp) are optional: without them the adapters raise `IntegrationNotConfiguredError`, a 503 `integration_not_configured`, and the app still boots. `/docs`, `/redoc` and `/openapi.json` are served only when `ENV` is local or test, unless `API_DOCS_ENABLED` says otherwise.
 - **AI is optional.**
-  - PydanticAI and Ollama are reached only through `ai_agents/runtime.py`, via a guarded import (`uv sync --extra ai`; `make image EXTRAS=ai` for the production image). Without them, agents degrade to a human handoff.
+  - PydanticAI and the model server are reached only through `ai_agents/runtime.py`, via a guarded import (`uv sync --extra ai`; `make image EXTRAS=ai` for the production image). Without them, agents degrade to a human handoff.
+  - `AI_PROVIDER` is `ollama` or `lmstudio`, both OpenAI-compatible at `AI_BASE_URL`. The model server runs on the host, and compose maps `host.docker.internal` to it, so LM Studio must listen beyond 127.0.0.1. `AI_THINKING=false` (default) adds Qwen3's `/no_think` switch; the generic `thinking=False` (`reasoning_effort`) setting did not finish a turn within 10 min in LM Studio. On a CPU-only machine use `qwen/qwen3-1.7b` for both models (4B and 8B are too slow for a turn), loaded with `lms load … --parallel 1` so the prompt cache survives across a turn's calls, and `AI_REQUEST_TIMEOUT_SECONDS=600`. Setup and measurements: `nova_backend/README.md`, "AI agents (local models)".
+  - Frontend: `/app/ai` (staff owner agents, filtered by `required_permission`), and `AssistantLauncher` on storefronts (receptionist) and on `/discover` (the marketplace agent, `POST /discovery/ai/chat`, customers only, no tenant). They hide themselves when inference is unavailable.
+  - **Agents book in two turns (ADR-0015).** A hold tool offers a slot. `book_held_slot` books only an offer from an _earlier_ turn, kept server-side with its hold token (`history.py` offers), and only the one the customer pressed "Yes, book it" on (the request's `confirm_hold_token`); a yes typed in words is refused with `not_confirmed`. It goes through `BookingService.create` (a `draft`; staff or a payment confirms it) and issues the QR ticket, returned in `AiChatResponse.tickets`. The model never sees hold tokens or QR payloads.
+  - Marketplace tools name listings by slug; the server resolves the tenant and opens that tenant's `TenantServiceScope` (`AgentToolkit._tenant_scope`). The tenant chat route refuses `marketplace_agent`, and vice versa (`AgentSpec.marketplace`).
+  - Tickets: a booking's ticket lasts until the appointment ends plus `TICKET_TTL_HOURS`. Reissuing revokes the old QR, so the frontend keeps tickets per device (`stores/tickets.js`). Staff scan at `/app/check-in` (camera via `jsqr`, or a pasted code or handheld scanner); check-in needs a confirmed booking.
   - The roster is data in `ai_agents/agents.py` (docs/13, ADR-0011). Owner agents (accountant, analyst, business manager) are staff-only, need a role permission (`required_permission`), are bound to one business, and may state only numbers a tool returned. The business manager proposes actions and never applies them.
   - A turn holds no transaction (see "Services `flush()`" above). What a write tool produced for the client comes back in `AiChatResponse.held_slots` and `queue_places`, even with a handoff. The model never sees a hold token.
   - No agent cancels. `request_cancellation` checks the booking against `BookingService.preview_cancellation` and returns it in `pending_cancellations`; the customer confirms through the booking's cancel route.
@@ -176,6 +205,27 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
 - **Factories:** `tenant_factory`, `business_factory`, `location_factory`, `service_factory`, `provider_factory`, `customer_factory`, and `qualify` (assigns a provider to a service).
 - **New modules** get `tests/modules/<name>/` with `test_domain.py` (no DB), `test_repository.py` (tenant isolation) and `test_router.py`.
 
+### Frontend (`nova-frontend/`)
+
+- **API layer.** `src/lib/api/<module>.js` mirrors the backend's modules. Every call goes through `http` in `src/lib/api/client.js`, which handles the base URL, auth headers, tenant paths, idempotency keys, a 401 refresh-and-retry, and the error envelope as `ApiError` (plus `NetworkError`).
+  - `client.js` never imports the auth store. `stores/auth.svelte.js` injects itself through `configureAuth`, because importing the store would be circular.
+  - With `PUBLIC_API_BASE_URL` empty, `src/routes/api/v1/[...path]/+server.js` serves an in-memory mock. `nova-frontend/.env` points it at the real backend on `:8000`.
+- **State** lives in universal reactive modules, `src/lib/stores/*.svelte.js`: auth, tenant, business, access, theme, toast. Top-level `$state` in these files needs no context or provider.
+  - The JWT decode in `utils/jwt.js` is for display only and is never verification.
+  - The refresh token is never in page script. The web app signs in with `refresh_cookie: true`, and the API sets it as an httpOnly, `SameSite=Strict` cookie on `/api/v1/auth` (`auth_router.py`); `POST /auth/refresh` with no token uses the cookie, and `POST /auth/logout` deletes it. Only the 15-minute access token is in localStorage. `client.js` fetches `/auth/*` with `credentials: 'include'`, so an e2e stub for those routes must echo the origin and allow credentials: a browser refuses a wildcard `access-control-allow-origin` on a credentialed response.
+  - A Content-Security-Policy is set in `vite.config.js` (`kit.csp`): SvelteKit adds a nonce to its own script, and nothing else inline runs. A new external origin (fonts, scripts, an API host) must be added there, or the browser blocks it.
+  - `accessStore` (`GET /memberships/me`) only hides UI the caller can't use. The backend still enforces every permission.
+- **Routes.** Public pages (`/`, `/discover`, `/business`, `/pricing`…) use `SiteHeader`. `/app/*` is the staff dashboard, with its own sidebar shell.
+- **i18n (en/ar), no library.** Wrap every user-visible string in `t('English text', {params})` from `$lib/i18n/index.svelte.js`. Use `tp()` for plurals and `m()` for strings kept in constants.
+  - Arabic lives in `src/lib/i18n/ar/*.js`, keyed by the English text. These files are JSON bodies (and prettier-ignored) so scripts can merge into them. Backend errors translate by code, as `error.<code>` keys in `ar/errors.js`.
+  - The `nova_locale` cookie, else Accept-Language, picks the locale. `hooks.server.js` sets `<html lang dir>` server-side.
+  - Chart SVGs and Leaflet containers are forced to `dir="ltr"`.
+  - Modules imported by Node-run e2e specs (`lib/map/geolocate.js`, `coordinates.js`) must not import `$lib/i18n`.
+- **Design system.** Use the semantic tokens defined in `src/routes/layout.css`: `bg-canvas`/`surface*`, `border-line*`, `text-fg*`, `rounded-control|card|panel`, `shadow-card|raised|overlay`, `focus-ring`. Don't use raw `slate` + `dark:` pairs or new radius and shadow values.
+  - Use the primitives in `src/lib/components/ui` (with `ui/styles.js` for fields) and their variants, e.g. `Button size="icon"`, rather than class overrides.
+- **Maps** use Leaflet with OpenStreetMap tiles (ADR-0012).
+- `nova-frontend/AGENTS.md` refers to Svelte MCP tools. When they aren't connected, validate with svelte-check and eslint instead.
+
 ## Gotchas
 
 - **ADRs can be stale.** Their "Consequences" sections describe the code at the time the ADR was written. ADR-0006, for example, lists RLS, the outbox, rate limiting and idempotency as missing, and all of them exist now. Trust the code.
@@ -185,7 +235,10 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
   - Redis requires `REDIS_PASSWORD`.
   - `backend` and `worker` get no schema-owner credentials: compose blanks `POSTGRES_PASSWORD` in them.
   - ARQ jobs are JSON, not pickle (`WorkerSettings.job_serializer`). With pickle, anyone who can write to Redis runs code in the worker.
-  - `infra/.env.example` holds no secret values, and `make infra/.env` generates them. The repository is public.
+  - `make infra/.env` copies `infra/.env.example` and fills in every blank secret. The repository is public, so the example must never hold a secret value. Commit `5e70214` once deleted it (and `pnpm-workspace.yaml` and `nova-frontend/.npmrc`, which the frontend Dockerfile copies) under a "docs: formatting" title, which broke `make dev` on a fresh checkout; all three are restored.
 - **Dev image.**
   - The venv lives at `/opt/venv` so the `/app` bind mount cannot shadow it.
   - The container UID must match the host's (`UID`/`GID` in `infra/.env`), because `alembic revision` writes into the mount.
+  - `nova_backend/uv.lock` is tracked, and the Dockerfile's `uv sync --frozen` needs it. After changing dependencies, run `uv lock` and rebuild `backend`.
+- **Formatting.** `make fmt` reformats all of `app` and `tests`, and a few files on main are not format-clean. Scope `ruff format` to the files you changed.
+- **Local `infra/.env`** has `ENV=local` and `AUTH_DEV_BYPASS=true`, so a request to `:8000` without a token acts as SERVICE. A 404 or 422 from a guarded route without a token is therefore expected, not a missing guard.

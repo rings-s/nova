@@ -28,18 +28,22 @@ route runs. Owner-facing tools work on the one business the request named.
 """
 
 import asyncio
+import json
 import logging
+import unicodedata
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.core.exceptions import DomainError, NotFoundError
+from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.modules.ai_agents.agents import WRITE_TOOLS, AgentSpec
 from app.modules.ai_agents.guardrails import (
     GuardrailError,
+    GuardrailViolation,
     ProposalTarget,
     ProposedAction,
     ProposedActionKind,
@@ -51,25 +55,109 @@ from app.modules.ai_agents.guardrails import (
 from app.modules.analytics.domain import CHARTS, ChartId, Dimension, ForecastMetric, Granularity
 
 if TYPE_CHECKING:  # pragma: no cover
-    from app.modules.ai_agents.service import AgentDeps, TenantServices
+    from app.modules.ai_agents.service import AgentDeps, ServiceScope, TenantServices
+    from app.modules.discovery.service import DiscoveryService
 
 logger = logging.getLogger(__name__)
 
 Result = dict[str, Any]
 #: A tool's body, given the services of the unit of work it runs in.
 Work = Callable[["TenantServices"], Awaitable[Result]]
+#: A marketplace tool's body, given the discovery service of its unit of work.
+DiscoveryWork = Callable[["DiscoveryService"], Awaitable[Result]]
+
+#: How many free times a search returns. More is noise to a small model and a
+#: long list to the customer; "later" is one more question away.
+_MAX_TIMES = 6
+#: Offered times start at least this far ahead. A turn can take minutes on a
+#: small local model, and a time that starts before the customer's "yes"
+#: arrives cannot be booked.
+_MIN_LEAD = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
 class HeldSlot:
-    """A slot a tool held this turn. The client books it with `hold_token`."""
+    """A slot a tool held and showed the customer: an *offer*.
+
+    The client may book it with `hold_token`; `book_held_slot` books it for the
+    customer once they say yes in a later turn. `tenant_id` and `business_slug`
+    say where, because the marketplace assistant holds across businesses.
+    """
 
     hold_token: str
+    location_id: UUID
     provider_id: UUID
     service_id: UUID
     starts_at: datetime
     ends_at: datetime
     expires_at: datetime
+    tenant_id: UUID | None = None
+    business_slug: str | None = None
+    #: "Classic Manicure at Lumière Spa, Thu 24 Sep 2026, 09:45 (Asia/Riyadh)":
+    #: what the customer is told is held, whatever the model writes.
+    label: str | None = None
+
+
+def encode_offers(offers: list[HeldSlot]) -> bytes:
+    """Offers as JSON for conversation memory (`history.py`)."""
+    return json.dumps(
+        [{f.name: _json(getattr(offer, f.name)) for f in fields(HeldSlot)} for offer in offers]
+    ).encode()
+
+
+def decode_offers(data: bytes | None) -> list[HeldSlot]:
+    """The inverse of `encode_offers`; anything unreadable is simply forgotten."""
+    if not data:
+        return []
+    try:
+        rows = json.loads(data)
+        return [
+            HeldSlot(
+                hold_token=row["hold_token"],
+                location_id=UUID(row["location_id"]),
+                provider_id=UUID(row["provider_id"]),
+                service_id=UUID(row["service_id"]),
+                starts_at=datetime.fromisoformat(row["starts_at"]),
+                ends_at=datetime.fromisoformat(row["ends_at"]),
+                expires_at=datetime.fromisoformat(row["expires_at"]),
+                tenant_id=UUID(row["tenant_id"]) if row.get("tenant_id") else None,
+                business_slug=row.get("business_slug"),
+                label=row.get("label"),
+            )
+            for row in rows
+        ]
+    except (ValueError, KeyError, TypeError):
+        logger.warning("ai_offers_unreadable")
+        return []
+
+
+def _json(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    return value
+
+
+@dataclass(frozen=True)
+class BookedTicket:
+    """A booking an agent made this turn, with its QR ticket for the customer.
+
+    `qr_payload` is the customer's check-in credential. It goes to the client
+    only: never to the model, the logs or conversation memory.
+    """
+
+    booking_id: UUID
+    tenant_id: UUID
+    business_name: str
+    booking_status: str
+    starts_at: datetime
+    ends_at: datetime
+    ticket_id: UUID
+    ticket_code: str
+    qr_payload: str
+    expires_at: datetime
+    ticket_page_url: str
 
 
 @dataclass(frozen=True)
@@ -103,6 +191,57 @@ def _text(value: Any) -> Any:
     return str(value) if isinstance(value, Decimal) else value
 
 
+#: Longest tenant-written text (a name, a title, a city) a tool hands the model.
+#: The marketplace agent shows one business's words to another's customers, with
+#: booking tools attached: long enough for any real name, too short for a
+#: paragraph of instructions.
+MAX_SHOWN_TEXT = 80
+
+
+def _shown(value: str | None) -> str | None:
+    """Tenant-written text as the model sees it: one line, without control or
+    invisible format characters, at most `MAX_SHOWN_TEXT` characters."""
+    if value is None:
+        return None
+    # Format characters (zero-width, bidi overrides) are dropped; line breaks and
+    # other controls or separators become a space.
+    kept = "".join(
+        " " if unicodedata.category(c)[0] in "CZ" else c
+        for c in value
+        if unicodedata.category(c) != "Cf"
+    )
+    line = " ".join(kept.split())
+    if len(line) > MAX_SHOWN_TEXT:
+        return line[: MAX_SHOWN_TEXT - 1].rstrip() + "…"
+    return line
+
+
+def _held(
+    hold: Any, *, tenant_id: UUID | None, slug: str | None = None, label: str | None = None
+) -> HeldSlot:
+    return HeldSlot(
+        hold_token=hold.hold_token,
+        location_id=hold.location_id,
+        provider_id=hold.provider_id,
+        service_id=hold.service_id,
+        starts_at=hold.starts_at,
+        ends_at=hold.ends_at,
+        expires_at=hold.expires_at,
+        tenant_id=tenant_id,
+        business_slug=slug,
+        label=label,
+    )
+
+
+def _same_instant(a: datetime, b: datetime) -> bool:
+    """Equal to the minute. A model may drop seconds or restate the offset."""
+    if a.tzinfo is None:
+        a = a.replace(tzinfo=UTC)
+    if b.tzinfo is None:
+        b = b.replace(tzinfo=UTC)
+    return abs((a - b).total_seconds()) < 60
+
+
 class AgentToolkit:
     def __init__(self, deps: "AgentDeps", *, spec: AgentSpec, tool_timeout_seconds: float) -> None:
         self.deps = deps
@@ -116,11 +255,46 @@ class AgentToolkit:
     async def _call(self, tool_name: str, work: Work) -> Result:
         """Runs a tool inside a unit of work of its own."""
 
+        return await self._call_in(tool_name, self._tenant_scope(self.deps.tenant_id), work)
+
+    async def _call_in(self, tool_name: str, scope: "ServiceScope", work: Work) -> Result:
+        """Runs a tool in a unit of work of `scope`'s tenant."""
+
         async def in_unit_of_work() -> Result:
-            async with self.deps.services() as services:
+            async with scope() as services:
                 return await work(services)
 
         return await self._run(tool_name, in_unit_of_work)
+
+    async def _call_discovery(self, tool_name: str, work: DiscoveryWork) -> Result:
+        """Runs a marketplace tool in a unit of work of the public listing window."""
+        discovery = self.deps.discovery
+        if discovery is None:  # pragma: no cover - only marketplace agents hold these tools
+            raise NotFoundError("The marketplace is not available here.")
+
+        async def in_unit_of_work() -> Result:
+            async with discovery() as service:
+                return await work(service)
+
+        return await self._run(tool_name, in_unit_of_work)
+
+    def _tenant_scope(self, tenant_id: UUID | None) -> "ServiceScope":
+        """The unit of work for one tenant: the turn's own, or one the
+        marketplace resolved from a listing.
+
+        A listing names its tenant, never the model, and the caller must be
+        allowed to act there: a customer may reach any tenant on the marketplace,
+        exactly as over HTTP.
+        """
+        if tenant_id is not None and tenant_id == self.deps.tenant_id and self.deps.services:
+            return self.deps.services
+        if tenant_id is None or self.deps.services_for is None:  # pragma: no cover
+            raise NotFoundError("This agent works on one business.")
+        if not self.deps.principal.can_access_tenant(tenant_id):
+            raise GuardrailError(
+                GuardrailViolation.TENANT_MISMATCH, "You do not have access to that business."
+            )
+        return self.deps.services_for(tenant_id)
 
     async def _call_without_services(
         self, tool_name: str, work: Callable[[], Awaitable[Result]]
@@ -165,15 +339,28 @@ class AgentToolkit:
         return business_id
 
     def _name(self, record: Any) -> str:
-        return record.name_ar if self.deps.locale == "ar" else record.name_en
+        return _shown(record.name_ar if self.deps.locale == "ar" else record.name_en) or ""
 
     # --- receptionist -----------------------------------------------------------
 
-    async def search_services(self, location_id: UUID) -> Result:
-        """The services a branch sells: name, duration and price."""
+    async def search_services(self, location_id: UUID | None = None) -> Result:
+        """The services this business sells, with duration and price. location_id is
+        optional: without it, every branch's services are listed."""
 
         async def work(services: "TenantServices") -> Result:
-            offered = await services.catalog.list_services(location_id)
+            branch_ids: list[UUID] = []
+            if location_id is not None:
+                try:
+                    branch_ids = [(await services.catalog.get_location(location_id)).id]
+                except NotFoundError:
+                    # Live, a small model guessed a branch id instead of asking
+                    # list_branches. The storefront's branches are the answer.
+                    branch_ids = []
+            if not branch_ids:
+                branch_ids = [branch.id for branch in await self._branches(services)]
+            offered = []
+            for branch_id in branch_ids:
+                offered.extend(await services.catalog.list_services(branch_id))
             return {
                 "services": [
                     {
@@ -185,7 +372,7 @@ class AgentToolkit:
                     }
                     for s in offered
                     if s.is_active
-                ]
+                ][:20]
             }
 
         return await self._call("search_services", work)
@@ -196,7 +383,11 @@ class AgentToolkit:
         async def work(services: "TenantServices") -> Result:
             provider = await services.catalog.get_provider(provider_id)
             title = provider.title_ar if self.deps.locale == "ar" else provider.title_en
-            return {"provider_id": str(provider.id), "name": self._name(provider), "title": title}
+            return {
+                "provider_id": str(provider.id),
+                "name": self._name(provider),
+                "title": _shown(title),
+            }
 
         return await self._call("get_provider_info", work)
 
@@ -220,40 +411,477 @@ class AgentToolkit:
 
         return await self._call("get_available_slots", work)
 
-    async def hold_slot(self, provider_id: UUID, service_id: UUID, starts_at: datetime) -> Result:
-        """Holds a time for a few minutes while the customer pays. It cannot confirm."""
+    async def hold_slot(
+        self, service_id: str, starts_at: datetime, provider_id: UUID | None = None
+    ) -> Result:
+        """Holds a free time for the customer to confirm, once they asked to book it.
+
+        Pass service_id and a starts_at that find_available_times returned. provider_id is
+        optional: any qualified provider free then is chosen.
+        """
+        if self.deps.artifacts.held_slots:
+            # One hold per reply. Live, a small model held a time and then kept
+            # holding others instead of answering; each refusal cost a minute.
+            return await self._run("hold_slot", _already_holding)
         held: list[HeldSlot] = []
 
         async def work(services: "TenantServices") -> Result:
+            service = await self._service_ref(services, service_id)
+            chosen = await self._free_provider(services, service.id, starts_at, provider_id)
             hold = await services.booking.hold_slot(
-                provider_id=provider_id,
-                service_id=service_id,
+                provider_id=chosen,
+                service_id=service.id,
                 starts_at=starts_at,
                 principal=self.deps.principal,
                 customer_id=self.deps.customer_id,
             )
-            held.append(
-                HeldSlot(
-                    hold_token=hold.hold_token,
-                    provider_id=hold.provider_id,
-                    service_id=hold.service_id,
-                    starts_at=hold.starts_at,
-                    ends_at=hold.ends_at,
-                    expires_at=hold.expires_at,
-                )
-            )
             # No token here. It is a bearer credential for the slot, the
             # response hands it to the client, and the model has no use for it:
             # the prompt, the logs and conversation memory are no place for it.
+            details = await self._hold_details(services, hold)
+            held.append(_held(hold, tenant_id=self.deps.tenant_id, label=details["label"]))
             return {
                 "held": True,
                 "starts_at": hold.starts_at.isoformat(),
+                **{k: v for k, v in details.items() if k != "label"},
                 "expires_at": hold.expires_at.isoformat(),
+                "next_step": _ASK_TO_CONFIRM,
             }
 
         result = await self._call("hold_slot", work)
         if "error" not in result:
             # Recorded only now that the unit of work has committed.
+            self.deps.artifacts.held_slots.extend(held)
+        return result
+
+    async def list_branches(self) -> Result:
+        """This business's branches: where the customer can be seen."""
+
+        async def work(services: "TenantServices") -> Result:
+            return {
+                "branches": [
+                    {
+                        "location_id": str(location.id),
+                        "name": self._name(location),
+                        "city": _shown(location.city),
+                    }
+                    for location in await self._branches(services)
+                ]
+            }
+
+        return await self._call("list_branches", work)
+
+    async def _branches(
+        self, services: "TenantServices", business_id: UUID | None = None
+    ) -> list[Any]:
+        """A business's branches: the one named, the storefront's, or this tenant's."""
+        business_id = business_id or self.deps.business_id
+        if business_id is not None:
+            business_ids = [business_id]
+        else:
+            business_ids = [b.id for b in await services.catalog.list_businesses(limit=5)]
+        branches: list[Any] = []
+        for business_id in business_ids:
+            branches.extend(await services.catalog.list_locations(business_id))
+        return branches
+
+    async def find_available_times(self, service_id: str, days_ahead: int = 7) -> Result:
+        """Free start times for a service across every provider who performs it.
+        service_id is the service's id, or its name ("Classic Manicure")."""
+
+        async def work(services: "TenantServices") -> Result:
+            service = await self._service_ref(services, service_id)
+            return await self._times_for_service(services, service.id, days_ahead)
+
+        return await self._call("find_available_times", work)
+
+    async def _service_ref(
+        self, services: "TenantServices", ref: str | UUID, business_id: UUID | None = None
+    ) -> Any:
+        """The business's service a model named, by id or by name.
+
+        Live, qwen3-1.7b invented service ids. A name is what the customer said
+        and what the model can repeat, so both resolve, and only among this
+        business's own active services. An unknown one is refused with the list.
+        """
+        offered = [
+            service
+            for branch in await self._branches(services, business_id)
+            for service in await services.catalog.list_services(branch.id)
+            if service.is_active
+        ]
+        text = str(ref).strip()
+        for service in offered:
+            if str(service.id) == text:
+                return service
+        wanted = _fold(text)
+        names = [(service, _fold(service.name_en), _fold(service.name_ar)) for service in offered]
+        exact = [service for service, en, ar in names if wanted in (en, ar)]
+        close = [
+            service
+            for service, en, ar in names
+            if wanted and (wanted in en or wanted in ar or (en and en in wanted))
+        ]
+        if exact or close:
+            return (exact or close)[0]
+        listed = "; ".join(f"{self._name(s)} (service_id {s.id})" for s in offered[:12])
+        raise NotFoundError(f"This business has no such service. It offers: {listed}.")
+
+    async def _times_for_service(
+        self,
+        services: "TenantServices",
+        service_id: UUID,
+        days_ahead: int,
+        limit: int | None = _MAX_TIMES,
+    ) -> Result:
+        """The booking domain's slots, merged across qualified providers."""
+        service = await services.catalog.get_service(service_id)
+        location = await services.catalog.get_location(service.location_id)
+        now = datetime.now(UTC)
+        earliest = now + _MIN_LEAD
+        date_to = now + timedelta(days=max(1, min(days_ahead, 14)))
+        offered: list[tuple[datetime, Any]] = []
+        for provider in await services.catalog.list_providers(service.location_id):
+            if not provider.is_active or not await services.catalog.is_provider_qualified(
+                provider.id, service_id
+            ):
+                continue
+            for slot in await services.booking.availability(
+                provider_id=provider.id, service_id=service_id, date_from=now, date_to=date_to
+            ):
+                if slot.starts_at >= earliest:
+                    offered.append((slot.starts_at, provider))
+        offered.sort(key=lambda pair: (pair[0], str(pair[1].id)))
+        return {
+            "service": self._name(service),
+            "price": str(service.price),
+            "currency": service.currency,
+            "duration_minutes": service.duration_minutes,
+            "available": len(offered),
+            "timezone": location.timezone,
+            "times": [
+                {
+                    "starts_at": starts_at.isoformat(),
+                    "local_time": _local(starts_at, location.timezone),
+                    "provider_id": str(provider.id),
+                    "provider": self._name(provider),
+                }
+                for starts_at, provider in offered[:limit]
+            ],
+        }
+
+    async def _hold_details(self, services: "TenantServices", hold: Any) -> dict[str, str]:
+        """Where and when a hold is, in words, for the model and for the reply."""
+        location = await services.catalog.get_location(hold.location_id)
+        business = self._name(await services.catalog.get_business(location.business_id))
+        service = self._name(await services.catalog.get_service(hold.service_id))
+        local_time = _local(hold.starts_at, location.timezone)
+        return {
+            "local_time": local_time,
+            "business": business,
+            "service": service,
+            "label": f"{service} at {business}, {local_time}",
+        }
+
+    async def _free_provider(
+        self,
+        services: "TenantServices",
+        service_id: UUID,
+        starts_at: datetime,
+        provider_id: UUID | None,
+    ) -> UUID:
+        """A qualified provider free at `starts_at`: the one named, if it is, else any.
+
+        A small model names the wrong id (live: the service id as provider_id) or
+        guesses a time. Rather than refuse the id, pick a provider who is free;
+        rather than refuse the time bare, say which times are free.
+        """
+        found = await self._times_for_service(services, service_id, days_ahead=14, limit=None)
+        free = [
+            t
+            for t in found["times"]
+            if _same_instant(datetime.fromisoformat(t["starts_at"]), starts_at)
+        ]
+        if free:
+            named = [t for t in free if t["provider_id"] == str(provider_id)]
+            return UUID((named or free)[0]["provider_id"])
+        upcoming = "; ".join(
+            f"{t['local_time']} (starts_at {t['starts_at']})" for t in found["times"][:5]
+        )
+        raise _TimeNotFree(
+            f"That time is not free. Free times: {upcoming}."
+            if upcoming
+            else "That time is not free, and nothing is free in the next two weeks."
+        )
+
+    async def book_held_slot(self, starts_at: datetime) -> Result:
+        """Books a time held for the customer in an EARLIER message, once they pressed
+        "Yes, book it" on it.
+
+        Issues their QR check-in ticket too. A time held in this same reply cannot
+        be booked yet, and neither can one the customer only agreed to in words:
+        the model's reading of "yes" is exactly what text in a listing or a
+        message could fake, so the confirmation comes from the client's button.
+        """
+        offer = next((o for o in self.deps.offers if _same_instant(o.starts_at, starts_at)), None)
+        if offer is None:
+            held_now = any(
+                _same_instant(h.starts_at, starts_at) for h in self.deps.artifacts.held_slots
+            )
+            self.deps.artifacts.booking_failures.append(
+                ("not_confirmed_yet", "")
+                if held_now
+                else ("not_offered", "that time was not held for you")
+            )
+            return await self._run(
+                "book_held_slot",
+                lambda: _refuse(
+                    "not_confirmed_yet" if held_now else "not_offered",
+                    "STOP: do not call book_held_slot again in this reply. " + _ASK_TO_CONFIRM
+                    if held_now
+                    else "That time was not held for this customer. Hold it with a hold tool, "
+                    "show it to them, and book it after they confirm.",
+                ),
+            )
+        if offer.hold_token != self.deps.confirmed_hold_token:
+            self.deps.artifacts.booking_failures.append(("not_confirmed", ""))
+            return await self._run(
+                "book_held_slot",
+                lambda: _refuse(
+                    "not_confirmed",
+                    "STOP: nothing was booked. The customer has not confirmed this time. "
+                    'Tell them to press "Yes, book it" under it.',
+                ),
+            )
+        booked: list[BookedTicket] = []
+
+        async def referral() -> str | None:
+            # A marketplace offer attributes to the marketplace, recorded the same
+            # way a storefront visit records it (ADR-0010).
+            if offer.business_slug is None or self.deps.discovery is None:
+                return self.deps.referral_token
+            try:
+                async with self.deps.discovery() as discovery:
+                    issued = await discovery.record_referral(offer.business_slug)
+            except DomainError:
+                # An unlisted business still books; it is simply not attributed.
+                return None
+            return issued.token
+
+        async def work(services: "TenantServices") -> Result:
+            customer_id = self.deps.customer_id
+            if customer_id is None:  # pragma: no cover - the router always resolves one
+                raise NotFoundError("There is no customer to book for.")
+            now = datetime.now(UTC)
+            booking = await services.booking.create(
+                location_id=offer.location_id,
+                service_id=offer.service_id,
+                provider_id=offer.provider_id,
+                customer_reference_id=customer_id,
+                self_service=self.deps.self_service,
+                starts_at=offer.starts_at,
+                referral_token=referral_token,
+                # An expired hold no longer reserves the time; booking without it
+                # still succeeds while the time is free, and says so when not.
+                hold_token=offer.hold_token if offer.expires_at > now else None,
+            )
+            issued = await services.queue.issue_ticket(booking_id=booking.id)
+            business = await services.catalog.get_business(booking.business_id)
+            booked.append(
+                BookedTicket(
+                    booking_id=booking.id,
+                    tenant_id=booking.tenant_id,
+                    business_name=self._name(business),
+                    booking_status=str(booking.status),
+                    starts_at=booking.slot.starts_at,
+                    ends_at=booking.slot.ends_at,
+                    ticket_id=issued.ticket.id,
+                    ticket_code=issued.ticket.ticket_code,
+                    qr_payload=issued.qr_payload,
+                    expires_at=issued.ticket.expires_at,
+                    ticket_page_url=issued.ticket_page_url,
+                )
+            )
+            # The QR payload is the customer's credential: the client gets it,
+            # the model does not.
+            return {
+                "booked": True,
+                "booking_status": str(booking.status),
+                "starts_at": booking.slot.starts_at.isoformat(),
+                "ticket_code": issued.ticket.ticket_code,
+                "business": self._name(business),
+            }
+
+        referral_token = await referral()
+        scope = self._tenant_scope(offer.tenant_id or self.deps.tenant_id)
+        result = await self._call_in("book_held_slot", scope, work)
+        if "error" in result:
+            # Kept for the service: a model may still tell the customer it booked.
+            self.deps.artifacts.booking_failures.append(
+                (str(result["error"]), str(result.get("message", "")))
+            )
+        else:
+            # Recorded only now that the unit of work has committed.
+            self.deps.artifacts.tickets.extend(booked)
+            self.deps.artifacts.booking_ids.extend(t.booking_id for t in booked)
+            self.deps.artifacts.used_offers.add(offer.hold_token)
+        return result
+
+    # --- marketplace ------------------------------------------------------------
+
+    async def search_businesses(
+        self, query: str | None = None, city: str | None = None, category: str | None = None
+    ) -> Result:
+        """Listed businesses (salon, spa, massage, nails, barber…) by name, service, city
+        or category, best rated first."""
+
+        term, where, kind = _given(query), _given(city), _given(category)
+
+        async def work(discovery: "DiscoveryService") -> Result:
+            cards = await discovery.search(
+                term=term, city=where, category=kind, sort="rating", limit=8
+            )
+            widened = False
+            if not cards and (where or kind) and term:
+                # A small model fills optional filters it was never told
+                # ("city": "unknown"). Rather than report nothing, drop them.
+                cards = await discovery.search(term=term, sort="rating", limit=8)
+                widened = bool(cards)
+            seen: set[str] = set()
+            found = []
+            for card in cards:
+                business = card.business
+                if business.slug in seen:
+                    continue
+                seen.add(business.slug)
+                found.append(
+                    {
+                        "business_slug": business.slug,
+                        "name": self._name(business),
+                        "branch": self._name(card.location),
+                        "city": _shown(card.location.city),
+                        "rating_count": business.rating_count,
+                    }
+                )
+            if not found:
+                # Said outright: a small model otherwise repeats the same empty
+                # search until its turn runs out.
+                return {
+                    "businesses": [],
+                    "hint": "Nothing matched. Do not repeat this search. Try once with just a "
+                    "service (spa, nails, haircut) or just the city, or ask the customer.",
+                }
+            if widened:
+                return {
+                    "businesses": found,
+                    "note": "Nothing matched that city or category; these match anywhere.",
+                }
+            return {"businesses": found}
+
+        return await self._call_discovery("search_businesses", work)
+
+    async def get_business_details(self, business_slug: str) -> Result:
+        """A listed business's branches and the services it sells, with prices."""
+
+        async def work(discovery: "DiscoveryService") -> Result:
+            storefront = await discovery.get_storefront(business_slug)
+            return {
+                "business_slug": storefront.business.slug,
+                "name": self._name(storefront.business),
+                "branches": [
+                    {"location_id": str(loc.id), "name": self._name(loc), "city": _shown(loc.city)}
+                    for loc in storefront.locations
+                ],
+                "services": [
+                    {
+                        "service_id": str(svc.id),
+                        "name": self._name(svc),
+                        "location_id": str(svc.location_id),
+                        "duration_minutes": svc.duration_minutes,
+                        "price": str(svc.price),
+                        "currency": svc.currency,
+                    }
+                    for svc in storefront.services[:30]
+                    if svc.is_active
+                ],
+            }
+
+        return await self._call_discovery("get_business_details", work)
+
+    async def _listing(self, business_slug: str) -> tuple[UUID, UUID]:
+        """The tenant and business behind a listing, resolved by the server from the
+        slug: only a live, listed business resolves."""
+        discovery = self.deps.discovery
+        if discovery is None:  # pragma: no cover
+            raise NotFoundError("The marketplace is not available here.")
+        async with discovery() as service:
+            business = (await service.get_storefront(business_slug)).business
+        return UUID(str(business.tenant_id)), UUID(str(business.id))
+
+    async def find_times_at_business(
+        self, business_slug: str, service_id: str, days_ahead: int = 7
+    ) -> Result:
+        """Free start times for one service at a listed business. service_id is the
+        service's id, or its name ("Classic Manicure")."""
+        try:
+            tenant_id, business_id = await self._listing(business_slug)
+        except DomainError as exc:
+            code, message = exc.code, exc.message
+            return await self._run("find_times_at_business", lambda: _refuse(code, message))
+
+        async def work(services: "TenantServices") -> Result:
+            service = await self._service_ref(services, service_id, business_id)
+            return await self._times_for_service(services, service.id, days_ahead)
+
+        return await self._call_in("find_times_at_business", self._tenant_scope(tenant_id), work)
+
+    async def hold_slot_at_business(
+        self,
+        business_slug: str,
+        service_id: str,
+        starts_at: datetime,
+        provider_id: UUID | None = None,
+    ) -> Result:
+        """Holds a free time at a listed business for the customer to confirm, once they
+        asked to book it.
+
+        Pass a starts_at that find_times_at_business returned. provider_id is optional.
+        """
+        if self.deps.artifacts.held_slots:
+            # One hold per reply. Live, a small model held a time and then kept
+            # holding others instead of answering; each refusal cost a minute.
+            return await self._run("hold_slot_at_business", _already_holding)
+        try:
+            tenant_id, business_id = await self._listing(business_slug)
+        except DomainError as exc:
+            code, message = exc.code, exc.message
+            return await self._run("hold_slot_at_business", lambda: _refuse(code, message))
+        held: list[HeldSlot] = []
+
+        async def work(services: "TenantServices") -> Result:
+            service = await self._service_ref(services, service_id, business_id)
+            chosen = await self._free_provider(services, service.id, starts_at, provider_id)
+            hold = await services.booking.hold_slot(
+                provider_id=chosen,
+                service_id=service.id,
+                starts_at=starts_at,
+                principal=self.deps.principal,
+                customer_id=self.deps.customer_id,
+            )
+            details = await self._hold_details(services, hold)
+            held.append(
+                _held(hold, tenant_id=tenant_id, slug=business_slug, label=details["label"])
+            )
+            return {
+                "held": True,
+                "starts_at": hold.starts_at.isoformat(),
+                **{k: v for k, v in details.items() if k != "label"},
+                "expires_at": hold.expires_at.isoformat(),
+                "next_step": _ASK_TO_CONFIRM,
+            }
+
+        result = await self._call_in("hold_slot_at_business", self._tenant_scope(tenant_id), work)
+        if "error" not in result:
             self.deps.artifacts.held_slots.extend(held)
         return result
 
@@ -325,15 +953,18 @@ class AgentToolkit:
 
     # --- customer service -------------------------------------------------------
 
-    @staticmethod
-    def _booking(booking: Any) -> Result:
-        # No notes and nothing about the customer: this goes into a prompt.
+    async def _booking(self, services: "TenantServices", booking: Any) -> Result:
+        """A booking in words. No notes and nothing about the customer: this goes
+        into a prompt. Names and a local time, not ids: live, a small model read
+        raw ids back to the customer."""
+        location = await services.catalog.get_location(booking.location_id)
+        service = await services.catalog.get_service(booking.service_id)
         return {
             "booking_id": str(booking.id),
             "status": str(booking.status),
+            "service": self._name(service),
+            "local_time": _local(booking.slot.starts_at, location.timezone),
             "starts_at": booking.slot.starts_at.isoformat(),
-            "service_id": str(booking.service_id),
-            "provider_id": str(booking.provider_id),
             "price": str(booking.price.amount),
             "currency": booking.price.currency,
         }
@@ -348,7 +979,7 @@ class AgentToolkit:
             bookings = await services.booking.list_for_customer_reference(
                 customer_id, self_service=self.deps.self_service, limit=10
             )
-            return {"bookings": [self._booking(b) for b in bookings]}
+            return {"bookings": [await self._booking(services, b) for b in bookings]}
 
         return await self._call("list_my_bookings", work)
 
@@ -357,7 +988,7 @@ class AgentToolkit:
 
         async def work(services: "TenantServices") -> Result:
             booking = await services.booking.get_for_principal(booking_id, self.deps.principal)
-            return self._booking(booking)
+            return await self._booking(services, booking)
 
         return await self._call("get_booking_status", work)
 
@@ -738,4 +1369,63 @@ class AgentToolkit:
         return target_id
 
 
-__all__ = ["AgentToolkit", "HeldSlot", "PendingCancellation", "QueuePlace"]
+__all__ = [
+    "AgentToolkit",
+    "BookedTicket",
+    "HeldSlot",
+    "PendingCancellation",
+    "QueuePlace",
+    "decode_offers",
+    "encode_offers",
+]
+
+
+def _fold(text: str | None) -> str:
+    """Case- and accent-insensitive text, for matching a service by name."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).strip()
+
+
+class _TimeNotFree(ConflictError):
+    code = "time_not_free"
+
+
+def _local(moment: datetime, timezone: str) -> str:
+    """A time as the branch's customers read it: `Thu 24 Sep 2026, 20:00 (Asia/Riyadh)`.
+
+    The ISO time is UTC. A small model restating it gets the day and hour
+    wrong, so each time is also given ready to repeat."""
+    try:
+        zone = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("Asia/Riyadh")
+    return f"{moment.astimezone(zone):%a %d %b %Y, %H:%M} ({zone.key})"
+
+
+#: Told to the model with every hold, before it can try to book too early.
+_ASK_TO_CONFIRM = (
+    "Now reply to the customer naming the business, the service and the held local_time, "
+    "and ask: shall I book it? "
+    'They confirm by pressing "Yes, book it" under the time; it is booked only then.'
+)
+
+#: What a small model writes into an optional argument it has no value for.
+_PLACEHOLDERS = frozenset({"unknown", "any", "none", "null", "n/a", "na", "all", "anywhere", "-"})
+
+
+def _given(value: str | None) -> str | None:
+    """A search filter the customer actually gave, or None."""
+    text = (value or "").strip()[:120]
+    return None if not text or text.lower() in _PLACEHOLDERS else text
+
+
+async def _already_holding() -> Result:
+    return {
+        "error": "already_holding",
+        "message": "A time is already held in this reply. Stop calling tools. " + _ASK_TO_CONFIRM,
+    }
+
+
+async def _refuse(code: str, message: str) -> Result:
+    """A refusal shaped like a domain error's, for a tool that stops before any work."""
+    return {"error": code, "message": message}

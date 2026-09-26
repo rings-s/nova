@@ -296,6 +296,10 @@ class DiscoveryService:
             photos=await self.catalog.photos_for(business.id),
         )
 
+    async def list_categories(self) -> list[Any]:
+        """The platform's service categories, for the search filter."""
+        return await self.catalog.list_categories()
+
     async def covers_for(self, business_ids: list[UUID]) -> dict[UUID, Any]:
         """Search cards' cover photos, one query for the whole page."""
         return await self.catalog.covers_for(business_ids)

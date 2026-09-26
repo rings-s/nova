@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { joinQueue } from '../../api/queue.js';
 	import { pickBilingual } from '../../utils/bilingual.js';
 	import Select from '../ui/Select.svelte';
@@ -13,11 +14,10 @@
 	 *   queueId: string,
 	 *   services: import('../../api/catalog.js').Service[],
 	 *   providers?: import('../../api/catalog.js').Provider[],
-	 *   locale?: 'en'|'ar',
 	 *   onjoined?: (entry: import('../../api/queue.js').QueueEntry) => void
 	 * }}
 	 */
-	let { tenantId, queueId, services, providers = [], locale = 'en', onjoined } = $props();
+	let { tenantId, queueId, services, providers = [], onjoined } = $props();
 
 	let serviceId = $state('');
 	let providerId = $state('');
@@ -50,25 +50,25 @@
 		<Alert tone="error">{error}</Alert>
 	{/if}
 	<Select
-		label="Service"
+		label={t('Service')}
 		required
 		bind:value={serviceId}
 		options={services.map((service) => ({
 			value: service.id,
-			label: pickBilingual(service, 'name', locale)
+			label: pickBilingual(service, 'name')
 		}))}
 	/>
 	{#if providers.length > 0}
 		<Select
-			label="Preferred provider"
-			hint="Optional — leave unset for the next available."
+			label={t('Preferred provider')}
+			hint={t('Optional — leave unset for the next available.')}
 			bind:value={providerId}
 			options={providers.map((provider) => ({
 				value: provider.id,
-				label: pickBilingual(provider, 'name', locale)
+				label: pickBilingual(provider, 'name')
 			}))}
 		/>
 	{/if}
-	<Input type="number" label="Party size" min="1" max="20" bind:value={partySize} />
-	<Button type="submit" {loading} fullWidth disabled={!serviceId}>Join the queue</Button>
+	<Input type="number" label={t('Party size')} min="1" max="20" bind:value={partySize} />
+	<Button type="submit" {loading} fullWidth disabled={!serviceId}>{t('Join the queue')}</Button>
 </form>

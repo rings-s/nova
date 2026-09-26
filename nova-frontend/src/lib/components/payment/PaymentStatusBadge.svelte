@@ -1,4 +1,5 @@
 <script>
+	import { paymentStatusLabel } from '$lib/i18n/labels.js';
 	import Badge from '../ui/Badge.svelte';
 
 	/** @type {{ status: import('../../api/payment.js').PaymentStatus }} */
@@ -18,4 +19,4 @@
 	let entry = $derived(map[status] ?? { tone: 'neutral', label: status });
 </script>
 
-<Badge tone={entry.tone}>{entry.label}</Badge>
+<Badge tone={entry.tone}>{paymentStatusLabel(status)}</Badge>

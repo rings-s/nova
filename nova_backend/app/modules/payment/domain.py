@@ -25,10 +25,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
-from app.core.exceptions import ConflictError, ValidationDomainError
+from app.core.exceptions import ConflictError, DomainError, ValidationDomainError
 from app.core.values import Money
 
 
@@ -137,7 +137,13 @@ class Payment:
     amount: Money
     status: PaymentStatus
     gateway: str = "moyasar"
+    #: Moyasar's payment id, known once the payer has actually paid: a refund
+    #: is made against it.
     gateway_payment_id: str | None = None
+    #: The hosted checkout (a Moyasar invoice) the payer was sent to. One
+    #: invoice can see several attempts (a declined card, then another), so it
+    #: is the checkout, not a payment.
+    gateway_invoice_id: str | None = None
     #: Whether the state was reached via a *verified* webhook rather than an
     #: optimistic client callback. Auditors care about the difference.
     webhook_verified: bool = False
@@ -233,7 +239,35 @@ def to_minor_units(amount: Money) -> int:
     return int((amount.amount * 100).quantize(Decimal("1")))
 
 
-class PaymentAmountMismatchError(ConflictError):
+class PaymentVerificationError(ConflictError):
+    """What the gateway reports paid does not match what this payment asked for.
+
+    Never captured: a capture is what confirms a booking. The webhook is
+    acknowledged all the same (a retry would never match) and left for a
+    person to look at.
+    """
+
+    code = "payment_verification_failed"
+
+
+class PaymentCheckoutMismatchError(PaymentVerificationError):
+    """A paid Moyasar payment that paid some other checkout than this one's.
+
+    Without this check, a webhook naming our invoice beside a real, paid
+    payment for any other purchase of the same amount would confirm a booking
+    nobody paid for.
+    """
+
+    code = "payment_checkout_mismatch"
+
+    def __init__(self, *, expected_invoice_id: str, invoice_id: object) -> None:
+        super().__init__(
+            f"The gateway payment paid invoice {invoice_id!r}, not this payment's "
+            f"checkout {expected_invoice_id!r}. The payment was not captured."
+        )
+
+
+class PaymentAmountMismatchError(PaymentVerificationError):
     """The gateway reports a different sum than this payment asked for.
 
     Not captured, and so the booking is not confirmed: a capture is what confirms
@@ -269,6 +303,31 @@ class ReturnUrlNotAllowedError(ValidationDomainError):
 
     def __init__(self) -> None:
         super().__init__("return_url must be an absolute http(s) URL on the app's own origin.")
+
+
+class CheckoutAmountTooSmallError(DomainError):
+    """Moyasar will not open a checkout for less than 100 minor units (1.00 SAR)."""
+
+    status_code = 422
+    code = "payment_amount_too_small"
+
+    def __init__(self, amount: Money) -> None:
+        super().__init__(
+            f"{amount.amount} {amount.currency} is below the smallest amount that can be "
+            "paid online."
+        )
+
+
+def with_query(url: str, **params: str) -> str:
+    """`url` with `params` added to its query string, keeping what was there.
+
+    How a payer's return from Moyasar's checkout says which payment it was:
+    the gateway sends them back to exactly the URL it was given.
+    """
+    parts = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k not in params]
+    query.extend(params.items())
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def assert_return_url_allowed(return_url: str, *, app_url: str) -> None:

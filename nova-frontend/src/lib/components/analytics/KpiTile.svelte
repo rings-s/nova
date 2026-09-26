@@ -1,30 +1,71 @@
 <script>
-	import Card from '../ui/Card.svelte';
-	import { formatMoney, formatPercent } from '../../utils/money.js';
+	import { t } from '$lib/i18n/index.svelte.js';
+	/**
+	 * One KPI: label, value, and its change against the previous window of the
+	 * same length. The change carries an arrow and words as well as colour,
+	 * and is coloured by whether it is good for this metric (fewer no-shows is
+	 * green), not by its sign.
+	 */
+	import Icon from '../ui/Icon.svelte';
+	import { formatKpi, kpiDelta, kpiMeta } from './kpis.js';
 
 	/**
-	 * @type {{ kpi: import('../../api/analytics.js').Kpi, currency?: string, locale?: 'en'|'ar' }}
+	 * @type {{
+	 *   kpi: import('../../api/analytics.js').Kpi|undefined,
+	 *   previous?: import('../../api/analytics.js').Kpi|undefined,
+	 *   currency?: string,
+	 *   compareLabel?: string,
+	 *   size?: 'md'|'sm'
+	 * }}
 	 */
-	let { kpi, currency = 'SAR', locale = 'en' } = $props();
+	let { kpi, previous, currency = 'SAR', compareLabel = '', size = 'md' } = $props();
 
-	let label = $derived(kpi.metric.replaceAll('_', ' '));
-
-	let displayValue = $derived.by(() => {
-		if (kpi.suppressed || kpi.value === null) return null;
-		if (kpi.unit === 'currency') return formatMoney(kpi.value, currency, locale);
-		if (kpi.unit === 'percent') return formatPercent(kpi.value, { locale });
-		return new Intl.NumberFormat(locale === 'ar' ? 'ar-SA' : 'en-US').format(Number(kpi.value));
-	});
+	let meta = $derived(kpiMeta(kpi?.metric ?? ''));
+	let value = $derived(formatKpi(kpi, { currency, compact: true }));
+	let delta = $derived(kpiDelta(kpi, previous));
 </script>
 
-<Card padding="sm" class="min-w-0">
-	<p class="truncate text-[13px] font-medium text-fg-muted first-letter:uppercase" title={label}>
-		{label}
+<div class={['flex min-w-0 flex-col', size === 'md' ? 'gap-1.5' : 'gap-1'].join(' ')}>
+	<p class="truncate text-[13px] font-medium text-fg-muted" title={t(meta.label)}>
+		{t(meta.label)}
 	</p>
-	{#if displayValue === null}
-		<p class="mt-1.5 text-2xl font-semibold text-fg-subtle">—</p>
-		<p class="mt-0.5 text-xs text-fg-subtle">Not enough data yet</p>
+	{#if value === null}
+		<p class={['font-semibold text-fg-subtle', size === 'md' ? 'text-3xl' : 'text-xl'].join(' ')}>
+			—
+		</p>
+		<p class="text-xs text-fg-subtle">{t('Too few bookings to tell yet')}</p>
 	{:else}
-		<p class="mt-1.5 text-2xl font-semibold tracking-tight text-fg tabular-nums">{displayValue}</p>
+		<p
+			class={[
+				'truncate font-semibold tracking-tight text-fg',
+				size === 'md' ? 'text-3xl' : 'text-xl'
+			].join(' ')}
+			title={value}
+		>
+			{value}
+		</p>
+		{#if delta}
+			<p class="flex flex-wrap items-center gap-x-1.5 text-xs">
+				<span
+					class={[
+						'inline-flex items-center gap-0.5 font-medium',
+						delta.tone === 'good'
+							? 'text-emerald-700 dark:text-emerald-400'
+							: delta.tone === 'bad'
+								? 'text-rose-700 dark:text-rose-400'
+								: 'text-fg-muted'
+					].join(' ')}
+				>
+					<Icon
+						name={delta.direction > 0 ? 'arrow-up' : delta.direction < 0 ? 'arrow-down' : 'minus'}
+						class="size-3"
+					/>
+					{delta.text}
+				</span>
+				{#if compareLabel}<span class="text-fg-subtle">{compareLabel}</span>{/if}
+			</p>
+		{:else if meta.hint}
+			<p class="truncate text-xs text-fg-subtle">{t(meta.hint)}</p>
+		{/if}
 	{/if}
-</Card>
+</div>

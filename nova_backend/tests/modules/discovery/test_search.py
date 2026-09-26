@@ -61,7 +61,7 @@ async def test_search_reaches_across_tenants(
 
 
 async def test_a_salon_is_found_by_something_it_sells(
-    client, tenant_factory, business_factory, location_factory, service_factory
+    client, tenant_factory, business_factory, location_factory, service_factory, category_factory
 ):
     """ "Haircut" has to find a salon that never says "haircut" in its name.
 
@@ -70,7 +70,7 @@ async def test_a_salon_is_found_by_something_it_sells(
     """
     business = await business_factory(await tenant_factory(), name_en="Bin Salman Beauty House")
     location = await location_factory(business)
-    await service_factory(location, name_en="Balayage", category="hair")
+    await service_factory(location, name_en="Balayage", category=await category_factory())
 
     items = (await client.get(DISCOVERY + "/businesses", params={"q": "Balayage"})).json()["items"]
 
@@ -89,6 +89,20 @@ async def test_arabic_search_matches_the_arabic_name(
     items = (await client.get(DISCOVERY + "/businesses", params={"q": "لولو"})).json()["items"]
 
     assert [item["business_id"] for item in items] == [str(business.id)]
+
+
+async def test_search_ignores_accents_on_both_sides(
+    client, tenant_factory, business_factory, location_factory
+):
+    """A customer types "Lumiere"; the salon is "Lumière Spa". Unfolded, the
+    search found nothing, and a model searching for a customer retried it until
+    its turn ran out."""
+    business = await business_factory(await tenant_factory(), name_en="Lumière Spa")
+    await location_factory(business, city="Riyadh")
+
+    for query in ("Lumiere", "LUMIÈRE", "lumière spa"):
+        items = (await client.get(DISCOVERY + "/businesses", params={"q": query})).json()["items"]
+        assert str(business.id) in [item["business_id"] for item in items], query
 
 
 async def test_a_wildcard_in_the_query_is_treated_as_a_literal(
@@ -183,22 +197,6 @@ async def test_the_cheapest_service_is_the_price_on_the_card(
     assert items[0]["currency"] == "SAR"
 
 
-async def test_search_results_do_not_leak_phone_numbers(
-    client, tenant_factory, business_factory, location_factory
-):
-    """ADR-0007 found exactly this defect on the old unauthenticated `GET /tenants`.
-
-    A storefront shows a branch's phone — that is the salon's shop window. One
-    search returning every phone number on the platform is a scrape.
-    """
-    business = await business_factory(await tenant_factory(), name_en="Private Number Salon")
-    await location_factory(business, phone="+966500009999")
-
-    body = (await client.get(DISCOVERY + "/businesses", params={"q": "Private Number"})).text
-
-    assert "+966500009999" not in body
-
-
 class TestOnlyPublishedRowsAreVisible:
     """The restriction that makes a cross-tenant read safe.
 
@@ -211,7 +209,8 @@ class TestOnlyPublishedRowsAreVisible:
     async def test_a_delisted_business_vanishes_from_search(
         self, client, tenant_factory, business_factory, location_factory, db_session, as_owner
     ):
-        """docs/11 section 8: an invoice 21 days overdue hides the listing."""
+        """The owner's opt-out (ADR-0010). Billing's is `hidden_by_billing`,
+        tested in tests/modules/billing/test_dunning_listing.py."""
         business = await business_factory(await tenant_factory(), name_en="Unpaid Salon")
         await location_factory(business)
 
@@ -305,7 +304,7 @@ async def test_the_storefront_carries_everything_needed_to_choose(
     """One call, because four round trips is a page filling in piece by piece."""
     tenant = await tenant_factory()
     business = await business_factory(tenant, name_en="Full Storefront", slug="full-storefront")
-    location = await location_factory(business, city="Riyadh", phone="+966500001234")
+    location = await location_factory(business, city="Riyadh")
     service = await service_factory(location, name_en="Haircut")
     provider = await provider_factory(location, name_en="Sara")
 
@@ -318,8 +317,8 @@ async def test_the_storefront_carries_everything_needed_to_choose(
     assert [row["id"] for row in storefront["locations"]] == [str(location.id)]
     assert [row["id"] for row in storefront["services"]] == [str(service.id)]
     assert [row["id"] for row in storefront["providers"]] == [str(provider.id)]
-    # A storefront does show the branch phone — it is the salon's shop window.
-    assert storefront["locations"][0]["phone"] == "+966500001234"
+    # A branch has no phone of its own (the tenant's is the contact).
+    assert "phone" not in storefront["locations"][0]
 
 
 async def test_public_availability_offers_only_qualified_providers(
@@ -665,19 +664,6 @@ async def test_the_map_says_when_it_was_cut_short(
 @pytest.mark.parametrize("limit", [0, 501])
 async def test_the_map_limit_is_bounded(client, limit):
     assert (await client.get(DISCOVERY + "/map", params={"limit": limit})).status_code == 422
-
-
-async def test_the_map_does_not_leak_phone_numbers(
-    client, tenant_factory, business_factory, location_factory
-):
-    """The map is a second door onto the same directory; it must not be a wider one."""
-    business = await business_factory(await tenant_factory(), name_en="Private Pin Salon")
-    await location_factory(business, phone="+966500008888", latitude=RIYADH[0], longitude=RIYADH[1])
-
-    body = (await client.get(DISCOVERY + "/map", params={"q": "Private Pin"})).text
-
-    assert "Private Pin Salon" in body
-    assert "+966500008888" not in body
 
 
 async def test_the_map_shows_only_published_listings(

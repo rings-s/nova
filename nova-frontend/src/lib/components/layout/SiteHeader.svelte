@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -10,6 +11,7 @@
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import ThemeToggle from '../ui/ThemeToggle.svelte';
+	import LanguageSwitch from '../ui/LanguageSwitch.svelte';
 	import TenantSwitcher from '../tenant/TenantSwitcher.svelte';
 	import Logo from './Logo.svelte';
 
@@ -23,20 +25,27 @@
 		mobileOpen = false;
 	});
 
+	/** Escape closes the menu, as it would any disclosure. @param {KeyboardEvent} event */
+	function onKeydown(event) {
+		if (event.key === 'Escape' && mobileOpen) mobileOpen = false;
+	}
+
 	/** @type {{ href: '/about'|'/features'|'/pricing'|'/discover', label: string }[]} */
 	const publicNavLinks = [
-		{ href: '/about', label: 'About' },
-		{ href: '/features', label: 'Features' },
-		{ href: '/pricing', label: 'Pricing' },
-		{ href: '/discover', label: 'Find a salon' }
+		{ href: '/about', label: m('About') },
+		{ href: '/features', label: m('Features') },
+		{ href: '/pricing', label: m('Pricing') },
+		{ href: '/discover', label: m('Find a salon') }
 	];
 
 	async function handleSignOut() {
 		authStore.logout();
-		toastStore.info('Signed out.');
+		toastStore.info(t('Signed out.'));
 		await goto(resolve('/'));
 	}
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 {#if isDashboard}
 	<!-- /app renders its own shell in routes/app/+layout.svelte -->
@@ -45,23 +54,23 @@
 		<div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
 			<div class="flex min-h-16 items-center justify-between gap-6">
 				<!-- Brand -->
-				<div class="flex min-w-0 items-center gap-8">
+				<div class="flex min-w-0 items-center gap-6 xl:gap-8">
 					<a
 						href={resolve('/')}
 						class="shrink-0 transition-opacity hover:opacity-80"
-						aria-label="NOVA home"
+						aria-label={t('NOVA home')}
 					>
 						<Logo />
 					</a>
 
 					<!-- Desktop navigation -->
-					<nav class="hidden items-center gap-7 lg:flex" aria-label="Main navigation">
+					<nav class="hidden items-center gap-5 lg:flex xl:gap-7" aria-label={t('Main navigation')}>
 						{#each publicNavLinks as link (link.href)}
 							<a
 								href={resolve(link.href)}
 								class="relative py-5 text-sm font-medium text-fg-secondary transition-colors hover:text-fg"
 							>
-								{link.label}
+								{t(link.label)}
 							</a>
 						{/each}
 					</nav>
@@ -75,57 +84,71 @@
 								href={resolve('/app')}
 								class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
 							>
-								Dashboard
+								{t('Dashboard')}
 							</a>
 						{:else}
 							<a
 								href={resolve('/bookings')}
 								class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
 							>
-								My bookings
+								{t('My bookings')}
 							</a>
 							<a
 								href={resolve('/business/new')}
 								class="hidden text-sm font-semibold text-accent transition-colors hover:underline lg:block"
 							>
-								List your business
+								{t('List your business')}
 							</a>
 						{/if}
 					{/if}
 				</div>
 
-				<!-- Desktop actions -->
-				<div class="hidden items-center gap-2 sm:flex">
+				<!-- Desktop actions. The page links only fit from `lg`, so everything
+				     below that uses the menu; one breakpoint for both, or a band of
+				     widths shows neither. -->
+				<div class="hidden shrink-0 items-center gap-2 lg:flex">
+					<LanguageSwitch />
 					<ThemeToggle />
 
 					<div class="mx-1 h-6 w-px bg-line"></div>
 
 					{#if authStore.isAuthenticated}
 						{#if authStore.isStaff}
-							<div class="w-44">
+							<div class="w-36 xl:w-44">
 								<TenantSwitcher />
 							</div>
 						{/if}
 
 						<Button variant="ghost" size="sm" onclick={handleSignOut} class="text-fg-secondary">
-							Sign out
+							{t('Sign out')}
 						</Button>
 					{:else}
-						<Button variant="ghost" size="sm" href={resolve('/login')}>Sign in</Button>
+						<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
 
-						<Button size="sm" href={resolve('/register')}>Get started</Button>
+						<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
 					{/if}
 				</div>
 
-				<!-- Mobile controls -->
-				<div class="flex items-center gap-2 sm:hidden">
+				<!-- Phone and tablet controls -->
+				<div class="flex shrink-0 items-center gap-2 lg:hidden">
+					{#if !authStore.isAuthenticated}
+						<!-- Room for them from `sm`; below that they are in the menu. The
+						     wrapper hides them: `Button`'s own `inline-flex` would beat a
+						     `hidden` passed to it. -->
+						<div class="hidden items-center gap-2 sm:flex">
+							<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
+							<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
+						</div>
+					{/if}
+					<LanguageSwitch compact />
 					<ThemeToggle />
 
 					<button
 						type="button"
+						aria-controls="site-mobile-menu"
 						onclick={() => (mobileOpen = !mobileOpen)}
 						class="inline-flex size-10 items-center justify-center rounded-control border border-line bg-surface text-fg-secondary transition-colors hover:bg-surface-muted"
-						aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+						aria-label={mobileOpen ? t('Close menu') : t('Open menu')}
 						aria-expanded={mobileOpen}
 					>
 						<Icon name={mobileOpen ? 'x' : 'menu'} class="size-5" />
@@ -133,17 +156,20 @@
 				</div>
 			</div>
 
-			<!-- Mobile navigation -->
+			<!-- Phone and tablet navigation -->
 			{#if mobileOpen}
-				<div class="border-t border-line/70 py-4">
-					<nav class="space-y-1" aria-label="Mobile navigation">
+				<div
+					id="site-mobile-menu"
+					class="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-line/70 py-4 lg:hidden"
+				>
+					<nav class="space-y-1" aria-label={t('Mobile navigation')}>
 						{#each publicNavLinks as link (link.href)}
 							<a
 								href={resolve(link.href)}
 								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary transition-colors hover:bg-surface-muted"
 							>
-								{link.label}
-								<Icon name="arrow-right" class="size-4 opacity-40" />
+								{t(link.label)}
+								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
 							</a>
 						{/each}
 
@@ -152,15 +178,15 @@
 								href={resolve('/bookings')}
 								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
 							>
-								My bookings
-								<Icon name="arrow-right" class="size-4 opacity-40" />
+								{t('My bookings')}
+								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
 							</a>
 							<a
 								href={resolve('/business/new')}
 								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-accent hover:bg-surface-muted"
 							>
-								List your business
-								<Icon name="arrow-right" class="size-4 opacity-40" />
+								{t('List your business')}
+								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
 							</a>
 						{/if}
 
@@ -169,13 +195,19 @@
 								href={resolve('/app')}
 								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
 							>
-								Dashboard
-								<Icon name="arrow-right" class="size-4 opacity-40" />
+								{t('Dashboard')}
+								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
 							</a>
 						{/if}
 					</nav>
 
-					<div class="mt-4 border-t border-line/70 pt-4">
+					<div
+						class={[
+							'mt-4 border-t border-line/70 pt-4',
+							// Signed out, its only content is in the bar itself from `sm`.
+							!authStore.isAuthenticated && 'sm:hidden'
+						]}
+					>
 						{#if authStore.isAuthenticated}
 							{#if authStore.isStaff}
 								<div class="mb-3">
@@ -184,13 +216,13 @@
 							{/if}
 
 							<Button variant="outline" size="sm" class="w-full" onclick={handleSignOut}>
-								Sign out
+								{t('Sign out')}
 							</Button>
 						{:else}
 							<div class="grid grid-cols-2 gap-2">
-								<Button variant="outline" size="sm" href={resolve('/login')}>Sign in</Button>
+								<Button variant="outline" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
 
-								<Button size="sm" href={resolve('/register')}>Get started</Button>
+								<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
 							</div>
 						{/if}
 					</div>
@@ -208,7 +240,7 @@
 				<a
 					href={resolve('/')}
 					class="shrink-0 transition-opacity hover:opacity-80"
-					aria-label="NOVA home"
+					aria-label={t('NOVA home')}
 				>
 					<Logo />
 				</a>
@@ -219,7 +251,7 @@
 					href={resolve('/discover')}
 					class="hidden text-sm font-medium text-fg-secondary transition-colors hover:text-fg sm:block"
 				>
-					Find a salon
+					{t('Find a salon')}
 				</a>
 
 				{#if authStore.isAuthenticated && !authStore.isStaff}
@@ -227,7 +259,7 @@
 						href={resolve('/bookings')}
 						class="hidden text-sm font-medium text-fg-secondary transition-colors hover:text-fg sm:block"
 					>
-						My bookings
+						{t('My bookings')}
 					</a>
 				{/if}
 
@@ -236,12 +268,13 @@
 						href={resolve('/app')}
 						class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg sm:block"
 					>
-						Dashboard
+						{t('Dashboard')}
 					</a>
 				{/if}
 			</div>
 
 			<div class="flex shrink-0 items-center gap-2">
+				<LanguageSwitch compact />
 				<ThemeToggle />
 
 				<div class="hidden h-6 w-px bg-line sm:block"></div>
@@ -254,14 +287,14 @@
 					{/if}
 
 					<Button variant="ghost" size="sm" onclick={handleSignOut}>
-						<span class="hidden sm:inline">Sign out</span>
+						<span class="hidden sm:inline">{t('Sign out')}</span>
 						<Icon name="log-out" class="size-4 sm:hidden" />
 					</Button>
 				{:else}
-					<Button variant="ghost" size="sm" href={resolve('/login')}>Sign in</Button>
+					<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
 
 					<Button size="sm" href={resolve('/register')} class="hidden sm:inline-flex">
-						Sign up
+						{t('Sign up')}
 					</Button>
 				{/if}
 			</div>

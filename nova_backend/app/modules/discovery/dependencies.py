@@ -27,8 +27,14 @@ async def get_discovery_service(
     query returns zero rows rather than leaking: forgetting it breaks discovery
     loudly instead of breaking isolation quietly.
     """
-    settings = get_settings()
     await set_discovery_scope(session)
+    return build_discovery_service(session)
+
+
+def build_discovery_service(session: AsyncSession) -> DiscoveryService:
+    """Assembles the service outside the request DI graph (the marketplace
+    assistant). The caller opens the RLS window with `set_discovery_scope`."""
+    settings = get_settings()
     return DiscoveryService(
         catalog=build_public_catalog_service(session),
         session=session,

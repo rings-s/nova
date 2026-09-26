@@ -3,6 +3,7 @@ title: Business Agents and Analytics
 created: 2026-09-14
 project: NOVA
 type: ai
+status: current
 tags: [ai, agents, pydanticai, analytics, pandas, numpy, plotly, charts]
 related_code:
   - app/modules/ai_agents/agents.py

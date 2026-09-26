@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import Input from '../ui/Input.svelte';
 	import Button from '../ui/Button.svelte';
 	import Alert from '../ui/Alert.svelte';
@@ -36,13 +37,13 @@
 	{#if error}
 		<Alert tone="error">{error}</Alert>
 	{/if}
-	<Input type="email" label="Email" required autocomplete="email" bind:value={email} />
+	<Input type="email" label={t('Email')} required autocomplete="email" bind:value={email} />
 	<Input
 		type="password"
-		label="Password"
+		label={t('Password')}
 		required
 		autocomplete="current-password"
 		bind:value={password}
 	/>
-	<Button type="submit" {loading} fullWidth>Sign in</Button>
+	<Button type="submit" {loading} fullWidth>{t('Sign in')}</Button>
 </form>

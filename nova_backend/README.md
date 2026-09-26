@@ -51,7 +51,7 @@ nova_backend/
 │   ├── modules/             one folder per bounded context
 │   │   ├── registry.py      the single place every module is wired in
 │   │   ├── identity/        ✅ Tenant, User, Membership, Customer
-│   │   ├── catalog/         ✅ Business, Location, Service, Provider
+│   │   ├── catalog/         ✅ Business, Location, Service, Provider, BusinessPhoto
 │   │   ├── discovery/       ✅ MarketplaceReferral  ← the only public, cross-tenant slice
 │   │   ├── booking/         ✅ Booking, Schedule, SlotHold  ← reference implementation
 │   │   ├── queue/           ✅ Queue, QueueEntry, Ticket
@@ -59,11 +59,10 @@ nova_backend/
 │   │   ├── payment/         ✅ Payment, Refund
 │   │   ├── billing/         ✅ Subscription, CommissionLine, Invoice, Payout
 │   │   ├── analytics/       ✅ owner reports and Plotly charts (pandas, numpy)  ← owns no tables
-│   │   ├── media/           ✅ MediaAsset
 │   │   ├── notification/    ✅ Notification
 │   │   └── ai_agents/       ✅ PydanticAI agents (calls services, never the DB)
 │   │
-│   ├── integrations/        outbound adapters (Moyasar, Nextcloud, WhatsApp)
+│   ├── integrations/        outbound adapters (Moyasar, WhatsApp) + images.py, storage/ (photos)
 │   └── worker/              outbox dispatcher + scheduled jobs (ARQ)
 │
 ├── alembic/                 migrations
@@ -111,7 +110,7 @@ Three of these are not the same thing, and mixing them is the most common mistak
 Not every module earns a rich domain entity. We pay for the mapping layer only
 where there is a real lifecycle to protect.
 
-**Pure functions** — `identity`, `catalog`, `discovery`, `review`, `media`, `notification`.
+**Pure functions** — `identity`, `catalog`, `discovery`, `review`, `notification`.
 Rules are field-level validation; the ORM model _is_ the domain object.
 
 ```python
@@ -201,6 +200,146 @@ and query it.
 For anything that is a reaction rather than a question, publish a domain event
 instead: booking publishes `BookingConfirmed`; notification reacts. Booking must
 not import notification.
+
+## Payments (Moyasar)
+
+Payments go through [Moyasar](https://docs.moyasar.com/), following its API
+reference. The adapter is `app/integrations/payments/moyasar.py`; the rules
+are in `modules/payment`.
+
+**The flow**
+
+1. `POST /tenants/{id}/payments/intents` opens a Moyasar **invoice**
+   (`POST /v1/invoices`) for the booking's price, in halalas. The response's
+   `redirect_url` is Moyasar's hosted checkout. The payer pays there with mada,
+   a card, Apple Pay or STC Pay (whichever the account enables), so card data
+   never reaches NOVA.
+2. Moyasar sends the payer back to the `return_url` the client gave, with
+   `payment=<id>` added. The page calls `POST …/payments/{id}/sync`, which
+   fetches the invoice and its payment from Moyasar and captures only if the
+   status is `paid` and the amount, currency and invoice all match. The redirect
+   itself proves nothing.
+3. Moyasar also sends a `payment_paid` webhook to `POST /api/v1/webhooks/moyasar`.
+   It is authenticated by the `secret_token` in its body, deduplicated by event
+   id, and checked against Moyasar's record of the payment just like a sync.
+   Either path confirms the booking; whichever arrives second changes nothing.
+
+A declined card does not fail the payment while the checkout is still open,
+because the payer can try another card. The payment fails once the invoice
+expires (`MOYASAR_CHECKOUT_TTL_MINUTES`, default 30) or is cancelled.
+
+**Setting it up**
+
+1. In the [Moyasar dashboard](https://dashboard.moyasar.com), under Settings >
+   API Keys, copy the **secret** key. Use `sk_test_…` until go-live. The
+   publishable `pk_…` key cannot create invoices, so the app refuses to start
+   with it, and it refuses `sk_test_…` when `ENV=production`.
+2. Under Settings > Webhooks, add
+   `https://<your public host>/api/v1/webhooks/moyasar` with a shared secret of
+   your choosing (`openssl rand -hex 32`). Subscribe to at least
+   `payment_paid` and `payment_failed`.
+3. Set both in `infra/.env` and restart the stack (`make dev`):
+
+   ```dotenv
+   MOYASAR_API_KEY=sk_test_...
+   MOYASAR_WEBHOOK_SECRET=<the webhook's shared secret>
+   ```
+
+4. `PUBLIC_APP_URL` must be the customer app's origin. A `return_url`
+   anywhere else is refused.
+
+Without a key, payment routes answer 503 `integration_not_configured`, and the
+rest of the app runs as normal. Locally, Moyasar cannot reach your webhook
+unless you expose it (`make tunnel`). Payments still confirm through the sync
+step when the payer returns. To test, pay with Moyasar's
+[test cards](https://docs.moyasar.com/guides/card-payments/test-cards/).
+
+A `live: false` (test-mode) webhook is ignored when `ENV=production`. Refunds
+go through `POST …/payments/{id}/refund` (owners and managers). A refund made
+in Moyasar's dashboard is not synced back to NOVA.
+
+## AI agents (local models)
+
+The agents in `modules/ai_agents` run on a model server on your own machine,
+through PydanticAI. The roster, tools and guardrails are in docs/10 and docs/13.
+The server connection is in `runtime.py`, and nothing else in the app knows
+which server is running.
+
+**Where agents appear**
+
+- `/app/ai` in the dashboard: the accountant, analyst and business manager
+  agents, for the business being managed. The list shows only the agents this
+  role's permissions allow. Charts and proposed actions come from the tools.
+- The storefront (`/discover/<slug>`): an "Ask the assistant" button that opens
+  the receptionist agent for signed-in customers.
+- `/discover`: the marketplace assistant (`POST /discovery/ai/chat`, customers
+  only). It searches every listed business, holds a time, and books at the one
+  the customer picks, attributed to the marketplace.
+- Both assistants **book for the customer in two turns** (ADR-0015). A hold tool
+  offers a time; `book_held_slot` books it only in a later turn, after the
+  customer presses its "Yes, book it" (`confirm_hold_token`), and returns the booking's **QR ticket** in `tickets`. The
+  booking is a `draft` until the business confirms it. Customers see the QR in
+  the chat and under My bookings ("Show ticket"). The business scans it at
+  `/app/check-in`, by camera or by pasting the code.
+- Both call `GET /tenants/{id}/ai/agents` first. Its `inference_available` is
+  false when the model server does not answer. The storefront then hides the
+  button, and `/app/ai` shows an "offline" panel.
+
+**Setting it up with LM Studio**
+
+1. In LM Studio, download models that support tool calling. Without a GPU,
+   use small Qwen3 models: `lms get qwen/qwen3-4b` for reasoning and
+   `lms get qwen/qwen3-1.7b` for routing. Then start the server on all
+   interfaces, so the containers can reach it: `lms server start --bind 0.0.0.0 --port 1234` (or turn on "Serve on
+   Local Network" in the Developer tab). Keep the host firewall closed to the
+   LAN on port 1234. Docker's bridge reaches it through `host.docker.internal`,
+   which compose maps with `extra_hosts: host-gateway`.
+2. Set the provider in `infra/.env`, then recreate `backend` and `worker`:
+
+   ```dotenv
+   AI_PROVIDER=lmstudio
+   AI_BASE_URL=http://host.docker.internal:1234/v1
+   AI_ROUTING_MODEL=qwen/qwen3-1.7b   # LM Studio's model id (`lms ls`)
+   AI_REASONING_MODEL=qwen/qwen3-4b
+   AI_REQUEST_TIMEOUT_SECONDS=300      # the 30 s default suits a GPU, not a laptop
+   ```
+
+For Ollama, set `AI_PROVIDER=ollama` and point `AI_BASE_URL` (or
+`OLLAMA_BASE_URL`) at `http://host.docker.internal:11434/v1`.
+
+**Speed**
+
+A turn sends the agent's instructions and tool schemas, typically 1,000 to 3,000
+tokens, and may call the model several times. `AI_THINKING=false`, the default,
+adds Qwen3's `/no_think` switch to the instructions. That cut a small
+tool-calling turn from 319 s to 59 s with qwen3-8b in LM Studio. PydanticAI's
+generic `thinking=False` (sent as `reasoning_effort`) did not finish that turn
+within 10 minutes in testing, so it is not used.
+
+Measured on a CPU-only laptop (i7-1185G7, 16 GB, AVX2 runtime), in tokens per
+second:
+
+| Model      | Reading the prompt | Generating |
+| ---------- | ------------------ | ---------- |
+| qwen3-8b   | ~2                 | ~1         |
+| qwen3-4b   | ~4.5               | ~1.9       |
+| qwen3-1.7b | ~10–27             | ~3–14      |
+
+Only qwen3-1.7b finishes a grounded staff turn there: the accountant's "How much
+did we earn this month?" took 270 s over 3–4 model calls, with a real chart.
+That machine runs 1.7B in both roles, with `AI_REQUEST_TIMEOUT_SECONDS=600`.
+With a GPU, use `qwen/qwen3-4b` or larger for `AI_REASONING_MODEL`.
+
+Load the model with **one parallel slot**, so each follow-up call in a turn
+reuses the cached prompt instead of reading it all again (that alone cut a
+second call from 1,375 prompt tokens to 253):
+
+```bash
+lms load qwen/qwen3-1.7b --parallel 1 -c 8192
+```
+
+When the model is unreachable or times out, the turn hands off to a human. It
+never fails the request, and the rest of the app is unaffected.
 
 ## Commands
 

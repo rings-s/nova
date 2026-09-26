@@ -119,6 +119,24 @@ class BookingService:
             provider_id=provider_id, location_id=provider.location_id, windows=windows
         )
 
+    async def has_upcoming_bookings(
+        self,
+        *,
+        location_id: UUID | None = None,
+        service_id: UUID | None = None,
+        provider_id: UUID | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Whether an appointment still to come uses this branch, service or
+        provider. Catalog refuses to delete one while it does, so no booking is
+        left pointing at something the salon no longer offers."""
+        return await self.repository.has_upcoming(
+            now=now or datetime.now(UTC),
+            location_id=location_id,
+            service_id=service_id,
+            provider_id=provider_id,
+        )
+
     async def get_provider_schedule(self, provider_id: UUID) -> list[WorkingWindow]:
         await self.catalog.get_provider(provider_id)
         return await self.schedules.list_windows(provider_id)

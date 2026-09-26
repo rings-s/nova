@@ -5,12 +5,15 @@ Services flush, never commit — the router owns the transaction boundary.
 
 import asyncio
 import uuid as uuid_module
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from app.core.events import publish_event
+from app.core.exceptions import ValidationDomainError
 from app.integrations.images import process_upload
 from app.integrations.storage import ImageStore
 from app.modules.catalog.domain import (
@@ -20,7 +23,6 @@ from app.modules.catalog.domain import (
     photo_storage_key,
     require_bilingual_text,
     validate_coordinates,
-    validate_gcc_phone,
     validate_photo_kind,
     validate_service_duration,
     validate_service_price,
@@ -29,6 +31,8 @@ from app.modules.catalog.domain import (
 from app.modules.catalog.events import BusinessCreated, LocationCreated, ServicePublished
 from app.modules.catalog.exceptions import (
     BusinessNotFoundError,
+    CatalogItemInUseError,
+    CategoryNotFoundError,
     CrossLocationAssignmentError,
     DuplicateSlugError,
     GalleryFullError,
@@ -44,6 +48,7 @@ from app.modules.catalog.models import (
     Provider,
     ProviderService,
     Service,
+    ServiceCategory,
 )
 from app.modules.catalog.repository import (
     BusinessPhotoRepository,
@@ -51,8 +56,22 @@ from app.modules.catalog.repository import (
     LocationRepository,
     ProviderRepository,
     PublicCatalogRepository,
+    ServiceCategoryRepository,
     ServiceRepository,
 )
+
+#: Asks booking whether an appointment still to come uses a branch, service or
+#: provider: `BookingService.has_upcoming_bookings`, passed in by the router.
+#: A parameter rather than a dependency because booking already depends on
+#: catalog, and the arrow must not point both ways.
+UpcomingBookings = Callable[..., Awaitable[bool]]
+
+
+def _require_text(changes: Mapping[str, Any], *fields: str) -> None:
+    """A required text field may be changed, but not to nothing."""
+    for field in fields:
+        if field in changes and not (changes[field] or "").strip():
+            raise ValidationDomainError(f"'{field}' cannot be empty.")
 
 
 class CatalogService:
@@ -63,8 +82,8 @@ class CatalogService:
         locations: LocationRepository,
         services: ServiceRepository,
         providers: ProviderRepository,
+        categories: ServiceCategoryRepository,
         tenant_id: UUID,
-        allowed_phone_country_codes: list[str],
         photos: BusinessPhotoRepository | None = None,
         images: ImageStore | None = None,
     ) -> None:
@@ -74,8 +93,8 @@ class CatalogService:
         self.locations = locations
         self.services = services
         self.providers = providers
+        self.categories = categories
         self.tenant_id = tenant_id
-        self.allowed_phone_country_codes = allowed_phone_country_codes
 
     @property
     def session(self):
@@ -193,6 +212,40 @@ class CatalogService:
             raise PhotoNotFoundError(photo_id)
         await self._remove_photo(photo)
 
+    async def update_photo(
+        self, photo_id: UUID, *, kind: str | None = None, position: int | None = None
+    ) -> BusinessPhoto:
+        """Makes a photo the cover (the old cover joins the gallery) or moves
+        it back into the gallery, and/or sets its place in the gallery order."""
+        photos, _ = self._photo_parts()
+        photo = await photos.get(photo_id)
+        if photo is None:
+            raise PhotoNotFoundError(photo_id)
+
+        if kind is not None and validate_photo_kind(kind) != photo.kind:
+            count, top = await photos.gallery_stats(photo.business_id)
+            if kind == "cover":
+                # A gallery photo trades places with the cover, so the gallery
+                # keeps its size. The one-cover index is checked per statement:
+                # the old cover steps down, and is flushed, before this steps up.
+                old_cover = await photos.get_cover(photo.business_id)
+                if old_cover is not None:
+                    old_cover.kind, old_cover.position = "gallery", top + 1
+                    await self.session.flush()
+                photo.kind, photo.position = "cover", 0
+            else:
+                if count >= MAX_GALLERY_PHOTOS:
+                    raise GalleryFullError(MAX_GALLERY_PHOTOS)
+                photo.kind, photo.position = "gallery", top + 1
+
+        if position is not None:
+            if position < 0:
+                raise ValidationDomainError("A photo's position cannot be negative.")
+            if photo.kind == "gallery":
+                photo.position = position
+        await self.session.flush()
+        return photo
+
     async def read_photo(self, photo_id: UUID, variant: str) -> bytes:
         """The stored bytes of a photo in this tenant (dashboard previews)."""
         photos, images = self._photo_parts()
@@ -233,7 +286,6 @@ class CatalogService:
         business_id: UUID,
         name_en: str,
         name_ar: str,
-        phone: str,
         timezone: str = "Asia/Riyadh",
         city: str | None = None,
         latitude: float | None = None,
@@ -244,7 +296,6 @@ class CatalogService:
         await self.get_business(business_id)
 
         require_bilingual_text(name_en, name_ar)
-        validate_gcc_phone(phone, self.allowed_phone_country_codes)
         validate_timezone(timezone)
         validate_coordinates(latitude, longitude)
 
@@ -255,7 +306,6 @@ class CatalogService:
             name_en=name_en,
             name_ar=name_ar,
             slug=slug,
-            phone=phone,
             timezone=timezone,
             city=city,
             latitude=latitude,
@@ -299,6 +349,38 @@ class CatalogService:
         await self.locations.session.flush()
         return location
 
+    async def update_location(self, location_id: UUID, changes: Mapping[str, Any]) -> Location:
+        """Renames a branch, or changes its city, timezone or whether it takes
+        bookings. Its map pin has its own verb, `set_location_position`."""
+        location = await self.get_location(location_id)
+        _require_text(changes, "name_en", "name_ar")
+        if "timezone" in changes:
+            validate_timezone(changes["timezone"])
+        for field in ("name_en", "name_ar", "city", "timezone", "is_active"):
+            if field in changes:
+                setattr(location, field, changes[field])
+        await self.locations.session.flush()
+        return location
+
+    async def delete_location(
+        self, location_id: UUID, *, has_upcoming: UpcomingBookings, now: datetime | None = None
+    ) -> None:
+        """Retires a branch, with its services and providers.
+
+        Soft: past bookings still resolve what they used. Refused while an
+        appointment is still to come there; cancel or move those first.
+        """
+        location = await self.get_location(location_id)
+        if await has_upcoming(location_id=location_id):
+            raise CatalogItemInUseError("branch")
+        now = now or datetime.now(UTC)
+        for service in await self.services.list_for_location(location_id):
+            service.mark_deleted(now=now)
+        for provider in await self.providers.list_for_location(location_id):
+            provider.mark_deleted(now=now)
+        location.mark_deleted(now=now)
+        await self.locations.session.flush()
+
     # --- Service ------------------------------------------------------------
 
     async def create_service(
@@ -310,7 +392,7 @@ class CatalogService:
         duration_minutes: int,
         price: Decimal,
         currency: str = "SAR",
-        category: str | None = None,
+        category_id: UUID | None = None,
         description_en: str | None = None,
         description_ar: str | None = None,
     ) -> Service:
@@ -319,6 +401,13 @@ class CatalogService:
         require_bilingual_text(name_en, name_ar)
         validate_service_duration(duration_minutes)
         validate_service_price(price)
+        # A tenant files its service under a category from the platform's
+        # list; it cannot invent one (only a superuser can, `CategoryService`).
+        category = None
+        if category_id is not None:
+            category = await self.categories.get(category_id)
+            if category is None or not category.is_active:
+                raise CategoryNotFoundError(category_id)
 
         service = Service(
             tenant_id=self.tenant_id,
@@ -352,6 +441,47 @@ class CatalogService:
     async def list_services(self, location_id: UUID) -> list[Service]:
         await self.get_location(location_id)
         return await self.services.list_for_location(location_id)
+
+    async def update_service(self, service_id: UUID, changes: Mapping[str, Any]) -> Service:
+        """Changes what a service is called, costs or takes, its category, or
+        whether it can be booked. A booking already made keeps the price and
+        times it was made with."""
+        service = await self.get_service(service_id)
+        _require_text(changes, "name_en", "name_ar")
+        if "duration_minutes" in changes:
+            validate_service_duration(changes["duration_minutes"])
+        if "price" in changes:
+            validate_service_price(changes["price"])
+        if "category_id" in changes:
+            category = None
+            if changes["category_id"] is not None:
+                category = await self.categories.get(changes["category_id"])
+                if category is None or not category.is_active:
+                    raise CategoryNotFoundError(changes["category_id"])
+            service.category = category
+        for field in (
+            "name_en",
+            "name_ar",
+            "description_en",
+            "description_ar",
+            "duration_minutes",
+            "price",
+            "is_active",
+        ):
+            if field in changes:
+                setattr(service, field, changes[field])
+        await self.services.session.flush()
+        return service
+
+    async def delete_service(
+        self, service_id: UUID, *, has_upcoming: UpcomingBookings, now: datetime | None = None
+    ) -> None:
+        """Retires a service. Refused while an appointment for it is still to come."""
+        service = await self.get_service(service_id)
+        if await has_upcoming(service_id=service_id):
+            raise CatalogItemInUseError("service")
+        service.mark_deleted(now=now or datetime.now(UTC))
+        await self.services.session.flush()
 
     # --- Provider -----------------------------------------------------------
 
@@ -389,6 +519,27 @@ class CatalogService:
         await self.get_location(location_id)
         return await self.providers.list_for_location(location_id)
 
+    async def update_provider(self, provider_id: UUID, changes: Mapping[str, Any]) -> Provider:
+        """Renames a provider, changes their title, or takes them off the
+        booking list (`is_active`) without retiring them."""
+        provider = await self.get_provider(provider_id)
+        _require_text(changes, "name_en", "name_ar")
+        for field in ("name_en", "name_ar", "title_en", "title_ar", "is_active"):
+            if field in changes:
+                setattr(provider, field, changes[field])
+        await self.providers.session.flush()
+        return provider
+
+    async def delete_provider(
+        self, provider_id: UUID, *, has_upcoming: UpcomingBookings, now: datetime | None = None
+    ) -> None:
+        """Retires a provider. Refused while they have an appointment to come."""
+        provider = await self.get_provider(provider_id)
+        if await has_upcoming(provider_id=provider_id):
+            raise CatalogItemInUseError("provider")
+        provider.mark_deleted(now=now or datetime.now(UTC))
+        await self.providers.session.flush()
+
     async def assign_service_to_provider(
         self, provider_id: UUID, service_id: UUID
     ) -> ProviderService:
@@ -413,15 +564,29 @@ class CatalogService:
     async def set_listing_visibility(self, business_id: UUID, *, is_listed: bool) -> Business:
         """Shows or hides this business on the public marketplace (ADR-0010).
 
-        Separate from any notion of "active" on purpose. docs/11 section 8 ends
-        the dunning ladder with "marketplace listing hidden. The calendar,
-        queue, and existing bookings keep working" — so the switch that billing
-        eventually pulls has to remove the salon from search *without* touching
-        anything it is already running.
+        The owner's switch. Separate from any notion of "active" on purpose:
+        it removes the salon from search *without* touching anything it is
+        already running. Billing's equivalent, for an unpaid invoice, is
+        `set_billing_visibility`.
         """
         business = await self.get_business(business_id)
         business.is_listed = is_listed
         await self.businesses.session.flush()
+        return business
+
+    async def set_billing_visibility(self, business_id: UUID, *, hidden: bool) -> Business:
+        """Mirrors billing's day-21 decision onto the listing (docs/11 section 8).
+
+        Billing owns the decision and catalog owns the listing, so the worker
+        carries one to the other (`app/worker/handlers.py`). A separate flag
+        from `is_listed`: that one is the owner's, and paying a bill must not
+        re-advertise a business its owner hid. Setting the value it already
+        has is a no-op, which is what makes a redelivered event harmless.
+        """
+        business = await self.get_business(business_id)
+        if business.hidden_by_billing != hidden:
+            business.hidden_by_billing = hidden
+            await self.businesses.session.flush()
         return business
 
 
@@ -447,6 +612,55 @@ class ListingCard:
     distance_km: float | None = None
 
 
+class CategoryService:
+    """The platform's service categories, which only a superuser edits.
+
+    No tenant, like `PublicCatalogService`: the list is shared by every salon
+    so the marketplace can filter them all by it. The router gates every write
+    on `require_superuser`; this class assumes that has happened.
+    """
+
+    def __init__(self, *, categories: ServiceCategoryRepository) -> None:
+        self.categories = categories
+
+    async def list_categories(self, *, include_inactive: bool = False) -> list[ServiceCategory]:
+        return await self.categories.list_ordered(include_inactive=include_inactive)
+
+    async def create(self, *, name_en: str, name_ar: str) -> ServiceCategory:
+        require_bilingual_text(name_en, name_ar)
+        slug = generate_slug(name_en)
+        if await self.categories.get_by_slug(slug) is not None:
+            raise DuplicateSlugError(slug)
+        category = ServiceCategory(slug=slug, name_en=name_en.strip(), name_ar=name_ar.strip())
+        self.categories.add(category)
+        await self.categories.session.flush()
+        return category
+
+    async def update(
+        self,
+        category_id: UUID,
+        *,
+        name_en: str | None = None,
+        name_ar: str | None = None,
+        is_active: bool | None = None,
+    ) -> ServiceCategory:
+        """Renames, retires or restores a category. Retiring hides it from new
+        services and from the marketplace filter; services already filed under
+        it keep it."""
+        category = await self.categories.get(category_id)
+        if category is None:
+            raise CategoryNotFoundError(category_id)
+        require_bilingual_text(name_en or category.name_en, name_ar or category.name_ar)
+        if name_en is not None:
+            category.name_en = name_en.strip()
+        if name_ar is not None:
+            category.name_ar = name_ar.strip()
+        if is_active is not None:
+            category.is_active = is_active
+        await self.categories.session.flush()
+        return category
+
+
 class PublicCatalogService:
     """Reads published listings across every tenant, for the marketplace.
 
@@ -465,10 +679,21 @@ class PublicCatalogService:
     """
 
     def __init__(
-        self, *, listings: PublicCatalogRepository, images: ImageStore | None = None
+        self,
+        *,
+        listings: PublicCatalogRepository,
+        categories: ServiceCategoryRepository | None = None,
+        images: ImageStore | None = None,
     ) -> None:
         self.listings = listings
+        self.categories = categories
         self.images = images
+
+    async def list_categories(self) -> list[ServiceCategory]:
+        """The categories a customer can filter by and a salon can file under."""
+        if self.categories is None:
+            raise RuntimeError("PublicCatalogService was built without categories.")
+        return await self.categories.list_ordered()
 
     async def covers_for(self, business_ids: list[UUID]) -> dict[UUID, BusinessPhoto]:
         return await self.listings.covers_for(business_ids)

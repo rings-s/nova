@@ -1,4 +1,5 @@
 <script>
+	import { t, m } from '$lib/i18n/index.svelte.js';
 	/**
 	 * The tenant dashboard's section nav, grouped by job: the day-to-day
 	 * operating screens first, then the ones that set the business up. The
@@ -13,27 +14,46 @@
 	let { onnavigate } = $props();
 
 	/**
-	 * @typedef {'/app'|'/app/catalog'|'/app/bookings'|'/app/queue'|'/app/customers'|'/app/reviews'|'/app/analytics'|'/app/billing'|'/app/team'} AppHref
-	 * @type {{ label: string, items: { href: AppHref, label: string, icon: import('../ui/Icon.svelte').IconName, needs?: import('../../api/identity.js').StaffPermission }[] }[]}
+	 * @typedef {'/app'|'/app/catalog'|'/app/bookings'|'/app/check-in'|'/app/queue'|'/app/customers'|'/app/reviews'|'/app/analytics'|'/app/ai'|'/app/billing'|'/app/team'} AppHref
+	 * @type {{ label: string, items: { href: AppHref, label: string, icon: import('../ui/Icon.svelte').IconName, needs?: import('../../api/identity.js').StaffPermission|import('../../api/identity.js').StaffPermission[] }[] }[]}
 	 */
 	const groups = [
 		{
-			label: 'Operate',
+			label: m('Operate'),
 			items: [
-				{ href: '/app', label: 'Overview', icon: 'home' },
-				{ href: '/app/bookings', label: 'Bookings', icon: 'calendar' },
-				{ href: '/app/queue', label: 'Walk-in queue', icon: 'users' },
-				{ href: '/app/customers', label: 'Customers', icon: 'user' }
+				{ href: '/app', label: m('Overview'), icon: 'home' },
+				{ href: '/app/bookings', label: m('Bookings'), icon: 'calendar' },
+				{ href: '/app/check-in', label: m('Check-in'), icon: 'shield-check' },
+				{ href: '/app/queue', label: m('Walk-in queue'), icon: 'users' },
+				{ href: '/app/customers', label: m('Customers'), icon: 'user' }
 			]
 		},
 		{
-			label: 'Business',
+			label: m('Business'),
 			items: [
-				{ href: '/app/catalog', label: 'Catalog', icon: 'layers' },
-				{ href: '/app/reviews', label: 'Reviews', icon: 'star' },
-				{ href: '/app/analytics', label: 'Analytics', icon: 'chart-bar', needs: 'view_analytics' },
-				{ href: '/app/billing', label: 'Billing', icon: 'credit-card', needs: 'view_financials' },
-				{ href: '/app/team', label: 'Team', icon: 'user-check' }
+				{ href: '/app/catalog', label: m('Catalog'), icon: 'layers' },
+				{ href: '/app/reviews', label: m('Reviews'), icon: 'star' },
+				{
+					href: '/app/analytics',
+					label: m('Analytics'),
+					icon: 'chart-bar',
+					needs: 'view_analytics'
+				},
+				// Shown when the role can use at least one owner agent; the page
+				// itself lists which. Both the accountant and the analyst need one.
+				{
+					href: '/app/ai',
+					label: m('AI assistant'),
+					icon: 'sparkles',
+					needs: ['view_financials', 'view_analytics']
+				},
+				{
+					href: '/app/billing',
+					label: m('Billing'),
+					icon: 'credit-card',
+					needs: 'view_financials'
+				},
+				{ href: '/app/team', label: m('Team'), icon: 'user-check' }
 			]
 		}
 	];
@@ -45,7 +65,13 @@
 	let visibleGroups = $derived(
 		groups.map((group) => ({
 			...group,
-			items: group.items.filter((item) => !item.needs || accessStore.can(item.needs))
+			items: group.items.filter(
+				(item) =>
+					!item.needs ||
+					(Array.isArray(item.needs)
+						? item.needs.some((need) => accessStore.can(need))
+						: accessStore.can(item.needs))
+			)
 		}))
 	);
 
@@ -58,11 +84,11 @@
 	}
 </script>
 
-<nav class="flex flex-col gap-6" aria-label="Dashboard">
+<nav class="flex flex-col gap-6" aria-label={t('Dashboard')}>
 	{#each visibleGroups as group (group.label)}
 		<div>
 			<p class="mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">
-				{group.label}
+				{t(group.label)}
 			</p>
 			<ul class="flex flex-col gap-0.5">
 				{#each group.items as item (item.href)}
@@ -90,7 +116,7 @@
 								name={item.icon}
 								class={`size-[18px] shrink-0 ${active ? 'text-accent' : 'text-fg-subtle group-hover:text-fg-muted'}`}
 							/>
-							{item.label}
+							{t(item.label)}
 						</a>
 					</li>
 				{/each}

@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { pickBilingual } from '../../utils/bilingual.js';
 	import Badge from '../ui/Badge.svelte';
 	import Button from '../ui/Button.svelte';
@@ -6,15 +7,16 @@
 	import Icon from '../ui/Icon.svelte';
 
 	/**
-	 * `onsetposition` is what makes the map row interactive; a card shown
-	 * read-only simply omits it.
+	 * `onsetposition`, `onedit` and `ondelete` are what make the card
+	 * interactive; a card shown read-only simply omits them.
 	 * @type {{
 	 *   location: import('../../api/catalog.js').Location,
-	 *   locale?: 'en'|'ar',
-	 *   onsetposition?: (location: import('../../api/catalog.js').Location) => void
+	 *   onsetposition?: (location: import('../../api/catalog.js').Location) => void,
+	 *   onedit?: (location: import('../../api/catalog.js').Location) => void,
+	 *   ondelete?: (location: import('../../api/catalog.js').Location) => void
 	 * }}
 	 */
-	let { location, locale = 'en', onsetposition } = $props();
+	let { location, onsetposition, onedit, ondelete } = $props();
 
 	// A branch is on the marketplace map only if it has both coordinates.
 	let pinned = $derived(location.latitude != null && location.longitude != null);
@@ -36,12 +38,27 @@
 			<Icon name="building" class="size-5" />
 		</span>
 		<div class="min-w-0 flex-1">
-			<p class="truncate font-semibold text-fg">{pickBilingual(location, 'name', locale)}</p>
-			<p class="mt-0.5 truncate text-sm text-fg-muted">
-				{[location.city, location.phone].filter(Boolean).join(' · ')}
+			<p class="flex items-center gap-2 font-semibold text-fg">
+				<span class="truncate">{pickBilingual(location, 'name')}</span>
+				{#if !location.is_active}<Badge size="sm">{t('Inactive')}</Badge>{/if}
 			</p>
+			{#if location.city}
+				<p class="mt-0.5 truncate text-sm text-fg-muted">{t(location.city)}</p>
+			{/if}
 			<p class="mt-0.5 text-xs text-fg-subtle">{location.timezone}</p>
 		</div>
+		{#if onedit || ondelete}
+			<div class="flex shrink-0 items-center gap-1">
+				{#if onedit}
+					<Button size="sm" variant="ghost" onclick={() => onedit(location)}>{t('Edit')}</Button>
+				{/if}
+				{#if ondelete}
+					<Button size="sm" variant="danger-ghost" onclick={() => ondelete(location)}>
+						{t('Delete')}
+					</Button>
+				{/if}
+			</div>
+		{/if}
 	</div>
 
 	<div
@@ -51,7 +68,7 @@
 			{#if pinned}
 				<Badge tone="success" size="sm">
 					<Icon name="map-pin" class="size-3" />
-					On the map
+					{t('On the map')}
 				</Badge>
 				<!-- An external, absolute URL built above, not an app route, so it does not
 				     go through SvelteKit's resolve(). -->
@@ -62,17 +79,17 @@
 					rel="noopener noreferrer"
 					class="inline-flex items-center gap-0.5 font-medium text-accent hover:underline"
 				>
-					View on OpenStreetMap<span class="sr-only"> (opens in a new tab)</span>
+					{t('View on OpenStreetMap')}<span class="sr-only"> {t('(opens in a new tab)')}</span>
 					<Icon name="arrow-up-right" class="size-3" />
 				</a>
 				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			{:else}
-				<Badge tone="warning" size="sm" dot>Not on the map yet</Badge>
+				<Badge tone="warning" size="sm" dot>{t('Not on the map yet')}</Badge>
 			{/if}
 		</div>
 		{#if onsetposition}
 			<Button variant="outline" size="sm" onclick={() => onsetposition(location)}>
-				{pinned ? 'Move pin' : 'Set on map'}
+				{pinned ? t('Move pin') : t('Set on map')}
 			</Button>
 		{/if}
 	</div>

@@ -74,6 +74,9 @@ async def create_queue(
     session: AsyncSession = Depends(get_db_session),
     service: QueueService = Depends(get_queue_service),
 ) -> object:
+    """Opens a walk-in queue at a branch. Staff only.
+
+    `average_service_minutes` drives the wait estimate shown to people in line."""
     queue = await service.create_queue(**payload.model_dump())
     await session.commit()
     return queue
@@ -85,6 +88,7 @@ async def list_queues(
     location_id: UUID,
     service: QueueService = Depends(get_queue_service),
 ) -> Page[QueueOut]:
+    """The queues at a branch, open or closed, for a customer choosing one to join."""
     rows = await service.list_queues(location_id)
     return Page(items=[QueueOut.model_validate(r) for r in rows])
 
@@ -125,6 +129,13 @@ async def join_queue(
     principal: Principal = Depends(get_principal),
     guard: IdempotencyGuard = Depends(idempotency_guard("POST /queues/entries")),
 ) -> object:
+    """Takes a place in a queue: your own as a customer, or someone else's as staff
+    (`on_behalf_of_customer_id`).
+
+    Send an `Idempotency-Key`, so a retried join does not take two places. The
+    answer includes `place_in_line` and `estimated_wait_minutes`; poll
+    `GET /queues/entries/{entry_id}` to follow them. A closed queue answers 409
+    `queue_closed`."""
     fields = payload.model_dump()
     on_behalf_of = fields.pop("on_behalf_of_customer_id")
     customer_reference_id = resolve_booking_customer(on_behalf_of, principal)
@@ -188,6 +199,11 @@ async def call_next(
     session: AsyncSession = Depends(get_db_session),
     service: QueueService = Depends(get_queue_service),
 ) -> QueueEntryOut:
+    """Calls the next person in line. Staff only.
+
+    The queue's own order decides who is next; staff cannot call someone out of
+    turn. Pass `provider_id` to record who will serve them. The customer is told
+    over WhatsApp, if they consented. An empty queue answers 409 `no_one_waiting`."""
     entry = await service.call_next(queue_id, provider_id=provider_id)
     await session.commit()
     return _entry_out(entry)
@@ -204,6 +220,9 @@ async def mark_missed(
     session: AsyncSession = Depends(get_db_session),
     service: QueueService = Depends(get_queue_service),
 ) -> QueueEntryOut:
+    """Marks a called customer who did not come forward. Staff only.
+
+    Put them back, at the end of the line, with `/requeue`."""
     entry = await service.mark_missed(entry_id)
     await session.commit()
     return _entry_out(entry)
@@ -237,6 +256,9 @@ async def start_service(
     session: AsyncSession = Depends(get_db_session),
     service: QueueService = Depends(get_queue_service),
 ) -> QueueEntryOut:
+    """Starts serving a checked-in queue entry. Staff only.
+
+    An entry is checked in when its QR ticket is scanned at `POST /tickets/check-in`."""
     entry = await service.start_service(entry_id)
     await session.commit()
     return _entry_out(entry)
@@ -253,6 +275,7 @@ async def complete_entry(
     session: AsyncSession = Depends(get_db_session),
     service: QueueService = Depends(get_queue_service),
 ) -> QueueEntryOut:
+    """Finishes serving a queue entry. Staff only."""
     entry = await service.complete(entry_id)
     await session.commit()
     return _entry_out(entry)
@@ -359,6 +382,9 @@ async def revoke_ticket(
     session: AsyncSession = Depends(get_db_session),
     service: QueueService = Depends(get_queue_service),
 ) -> object:
+    """Revokes a QR ticket, so it no longer checks anyone in. Staff only.
+
+    The customer can be given a new one with `POST /tickets`."""
     ticket = await service.revoke_ticket(ticket_id)
     await session.commit()
     return ticket

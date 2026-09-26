@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { listMyTenants } from '../../api/identity.js';
 	import { tenantStore } from '../../stores/tenant.svelte.js';
 	import { toastStore } from '../../stores/toast.svelte.js';
@@ -6,8 +7,8 @@
 	import Select from '../ui/Select.svelte';
 	import Spinner from '../ui/Spinner.svelte';
 
-	/** @type {{ locale?: 'en'|'ar', onchange?: (tenantId: string) => void }} */
-	let { locale = 'en', onchange } = $props();
+	/** @type {{ onchange?: (tenantId: string) => void }} */
+	let { onchange } = $props();
 
 	let tenants = $state(/** @type {import('../../api/identity.js').Tenant[]} */ ([]));
 	let loading = $state(true);
@@ -44,14 +45,14 @@
 {#if loading}
 	<Spinner size="sm" />
 {:else if tenants.length === 0}
-	<p class="text-sm text-fg-muted">No businesses yet.</p>
+	<p class="text-sm text-fg-muted">{t('No businesses yet.')}</p>
 {:else}
 	<Select
 		value={tenantStore.activeTenantId ?? ''}
 		onchange={handleChange}
 		options={tenants.map((tenant) => ({
 			value: tenant.id,
-			label: pickBilingual(tenant, 'name', locale)
+			label: pickBilingual(tenant, 'name')
 		}))}
 	/>
 {/if}

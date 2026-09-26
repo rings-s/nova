@@ -1,4 +1,5 @@
 <script>
+	import { bookingSourceLabel } from '$lib/i18n/labels.js';
 	import { formatDate, formatTime } from '../../utils/datetime.js';
 	import { formatMoney } from '../../utils/money.js';
 	import Icon from '../ui/Icon.svelte';
@@ -11,21 +12,11 @@
 	 *
 	 * @type {{
 	 *   booking: import('../../api/booking.js').Booking,
-	 *   locale?: 'en'|'ar',
 	 *   title?: string|null,
 	 *   actions?: import('svelte').Snippet
 	 * }}
 	 */
-	let { booking, locale = 'en', title = null, actions } = $props();
-
-	const sourceLabel = /** @type {Record<string, string>} */ ({
-		marketplace: 'Marketplace',
-		direct_link: 'Direct link',
-		whatsapp: 'WhatsApp',
-		walk_in: 'Walk-in',
-		reception: 'Reception',
-		ai_agent: 'AI assistant'
-	});
+	let { booking, title = null, actions } = $props();
 
 	let muted = $derived(booking.status === 'cancelled' || booking.status === 'no_show');
 </script>
@@ -40,27 +31,25 @@
 			<span
 				class={`text-sm font-semibold tabular-nums ${muted ? 'text-fg-muted line-through' : 'text-accent'}`}
 			>
-				{formatTime(booking.starts_at, locale)}
+				{formatTime(booking.starts_at)}
 			</span>
-			<span class="text-[11px] text-fg-muted tabular-nums"
-				>{formatTime(booking.ends_at, locale)}</span
-			>
+			<span class="text-[11px] text-fg-muted tabular-nums">{formatTime(booking.ends_at)}</span>
 		</div>
-		<p class="text-xs text-fg-muted sm:hidden">{formatDate(booking.starts_at, locale)}</p>
+		<p class="text-xs text-fg-muted sm:hidden">{formatDate(booking.starts_at)}</p>
 	</div>
 
 	<div class="min-w-0 flex-1">
 		<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-			<p class="font-semibold text-fg">{title ?? formatDate(booking.starts_at, locale)}</p>
+			<p class="font-semibold text-fg">{title ?? formatDate(booking.starts_at)}</p>
 			<BookingStatusBadge status={booking.status} />
 		</div>
 		<p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg-muted">
 			<span class="font-medium text-fg-secondary tabular-nums">
-				{formatMoney(booking.price, booking.currency, locale)}
+				{formatMoney(booking.price, booking.currency)}
 			</span>
 			<span class="inline-flex items-center gap-1">
 				<Icon name="globe" class="size-3.5" />
-				{sourceLabel[booking.source] ?? booking.source}
+				{bookingSourceLabel(booking.source)}
 			</span>
 		</p>
 		{#if booking.notes}

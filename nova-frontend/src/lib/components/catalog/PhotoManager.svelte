@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * The business's cover and gallery, as the dashboard manages them. Uploads
 	 * go to the API as the raw file; the server re-encodes every image, so the
@@ -8,6 +9,7 @@
 	import {
 		deleteBusinessPhoto,
 		listBusinessPhotos,
+		updateBusinessPhoto,
 		uploadBusinessPhoto
 	} from '../../api/catalog.js';
 	import { toastStore } from '../../stores/toast.svelte.js';
@@ -58,8 +60,8 @@
 	/** @param {File} file */
 	function problemWith(file) {
 		if (!ACCEPT.split(',').includes(file.type))
-			return `${file.name}: use a JPEG, PNG or WebP image.`;
-		if (file.size > MAX_BYTES) return `${file.name} is over 10 MB.`;
+			return t('{file}: use a JPEG, PNG or WebP image.', { file: file.name });
+		if (file.size > MAX_BYTES) return t('{file} is over 10 MB.', { file: file.name });
 		return null;
 	}
 
@@ -70,7 +72,10 @@
 		if (kind === 'cover') files = files.slice(0, 1);
 		if (kind === 'gallery' && files.length > galleryRoom) {
 			toastStore.info(
-				`The gallery holds ${MAX_GALLERY} photos; adding the first ${Math.max(0, galleryRoom)}.`
+				t('The gallery holds {max} photos; adding the first {count}.', {
+					max: MAX_GALLERY,
+					count: Math.max(0, galleryRoom)
+				})
 			);
 			files = files.slice(0, Math.max(0, galleryRoom));
 		}
@@ -95,7 +100,7 @@
 			}
 		}
 		if (files.length)
-			toastStore.success(kind === 'cover' ? 'Cover photo updated.' : 'Photos added.');
+			toastStore.success(kind === 'cover' ? t('Cover photo updated.') : t('Photos added.'));
 	}
 
 	/** @param {import('../../api/catalog.js').BusinessPhoto} photo */
@@ -109,6 +114,45 @@
 		} finally {
 			removing = null;
 		}
+	}
+
+	/** A photo being made the cover or moved, so its buttons show progress. */
+	let arranging = $state(/** @type {string|null} */ (null));
+
+	/**
+	 * Runs one rearrangement, then reads the photos back: the server decides
+	 * where a demoted cover lands, so the page shows its answer, not a guess.
+	 * @param {string} photoId @param {() => Promise<unknown>} change
+	 */
+	async function rearrange(photoId, change) {
+		arranging = photoId;
+		try {
+			await change();
+			photos = await listBusinessPhotos(tenantId, businessId);
+		} catch (err) {
+			toastStore.fromError(err);
+		} finally {
+			arranging = null;
+		}
+	}
+
+	/** @param {import('../../api/catalog.js').BusinessPhoto} photo */
+	function makeCover(photo) {
+		return rearrange(photo.id, () => updateBusinessPhoto(tenantId, photo.id, { kind: 'cover' }));
+	}
+
+	/**
+	 * Swaps a gallery photo with its neighbour, earlier (-1) or later (+1).
+	 * @param {number} index @param {-1|1} step
+	 */
+	function move(index, step) {
+		const photo = gallery[index];
+		const other = gallery[index + step];
+		if (!photo || !other) return;
+		return rearrange(photo.id, async () => {
+			await updateBusinessPhoto(tenantId, photo.id, { position: index + step });
+			await updateBusinessPhoto(tenantId, other.id, { position: index });
+		});
 	}
 
 	/** @param {DragEvent} event @param {'cover'|'gallery'} kind */
@@ -132,22 +176,24 @@
 		<div class="mb-3 flex flex-wrap items-end justify-between gap-2">
 			<div>
 				<h2 id="cover-heading" class="text-base font-semibold tracking-tight text-fg">
-					Cover photo
+					{t('Cover photo')}
 				</h2>
 				<p class="text-sm text-fg-muted">
-					The first thing customers see, on search results and at the top of your page.
+					{t('The first thing customers see, on search results and at the top of your page.')}
 				</p>
 			</div>
 			{#if canEdit && cover}
 				<div class="flex gap-2">
-					<Button size="sm" variant="outline" onclick={() => coverInput?.click()}>Replace</Button>
+					<Button size="sm" variant="outline" onclick={() => coverInput?.click()}
+						>{t('Replace')}</Button
+					>
 					<Button
 						size="sm"
 						variant="danger-ghost"
 						loading={removing === cover.id}
 						onclick={() => cover && remove(cover)}
 					>
-						Remove
+						{t('Remove')}
 					</Button>
 				</div>
 			{/if}
@@ -159,12 +205,12 @@
 			<div
 				class="flex aspect-[16/7] w-full items-center justify-center rounded-card border border-line bg-surface-sunken"
 			>
-				<Spinner label="Uploading cover" />
+				<Spinner label={t('Uploading cover')} />
 			</div>
 		{:else if cover}
 			<img
 				src={apiAssetUrl(cover.urls.large)}
-				alt="Cover"
+				alt={t('Cover')}
 				class="aspect-[16/7] w-full rounded-card border border-line object-cover shadow-card"
 			/>
 		{:else if canEdit}
@@ -183,12 +229,12 @@
 				].join(' ')}
 			>
 				<Icon name="plus" class="size-6" />
-				<span class="font-medium">Add a cover photo</span>
-				<span class="text-xs">Click or drop an image · JPEG, PNG or WebP, up to 10 MB</span>
+				<span class="font-medium">{t('Add a cover photo')}</span>
+				<span class="text-xs">{t('Click or drop an image · JPEG, PNG or WebP, up to 10 MB')}</span>
 			</button>
 		{:else}
 			<p class="rounded-card border border-line bg-surface-sunken p-6 text-sm text-fg-muted">
-				No cover photo yet.
+				{t('No cover photo yet.')}
 			</p>
 		{/if}
 		<input
@@ -209,11 +255,12 @@
 	<section aria-labelledby="gallery-heading">
 		<div class="mb-3">
 			<h2 id="gallery-heading" class="text-base font-semibold tracking-tight text-fg">
-				Gallery <span class="ms-1 text-sm font-normal text-fg-muted tabular-nums"
+				{t('Gallery')}
+				<span class="ms-1 text-sm font-normal text-fg-muted tabular-nums"
 					>{gallery.length}/{MAX_GALLERY}</span
 				>
 			</h2>
-			<p class="text-sm text-fg-muted">Your space, your work and your team, on your page.</p>
+			<p class="text-sm text-fg-muted">{t('Your space, your work and your team, on your page.')}</p>
 		</div>
 
 		{#if loading}
@@ -222,7 +269,7 @@
 			</div>
 		{:else}
 			<ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-				{#each gallery as photo (photo.id)}
+				{#each gallery as photo, index (photo.id)}
 					<li class="group relative">
 						<img
 							src={apiAssetUrl(photo.urls.thumb)}
@@ -231,11 +278,47 @@
 							class="aspect-square w-full rounded-card border border-line object-cover"
 						/>
 						{#if canEdit}
+							<div
+								class="absolute inset-x-2 bottom-2 flex items-center justify-between gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+							>
+								<div class="flex gap-1">
+									<button
+										type="button"
+										onclick={() => move(index, -1)}
+										disabled={index === 0 || arranging !== null}
+										aria-label={t('Move earlier')}
+										class="flex size-8 items-center justify-center rounded-full bg-slate-950/70 text-white focus-ring backdrop-blur disabled:opacity-40"
+									>
+										<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
+									</button>
+									<button
+										type="button"
+										onclick={() => move(index, 1)}
+										disabled={index === gallery.length - 1 || arranging !== null}
+										aria-label={t('Move later')}
+										class="flex size-8 items-center justify-center rounded-full bg-slate-950/70 text-white focus-ring backdrop-blur disabled:opacity-40"
+									>
+										<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
+									</button>
+								</div>
+								<button
+									type="button"
+									onclick={() => makeCover(photo)}
+									disabled={arranging !== null}
+									class="flex h-8 items-center gap-1 rounded-full bg-slate-950/70 px-3 text-xs font-medium text-white focus-ring backdrop-blur disabled:opacity-40"
+								>
+									{#if arranging === photo.id}<Spinner size="sm" class="text-white" />{:else}<Icon
+											name="star"
+											class="size-3.5"
+										/>{/if}
+									{t('Make cover')}
+								</button>
+							</div>
 							<button
 								type="button"
 								onclick={() => remove(photo)}
 								disabled={removing === photo.id}
-								aria-label="Remove photo"
+								aria-label={t('Remove photo')}
 								class="absolute end-2 top-2 flex size-8 items-center justify-center rounded-full bg-slate-950/70 text-white opacity-0 focus-ring backdrop-blur transition-opacity group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-100"
 							>
 								{#if removing === photo.id}<Spinner size="sm" class="text-white" />{:else}<Icon
@@ -250,7 +333,7 @@
 					<li
 						class="flex aspect-square items-center justify-center rounded-card border border-line bg-surface-sunken"
 					>
-						<Spinner size="sm" label="Uploading" />
+						<Spinner size="sm" label={t('Uploading')} />
 					</li>
 				{/each}
 				{#if canEdit && galleryRoom > 0}
@@ -270,14 +353,14 @@
 							].join(' ')}
 						>
 							<Icon name="plus" class="size-5" />
-							<span class="font-medium">Add photos</span>
+							<span class="font-medium">{t('Add photos')}</span>
 						</button>
 					</li>
 				{/if}
 			</ul>
 			{#if !canEdit && gallery.length === 0}
 				<p class="rounded-card border border-line bg-surface-sunken p-6 text-sm text-fg-muted">
-					No gallery photos yet.
+					{t('No gallery photos yet.')}
 				</p>
 			{/if}
 		{/if}

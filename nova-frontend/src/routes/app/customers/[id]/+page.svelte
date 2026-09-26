@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * One customer's record: profile, consent (PDPL — withdrawing must be as
 	 * easy as giving it), their booking history at this business, and the
@@ -9,6 +10,7 @@
 	import { tenantStore } from '$lib/stores/tenant.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import { errorMessage } from '$lib/utils/errors.js';
+	import { formatDate } from '$lib/utils/datetime.js';
 	import { getCustomer, updateCustomerConsent } from '$lib/api/identity.js';
 	import { listBookings } from '$lib/api/booking.js';
 	import { listCustomerNotifications } from '$lib/api/notification.js';
@@ -63,6 +65,25 @@
 		load();
 	});
 
+	/**
+	 * Who last changed a consent flag, and when, for the record PDPL asks for.
+	 * @param {'customer'|'staff'|null|undefined} source
+	 * @param {string|null|undefined} at
+	 */
+	function consentProvenance(source, at) {
+		if (!source || !at) return null;
+		return source === 'customer'
+			? t('Set by the customer on {date}', { date: formatDate(at) })
+			: t('Set by staff on {date}', { date: formatDate(at) });
+	}
+
+	let marketingProvenance = $derived(
+		consentProvenance(customer?.marketing_consent_source, customer?.marketing_consent_at)
+	);
+	let whatsappProvenance = $derived(
+		consentProvenance(customer?.whatsapp_consent_source, customer?.whatsapp_consent_at)
+	);
+
 	async function saveConsent() {
 		savingConsent = true;
 		try {
@@ -70,7 +91,7 @@
 				marketingConsent,
 				whatsappConsent
 			});
-			toastStore.success('Consent updated.');
+			toastStore.success(t('Consent updated.'));
 		} catch (err) {
 			toastStore.fromError(err);
 		} finally {
@@ -79,7 +100,7 @@
 	}
 </script>
 
-<svelte:head><title>{customer?.full_name ?? 'Customer'} — NOVA</title></svelte:head>
+<svelte:head><title>{customer?.full_name ?? t('Customer')} — NOVA</title></svelte:head>
 
 {#if loading}
 	<div class="flex justify-center py-12"><Spinner /></div>
@@ -89,7 +110,7 @@
 	<div class="mb-4">
 		<Button variant="ghost" size="sm" class="-ms-3" href={resolve('/app/customers')}>
 			<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
-			Customers
+			{t('Customers')}
 		</Button>
 	</div>
 
@@ -98,7 +119,7 @@
 		<div class="min-w-0">
 			<h1 class="text-2xl font-semibold tracking-tight text-fg">{customer.full_name}</h1>
 			<p class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted">
-				<span class="inline-flex items-center gap-1.5"
+				<span class="inline-flex items-center gap-1.5" dir="ltr"
 					><Icon name="phone" class="size-4" />{customer.phone}</span
 				>
 				{#if customer.email}<span>{customer.email}</span>{/if}
@@ -110,10 +131,11 @@
 		<div class="flex flex-col gap-8 lg:col-span-2">
 			<section>
 				<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">
-					Bookings <span class="ms-1 text-sm font-normal text-fg-muted">{bookings.length}</span>
+					{t('Bookings')}
+					<span class="ms-1 text-sm font-normal text-fg-muted">{bookings.length}</span>
 				</h2>
 				{#if bookings.length === 0}
-					<EmptyState title="No bookings yet">
+					<EmptyState title={t('No bookings yet')}>
 						{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
 					</EmptyState>
 				{:else}
@@ -126,9 +148,9 @@
 			</section>
 
 			<section>
-				<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">Delivery log</h2>
+				<h2 class="mb-3 text-base font-semibold tracking-tight text-fg">{t('Delivery log')}</h2>
 				{#if notifications.length === 0}
-					<EmptyState title="No messages sent yet">
+					<EmptyState title={t('No messages sent yet')}>
 						{#snippet icon()}<Icon name="chat-bubble" class="size-6" />{/snippet}
 					</EmptyState>
 				{:else}
@@ -146,22 +168,47 @@
 		<aside class="flex flex-col gap-6">
 			<Card padding="none">
 				{#snippet header()}
-					<h2 class="text-sm font-semibold text-fg">Consent</h2>
-					<p class="mt-0.5 text-xs text-fg-muted">What this customer agreed to receive (PDPL).</p>
+					<h2 class="text-sm font-semibold text-fg">{t('Consent')}</h2>
+					<p class="mt-0.5 text-xs text-fg-muted">
+						{t('What this customer agreed to receive (PDPL).')}
+					</p>
 				{/snippet}
 				<div class="flex flex-col gap-3 p-5">
-					<Checkbox label="Marketing offers" bind:checked={marketingConsent} />
-					<Checkbox label="WhatsApp messages" bind:checked={whatsappConsent} />
+					<!-- Only the customer can opt in to marketing, so staff may untick it but
+					     not tick it; the backend refuses the latter either way. -->
+					<div>
+						<Checkbox
+							label={t('Marketing offers')}
+							bind:checked={marketingConsent}
+							disabled={!customer.marketing_consent}
+						/>
+						{#if marketingProvenance}
+							<p class="mt-1 ps-6.5 text-xs text-fg-muted">{marketingProvenance}</p>
+						{/if}
+						{#if !customer.marketing_consent}
+							<p class="mt-1 ps-6.5 text-xs text-fg-muted">
+								{t('Only the customer can opt in to marketing.')}
+							</p>
+						{/if}
+					</div>
+					<div>
+						<Checkbox label={t('WhatsApp messages')} bind:checked={whatsappConsent} />
+						{#if whatsappProvenance}
+							<p class="mt-1 ps-6.5 text-xs text-fg-muted">{whatsappProvenance}</p>
+						{/if}
+					</div>
 				</div>
 				{#snippet footer()}
 					<div class="flex justify-end">
-						<Button size="sm" loading={savingConsent} onclick={saveConsent}>Save consent</Button>
+						<Button size="sm" loading={savingConsent} onclick={saveConsent}
+							>{t('Save consent')}</Button
+						>
 					</div>
 				{/snippet}
 			</Card>
 			{#if customer.notes}
 				<Card padding="md">
-					<h2 class="mb-2 text-sm font-semibold text-fg">Notes</h2>
+					<h2 class="mb-2 text-sm font-semibold text-fg">{t('Notes')}</h2>
 					<p class="text-sm whitespace-pre-line text-fg-secondary">{customer.notes}</p>
 				</Card>
 			{/if}

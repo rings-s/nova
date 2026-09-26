@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_authorized_tenant
+from app.core.security import AuthorizationError, Principal, PrincipalKind, get_principal
 from app.db.errors import translate_integrity_error
-from app.db.session import get_session_factory, set_tenant_scope
+from app.db.session import get_session_factory, set_discovery_scope, set_tenant_scope
 from app.integrations.payments.moyasar import PaymentGateway
 from app.modules.ai_agents.history import ConversationStore, RedisConversationStore
 from app.modules.ai_agents.runtime import InferenceEngine, build_inference_engine
@@ -29,6 +30,8 @@ from app.modules.analytics.dependencies import build_analytics_service
 from app.modules.billing.dependencies import build_billing_service
 from app.modules.booking.dependencies import build_booking_service
 from app.modules.catalog.dependencies import build_catalog_service
+from app.modules.discovery.dependencies import build_discovery_service
+from app.modules.discovery.service import DiscoveryService
 from app.modules.identity.dependencies import build_customer_service, build_membership_service
 from app.modules.payment.dependencies import build_payment_service, get_payment_gateway
 from app.modules.queue.dependencies import build_queue_service
@@ -108,6 +111,23 @@ class TenantServiceScope:
             raise translate_integrity_error(exc) from exc
 
 
+class DiscoveryServiceScope:
+    """`service.DiscoveryScope` over real transactions: the public listing window.
+
+    The marketplace assistant's searches and referrals run here. It widens to a
+    tenant only through a `TenantServiceScope` for the tenant a listing names.
+    """
+
+    def __init__(self, *, transaction: Transaction) -> None:
+        self._transaction = transaction
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[DiscoveryService]:
+        async with self._transaction() as session:
+            await set_discovery_scope(session)
+            yield build_discovery_service(session)
+
+
 _conversation_store: ConversationStore | None = None
 
 
@@ -147,4 +167,31 @@ def get_ai_chat_service(
         services=TenantServiceScope(tenant_id, transaction=transaction, gateway=gateway),
         tenant_id=tenant_id,
         history=history,
+    )
+
+
+def get_marketplace_chat_service(
+    principal: Principal = Depends(get_principal),
+    engine: InferenceEngine = Depends(get_inference_engine),
+    transaction: Transaction = Depends(get_agent_transaction),
+    gateway: PaymentGateway = Depends(get_payment_gateway),
+    history: ConversationStore = Depends(get_conversation_store),
+) -> AiChatService:
+    """The marketplace assistant: no tenant until a customer picks a listing.
+
+    Customers only. It books in the caller's own name at whichever business
+    they choose, which is what a customer may do over HTTP at any tenant; staff
+    book on someone's behalf through their own dashboard instead.
+    """
+    if principal.kind is not PrincipalKind.CUSTOMER:
+        raise AuthorizationError("The marketplace assistant is for customers.")
+    return AiChatService(
+        engine=engine,
+        services=None,
+        tenant_id=None,
+        history=history,
+        discovery=DiscoveryServiceScope(transaction=transaction),
+        services_for=lambda tenant_id: TenantServiceScope(
+            tenant_id, transaction=transaction, gateway=gateway
+        ),
     )

@@ -1,11 +1,13 @@
 <script>
+	import { notificationChannelLabel, notificationStatusLabel } from '$lib/i18n/labels.js';
+	import { t } from '$lib/i18n/index.svelte.js';
 	import Badge from '../ui/Badge.svelte';
 	import { formatDateTime } from '../../utils/datetime.js';
 
 	/**
 	 * @type {{ notification: import('../../api/notification.js').Notification, locale?: 'en'|'ar' }}
 	 */
-	let { notification, locale = 'en' } = $props();
+	let { notification } = $props();
 
 	/** @type {Record<string, 'neutral'|'success'|'warning'|'error'|'info'|'accent'>} */
 	const statusTone = {
@@ -23,11 +25,11 @@
 			{notification.template.replaceAll('_', ' ')}
 		</p>
 		<p class="text-xs text-fg-muted">
-			{notification.channel} ·
+			{notificationChannelLabel(notification.channel)} ·
 			{notification.sent_at
-				? formatDateTime(notification.sent_at, locale)
+				? formatDateTime(notification.sent_at)
 				: notification.scheduled_for
-					? `scheduled for ${formatDateTime(notification.scheduled_for, locale)}`
+					? t('scheduled for {time}', { time: formatDateTime(notification.scheduled_for) })
 					: '—'}
 		</p>
 		{#if notification.error}
@@ -35,6 +37,6 @@
 		{/if}
 	</div>
 	<Badge tone={statusTone[notification.status] ?? 'neutral'} size="sm" dot
-		>{notification.status}</Badge
+		>{notificationStatusLabel(notification.status)}</Badge
 	>
 </div>

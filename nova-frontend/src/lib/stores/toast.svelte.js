@@ -1,3 +1,5 @@
+import { t } from '$lib/i18n/index.svelte.js';
+import { errorMessage } from '../utils/errors.js';
 /**
  * Global toast queue, rendered by `$lib/components/ui/ToastContainer.svelte`
  * (mount it once, in the root layout). Push from anywhere — a load function,
@@ -54,11 +56,9 @@ function dismiss(id) {
  */
 function describe(error) {
 	if (error && typeof error === 'object' && 'status' in error && error.status === 401) {
-		return 'Your session has expired. Please sign in again.';
+		return t('Your session has expired. Please sign in again.');
 	}
-	return error && typeof error === 'object' && 'message' in error && error.message
-		? String(error.message)
-		: 'Something went wrong.';
+	return errorMessage(error);
 }
 
 export const toastStore = {

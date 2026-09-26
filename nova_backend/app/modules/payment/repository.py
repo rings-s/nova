@@ -33,6 +33,7 @@ def _to_domain(record: PaymentRecord) -> Payment:
         status=record.status,
         gateway=record.gateway,
         gateway_payment_id=record.gateway_payment_id,
+        gateway_invoice_id=record.gateway_invoice_id,
         webhook_verified=record.webhook_verified,
         failure_code=record.failure_code,
         refunded_amount=record.refunded_amount,
@@ -45,6 +46,7 @@ def _to_domain(record: PaymentRecord) -> Payment:
 def _apply(payment: Payment, record: PaymentRecord) -> PaymentRecord:
     record.status = payment.status
     record.gateway_payment_id = payment.gateway_payment_id
+    record.gateway_invoice_id = payment.gateway_invoice_id
     record.webhook_verified = payment.webhook_verified
     record.failure_code = payment.failure_code
     record.refunded_amount = payment.refunded_amount
@@ -70,6 +72,7 @@ class PaymentRepository(TenantScopedRepository[PaymentRecord]):
             status=payment.status,
             gateway=payment.gateway,
             gateway_payment_id=payment.gateway_payment_id,
+            gateway_invoice_id=payment.gateway_invoice_id,
         )
         self.add(record)
         await self.session.flush()
@@ -90,6 +93,27 @@ class PaymentRepository(TenantScopedRepository[PaymentRecord]):
         result = await self.session.execute(stmt)
         record = result.scalar_one_or_none()
         return _to_domain(record) if record else None
+
+    async def get_by_gateway_invoice_id(self, gateway_invoice_id: str) -> Payment | None:
+        stmt = self._scope(
+            select(PaymentRecord).where(PaymentRecord.gateway_invoice_id == gateway_invoice_id)
+        )
+        result = await self.session.execute(stmt)
+        record = result.scalar_one_or_none()
+        return _to_domain(record) if record else None
+
+    async def find_for_gateway(
+        self, *, gateway_payment_id: str | None, gateway_invoice_id: str | None
+    ) -> Payment | None:
+        """The payment a Moyasar payment belongs to: by its own id once known,
+        else by the checkout (invoice) it paid."""
+        if gateway_payment_id:
+            found = await self.get_by_gateway_id(gateway_payment_id)
+            if found is not None:
+                return found
+        if gateway_invoice_id:
+            return await self.get_by_gateway_invoice_id(gateway_invoice_id)
+        return None
 
     async def list_for_booking(self, booking_id: UUID) -> list[Payment]:
         stmt = self._scope(
@@ -275,17 +299,25 @@ class WebhookEventRepository(BaseRepository[WebhookEventRecord]):
         event.error = error
         await self.session.flush()
 
-    async def find_payment_tenant(self, gateway_payment_id: str) -> UUID | None:
+    async def find_payment_tenant(
+        self, gateway_payment_id: str | None, gateway_invoice_id: str | None = None
+    ) -> UUID | None:
         """Which tenant a gateway payment belongs to.
 
         The one genuinely cross-tenant read in this module. A webhook arrives
-        with only the gateway's own id, so the tenant has to be discovered
-        before any tenant-scoped repository can be built. The caller must have
-        called `bypass_tenant_scope` first, or RLS correctly returns nothing.
+        with only Moyasar's ids (the payment's, and the invoice it paid), so
+        the tenant has to be discovered before any tenant-scoped repository
+        can be built. The caller must have called `bypass_tenant_scope` first,
+        or RLS correctly returns nothing.
         """
-        stmt = select(PaymentRecord.tenant_id).where(
-            PaymentRecord.gateway_payment_id == gateway_payment_id
-        )
+        conditions = []
+        if gateway_payment_id:
+            conditions.append(PaymentRecord.gateway_payment_id == gateway_payment_id)
+        if gateway_invoice_id:
+            conditions.append(PaymentRecord.gateway_invoice_id == gateway_invoice_id)
+        if not conditions:
+            return None
+        stmt = select(PaymentRecord.tenant_id).where(or_(*conditions))
         result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
 

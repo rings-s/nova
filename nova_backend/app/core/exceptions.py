@@ -10,6 +10,9 @@ class DomainError(Exception):
 
     status_code: int = 400
     code: str = "domain_error"
+    #: Whether asking again may succeed. A 409 and a 429 always are; any other
+    #: error opts in here (an unreachable payment provider, say).
+    retryable: bool = False
 
     def __init__(self, message: str) -> None:
         super().__init__(message)

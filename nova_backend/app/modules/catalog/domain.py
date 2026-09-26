@@ -14,7 +14,6 @@ from app.core.exceptions import ValidationDomainError
 from app.core.validators import (
     generate_slug,
     require_bilingual_text,
-    validate_gcc_phone,
     validate_timezone,
 )
 
@@ -33,7 +32,6 @@ __all__ = [
     "rating_score",
     "require_bilingual_text",
     "validate_coordinates",
-    "validate_gcc_phone",
     "validate_service_duration",
     "validate_service_price",
     "validate_timezone",

@@ -101,11 +101,18 @@ class StorefrontLocationOut(ApiSchema):
     name_en: str
     name_ar: str
     city: str | None = None
-    #: The salon's own shop-window contact. Public here, never in search.
-    phone: str
     timezone: str
     latitude: float | None = None
     longitude: float | None = None
+
+
+class CategoryOut(ApiSchema):
+    """A service category from the platform's list. Filter search by `slug`."""
+
+    id: UUID
+    slug: str
+    name_en: str
+    name_ar: str
 
 
 class StorefrontServiceOut(ApiSchema):
@@ -115,7 +122,7 @@ class StorefrontServiceOut(ApiSchema):
     name_ar: str
     description_en: str | None = None
     description_ar: str | None = None
-    category: str | None = None
+    category: CategoryOut | None = None
     duration_minutes: int
     price: Decimal
     currency: str

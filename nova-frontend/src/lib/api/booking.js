@@ -46,6 +46,7 @@ import { newIdempotencyKey } from '../utils/idempotency.js';
 /**
  * @typedef {Object} SlotHold
  * @property {string} hold_token
+ * @property {string} location_id Needed with `holdToken` to book the hold.
  * @property {string} provider_id
  * @property {string} service_id
  * @property {string} starts_at

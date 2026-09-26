@@ -1,4 +1,5 @@
 <script>
+	import { t, tp, m, i18n } from '$lib/i18n/index.svelte.js';
 	import { mapBusinesses, searchBusinesses } from '$lib/api/discovery.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import { pickBilingual } from '$lib/utils/bilingual.js';
@@ -18,6 +19,7 @@
 	import RatingStars from '$lib/components/review/RatingStars.svelte';
 	import { apiAssetUrl } from '$lib/api/client.js';
 	import { describeAccuracy, locate, LocateError, metresBetween } from '$lib/map/geolocate.js';
+	import AssistantLauncher from '$lib/components/ai/AssistantLauncher.svelte';
 
 	let q = $state('');
 	let selectedCity = $state('');
@@ -42,27 +44,27 @@
 	// Below `lg` the list and the map take turns on the screen; from `lg` up they
 	// sit side by side and this is ignored.
 	/** @type {('list' | 'map')[]} */
-	const views = ['list', 'map'];
+	const views = [m('list'), m('map')];
 	let view = $state(views[0]);
 
 	// Quick View Modal
 	let quickViewSalon = $state(/** @type {any | null} */ (null));
 
 	const cities = [
-		{ id: '', name: 'All Cities' },
-		{ id: 'Riyadh', name: 'Riyadh (الرياض)' },
-		{ id: 'Jeddah', name: 'Jeddah (جدة)' },
-		{ id: 'Al Khobar', name: 'Al Khobar (الخبر)' }
+		{ id: '', name: m('All Cities') },
+		{ id: 'Riyadh', name: m('Riyadh') },
+		{ id: 'Jeddah', name: m('Jeddah') },
+		{ id: 'Al Khobar', name: m('Al Khobar') }
 	];
 
 	/** @type {{ id: string, name: string, icon: import('$lib/components/ui/Icon.svelte').IconName }[]} */
 	const categories = [
-		{ id: '', name: 'All Services', icon: 'sparkles' },
-		{ id: 'Hair', name: 'Hair & Styling', icon: 'zap' },
-		{ id: 'Skincare', name: 'Skincare & Facials', icon: 'sparkles' },
-		{ id: 'Spa', name: 'Hammam & Spa', icon: 'globe' },
-		{ id: 'Nail', name: 'Nails & Brows', icon: 'check' },
-		{ id: 'Massage', name: 'Massage & Recovery', icon: 'users' }
+		{ id: '', name: m('All Services'), icon: 'sparkles' },
+		{ id: 'Hair', name: m('Hair & Styling'), icon: 'zap' },
+		{ id: 'Skincare', name: m('Skincare & Facials'), icon: 'sparkles' },
+		{ id: 'Spa', name: m('Hammam & Spa'), icon: 'globe' },
+		{ id: 'Nail', name: m('Nails & Brows'), icon: 'check' },
+		{ id: 'Massage', name: m('Massage & Recovery'), icon: 'users' }
 	];
 
 	/**
@@ -119,11 +121,14 @@
 
 	let originNote = $derived.by(() => {
 		if (!origin) return null;
-		if (origin.source === 'map') return 'Showing salons near the spot you placed on the map.';
-		const within = describeAccuracy(origin.accuracy);
+		if (origin.source === 'map') return t('Showing salons near the spot you placed on the map.');
+		const within = describeAccuracy(origin.accuracy, t);
 		return origin.accuracy > ROUGH_FIX_M
-			? `Your device could only place you within about ${within}, so "near you" may be off. Drag the blue dot on the map to where you are.`
-			: `Showing salons near you — located to within about ${within}.`;
+			? t(
+					'Your device could only place you within about {within}, so "near you" may be off. Drag the blue dot on the map to where you are.',
+					{ within }
+				)
+			: t('Showing salons near you — located to within about {within}.', { within });
 	});
 
 	/** How far "near you" reaches, in km. The API allows up to 100. */
@@ -161,10 +166,12 @@
 			if (kind === 'cancelled') return origin !== null;
 			locateMessage =
 				kind === 'denied'
-					? 'Location is blocked for this site. Allow it from the address bar to see salons near you.'
+					? t(
+							'Location is blocked for this site. Allow it from the address bar to see salons near you.'
+						)
 					: kind === 'insecure'
-						? 'Your browser only shares location on secure (https) pages.'
-						: "We couldn't find your location. Pick a city instead.";
+						? t('Your browser only shares location on secure (https) pages.')
+						: t("We couldn't find your location. Pick a city instead.");
 			return false;
 		} finally {
 			if (locateAbort === controller) {
@@ -321,10 +328,12 @@
 </script>
 
 <svelte:head>
-	<title>Discover salons &amp; spas — NOVA</title>
+	<title>{t('Discover salons & spas')} — NOVA</title>
 	<meta
 		name="description"
-		content="Search beauty salons, spas, and hammams in Riyadh, Jeddah, and Al Khobar, and book directly with live availability."
+		content={t(
+			'Search beauty salons, spas, and hammams in Riyadh, Jeddah, and Al Khobar, and book directly with live availability.'
+		)}
 	/>
 </svelte:head>
 
@@ -338,13 +347,13 @@
 				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
 				<span class="size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
-				Live availability in Riyadh, Jeddah &amp; Khobar
+				{t('Live availability in Riyadh, Jeddah & Khobar')}
 			</p>
 			<h1 class="mt-5 text-display-xl font-semibold tracking-tight text-fg">
-				Find your next salon or spa
+				{t('Find your next salon or spa')}
 			</h1>
 			<p class="mt-3 text-body-lg text-fg-muted">
-				Book a real, held slot in seconds — confirmed instantly on WhatsApp.
+				{t('Book a real, held slot in seconds — confirmed instantly on WhatsApp.')}
 			</p>
 		</div>
 
@@ -360,8 +369,8 @@
 				/>
 				<input
 					type="text"
-					aria-label="Search salons or services"
-					placeholder="Salon or service — e.g. HydraFacial, balayage"
+					aria-label={t('Search salons or services')}
+					placeholder={t('Salon or service — e.g. HydraFacial, balayage')}
 					bind:value={q}
 					class="h-12 w-full rounded-card border-0 bg-transparent ps-11 pe-3 text-[15px] text-fg placeholder:text-fg-subtle focus:ring-0 focus:outline-none"
 				/>
@@ -373,17 +382,17 @@
 					class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle"
 				/>
 				<select
-					aria-label="City"
+					aria-label={t('City')}
 					bind:value={selectedCity}
 					onchange={() => (area = null)}
 					class="h-12 w-full rounded-card border-0 bg-transparent ps-9 text-sm text-fg-secondary focus:ring-0 focus:outline-none"
 				>
 					{#each cities as c (c.id)}
-						<option value={c.id}>{c.name}</option>
+						<option value={c.id}>{t(c.name)}</option>
 					{/each}
 				</select>
 			</div>
-			<Button type="submit" size="lg" class="sm:px-7">Search</Button>
+			<Button type="submit" size="lg" class="sm:px-7">{t('Search')}</Button>
 		</form>
 		<div class="mt-4 flex justify-center">
 			<Button
@@ -397,7 +406,11 @@
 				aria-pressed={sortBy === 'nearest'}
 			>
 				{#if !locating}<Icon name="map-pin" class="size-4" />{/if}
-				{locating ? 'Finding your location…' : origin ? 'Update my location' : 'Use my location'}
+				{locating
+					? t('Finding your location…')
+					: origin
+						? t('Update my location')
+						: t('Use my location')}
 			</Button>
 		</div>
 		{#if locateMessage || originNote}
@@ -417,7 +430,7 @@
 		<div
 			class="mt-6 flex flex-wrap items-center justify-center gap-2"
 			role="group"
-			aria-label="Category"
+			aria-label={t('Category')}
 		>
 			{#each categories as cat (cat.id)}
 				<button
@@ -436,7 +449,7 @@
 					].join(' ')}
 				>
 					<Icon name={cat.icon} class="size-3.5" />
-					{cat.name}
+					{t(cat.name)}
 				</button>
 			{/each}
 		</div>
@@ -461,7 +474,7 @@
 			style="background-image: var(--gradient-hero)"
 			aria-hidden="true"
 		>
-			{pickBilingual(listing, 'name', 'en').trim().charAt(0).toUpperCase()}
+			{pickBilingual(listing, 'name').trim().charAt(0).toUpperCase()}
 		</div>
 	{/if}
 {/snippet}
@@ -474,14 +487,16 @@
 		{@render cover(listing, 'aspect-[16/10]')}
 		<div class="flex flex-1 flex-col p-4">
 			<p class="truncate font-semibold text-fg group-hover:text-accent">
-				{pickBilingual(listing, 'name', 'en')}
+				{pickBilingual(listing, 'name')}
 			</p>
 			<p class="mt-0.5 flex items-center gap-1 truncate text-xs text-fg-muted">
 				<Icon name="map-pin" class="size-3" />
-				{listing.location_name_en || listing.city}
+				{pickBilingual(listing, 'location_name') || listing.city}
 				{#if listing.distance_km != null}
 					<span aria-hidden="true">·</span>
-					<span class="shrink-0 font-medium text-fg-secondary">{listing.distance_km} km</span>
+					<span class="shrink-0 font-medium text-fg-secondary"
+						>{t('{n} km', { n: listing.distance_km })}</span
+					>
 				{/if}
 			</p>
 			<div class="mt-auto flex items-center justify-between gap-2 pt-4">
@@ -492,9 +507,9 @@
 					compact
 				/>
 				<span class="text-xs text-fg-muted">
-					from
+					{t('from')}
 					<span class="font-semibold text-fg tabular-nums">
-						{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
+						{formatMoney(listing.starting_price, listing.currency ?? 'SAR')}
 					</span>
 				</span>
 			</div>
@@ -512,11 +527,11 @@
 						class="flex items-center gap-2 text-base font-semibold tracking-tight text-fg"
 					>
 						<Icon name="map-pin" class="size-4 text-accent" />
-						Near you
+						{t('Near you')}
 					</h2>
 					{#if origin}
 						<Button size="sm" variant="ghost" onclick={() => changeSort('nearest')}>
-							See all
+							{t('See all')}
 							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 						</Button>
 					{/if}
@@ -531,10 +546,13 @@
 							<Icon name="map-pin" class="size-5" />
 						</span>
 						<p class="flex-1 text-sm text-fg-muted">
-							Share your location to see the closest salons and spas. It's only used for this
-							search.
+							{t(
+								"Share your location to see the closest salons and spas. It's only used for this search."
+							)}
 						</p>
-						<Button size="sm" loading={locating} onclick={useMyLocation}>Use my location</Button>
+						<Button size="sm" loading={locating} onclick={useMyLocation}
+							>{t('Use my location')}</Button
+						>
 					</div>
 				{:else if nearby === null}
 					<div class="grid grid-cols-2 gap-3">
@@ -542,7 +560,7 @@
 					</div>
 				{:else if nearby.length === 0}
 					<p class="rounded-card border border-line bg-surface p-5 text-sm text-fg-muted">
-						No salons within {NEAR_RADIUS_KM} km of you yet.
+						{t('No salons within {km} km of you yet.', { km: NEAR_RADIUS_KM })}
 					</p>
 				{:else}
 					<div class="grid grid-cols-2 gap-3">
@@ -560,18 +578,18 @@
 						class="flex items-center gap-2 text-base font-semibold tracking-tight text-fg"
 					>
 						<Icon name="star" class="size-4 text-amber-500" />
-						Top rated
+						{t('Top rated')}
 					</h2>
 					{#if topRated.length > 0}
 						<Button size="sm" variant="ghost" onclick={() => changeSort('rating')}>
-							See all
+							{t('See all')}
 							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 						</Button>
 					{/if}
 				</div>
 				{#if topRated.length === 0}
 					<p class="rounded-card border border-line bg-surface p-5 text-sm text-fg-muted">
-						Ratings appear here once customers rate their visits.
+						{t('Ratings appear here once customers rate their visits.')}
 					</p>
 				{:else}
 					<div class="grid grid-cols-2 gap-3">
@@ -589,17 +607,18 @@
 		<div class="flex items-center gap-3">
 			<p class="text-sm text-fg-secondary" aria-live="polite">
 				{#if loading}
-					Searching…
+					{t('Searching…')}
 				{:else}
-					<span class="font-semibold text-fg tabular-nums">{listings.length}</span>
-					{listings.length === 1 ? 'salon' : 'salons'}
-					{#if selectedCity}in <span class="font-medium text-fg">{selectedCity}</span>{/if}
+					{tp(listings.length, '{count} salon', '{count} salons')}
+					{#if selectedCity}{t('in {city}', {
+							city: t(cities.find((c) => c.id === selectedCity)?.name ?? selectedCity)
+						})}{/if}
 				{/if}
 			</p>
 			{#if q || selectedCity || selectedCategory || area}
 				<Button size="sm" variant="ghost" onclick={resetFilters}>
 					<Icon name="x" class="size-3.5" />
-					Clear filters
+					{t('Clear filters')}
 				</Button>
 			{/if}
 		</div>
@@ -609,7 +628,7 @@
 			<div
 				class="inline-flex rounded-control bg-surface-muted p-1 lg:hidden"
 				role="group"
-				aria-label="Show results as"
+				aria-label={t('Show results as')}
 			>
 				{#each views as mode (mode)}
 					<button
@@ -623,22 +642,22 @@
 								: 'text-fg-muted hover:text-fg'
 						]}
 					>
-						{mode}
+						{t(mode)}
 					</button>
 				{/each}
 			</div>
-			<label for="sort-select" class="sr-only">Sort by</label>
+			<label for="sort-select" class="sr-only">{t('Sort by')}</label>
 			<select
 				id="sort-select"
 				value={sortBy}
 				onchange={(event) => changeSort(event.currentTarget.value)}
 				class={`${fieldBase} ${fieldBorder(false)} h-9 w-auto pe-9 text-[13px]`}
 			>
-				<option value="recommended">Recommended</option>
-				<option value="rating">Top rated</option>
-				<option value="nearest">Nearest to me</option>
-				<option value="price-low">Price: low to high</option>
-				<option value="price-high">Price: high to low</option>
+				<option value="recommended">{t('Recommended')}</option>
+				<option value="rating">{t('Top rated')}</option>
+				<option value="nearest">{t('Nearest to me')}</option>
+				<option value="price-low">{t('Price: low to high')}</option>
+				<option value="price-high">{t('Price: high to low')}</option>
 			</select>
 		</div>
 	</div>
@@ -660,12 +679,12 @@
 				</div>
 			{:else if listings.length === 0}
 				<EmptyState
-					title="No salons match"
-					description="Try a different search term, category or city."
+					title={t('No salons match')}
+					description={t('Try a different search term, category or city.')}
 				>
 					{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
 					{#snippet action()}
-						<Button variant="outline" onclick={resetFilters}>Reset filters</Button>
+						<Button variant="outline" onclick={resetFilters}>{t('Reset filters')}</Button>
 					{/snippet}
 				</EmptyState>
 			{:else}
@@ -679,15 +698,20 @@
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
 										<h3 class="font-semibold text-fg transition-colors group-hover:text-accent">
-											{pickBilingual(listing, 'name', 'en')}
+											{pickBilingual(listing, 'name')}
 										</h3>
-										{#if listing.name_ar}
+										{#if i18n.locale === 'en' && listing.name_ar}
 											<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="rtl" lang="ar">
 												{listing.name_ar}
 											</p>
+										{:else if i18n.locale === 'ar' && listing.name_en}
+											<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="ltr" lang="en">
+												{listing.name_en}
+											</p>
 										{/if}
 									</div>
-									<Badge tone="neutral" size="sm">{listing.city || 'KSA'}</Badge>
+									<Badge tone="neutral" size="sm">{listing.city ? t(listing.city) : t('KSA')}</Badge
+									>
 								</div>
 
 								<div class="mt-2">
@@ -700,15 +724,19 @@
 
 								<p class="mt-2 flex items-center gap-1.5 text-xs text-fg-muted">
 									<Icon name="map-pin" class="size-3.5" />
-									<span class="truncate">{listing.location_name_en || listing.city}</span>
+									<span class="truncate"
+										>{pickBilingual(listing, 'location_name') || listing.city}</span
+									>
 									{#if listing.distance_km != null}
 										<span aria-hidden="true">·</span>
-										<span class="shrink-0">{listing.distance_km} km</span>
+										<span class="shrink-0">{t('{n} km', { n: listing.distance_km })}</span>
 									{/if}
 								</p>
 
-								{#if listing.description_en}
-									<p class="mt-3 line-clamp-2 text-sm text-fg-muted">{listing.description_en}</p>
+								{#if pickBilingual(listing, 'description')}
+									<p class="mt-3 line-clamp-2 text-sm text-fg-muted">
+										{pickBilingual(listing, 'description')}
+									</p>
 								{/if}
 							</div>
 
@@ -718,9 +746,9 @@
 								class="flex flex-col gap-3 rounded-b-card border-t border-line-subtle bg-surface-sunken px-5 py-4"
 							>
 								<p class="flex items-baseline justify-between gap-2 text-xs text-fg-muted">
-									From
+									{t('From')}
 									<span class="text-base font-semibold text-fg tabular-nums">
-										{formatMoney(listing.starting_price, listing.currency ?? 'SAR', 'en')}
+										{formatMoney(listing.starting_price, listing.currency ?? 'SAR')}
 									</span>
 								</p>
 								<div class="grid grid-cols-2 gap-2">
@@ -730,14 +758,14 @@
 										fullWidth
 										onclick={() => (quickViewSalon = listing)}
 									>
-										Quick View
+										{t('Quick View')}
 									</Button>
 									<Button
 										href={resolve('/discover/[slug]', { slug: listing.slug })}
 										size="sm"
 										fullWidth
 									>
-										Book Now
+										{t('Book Now')}
 									</Button>
 								</div>
 							</div>
@@ -776,8 +804,12 @@
 
 <Modal
 	open={quickViewSalon !== null}
-	title={quickViewSalon?.name_en ?? ''}
-	description={quickViewSalon?.name_ar ?? null}
+	title={quickViewSalon ? pickBilingual(quickViewSalon, 'name') : ''}
+	description={quickViewSalon
+		? i18n.locale === 'ar'
+			? quickViewSalon.name_en
+			: quickViewSalon.name_ar
+		: null}
 	onclose={() => (quickViewSalon = null)}
 >
 	{#if quickViewSalon}
@@ -791,40 +823,59 @@
 		<div class="mb-4">
 			<RatingStars average={quickViewSalon.rating_average} count={quickViewSalon.rating_count} />
 		</div>
-		{#if quickViewSalon.description_en}
-			<p class="text-sm text-fg-secondary">{quickViewSalon.description_en}</p>
+		{#if pickBilingual(quickViewSalon, 'description')}
+			<p class="text-sm text-fg-secondary">{pickBilingual(quickViewSalon, 'description')}</p>
 		{/if}
 		<dl class="mt-5 divide-y divide-line-subtle rounded-card border border-line text-sm">
 			<div class="flex items-center gap-3 px-4 py-3">
 				<Icon name="map-pin" class="size-4 text-accent" />
-				<dt class="sr-only">Location</dt>
+				<dt class="sr-only">{t('Location')}</dt>
 				<dd class="text-fg-secondary">
-					{[quickViewSalon.location_name_en, quickViewSalon.city].filter(Boolean).join(', ')}
+					{[
+						pickBilingual(quickViewSalon, 'location_name'),
+						quickViewSalon.city && t(quickViewSalon.city)
+					]
+						.filter(Boolean)
+						.join(t(', '))}
 				</dd>
 			</div>
 			<div class="flex items-center gap-3 px-4 py-3">
 				<Icon name="credit-card" class="size-4 text-accent" />
-				<dt class="sr-only">Payment</dt>
-				<dd class="text-fg-secondary">Mada, Apple Pay, Visa &amp; Mastercard</dd>
+				<dt class="sr-only">{t('Payment')}</dt>
+				<dd class="text-fg-secondary">{t('Mada, Apple Pay, Visa & Mastercard')}</dd>
 			</div>
 			<div class="flex items-center gap-3 px-4 py-3">
 				<Icon name="sparkles" class="size-4 text-accent" />
-				<dt class="sr-only">Price</dt>
+				<dt class="sr-only">{t('Price')}</dt>
 				<dd class="text-fg-secondary">
-					Treatments from
+					{t('Treatments from')}
 					<span class="font-semibold text-fg tabular-nums">
-						{formatMoney(quickViewSalon.starting_price, quickViewSalon.currency ?? 'SAR', 'en')}
+						{formatMoney(quickViewSalon.starting_price, quickViewSalon.currency ?? 'SAR')}
 					</span>
 				</dd>
 			</div>
 		</dl>
 	{/if}
 	{#snippet footer()}
-		<Button variant="ghost" onclick={() => (quickViewSalon = null)}>Close</Button>
+		<Button variant="ghost" onclick={() => (quickViewSalon = null)}>{t('Close')}</Button>
 		{#if quickViewSalon}
 			<Button href={resolve('/discover/[slug]', { slug: quickViewSalon.slug })}>
-				View Full Menu
+				{t('View Full Menu')}
 			</Button>
 		{/if}
 	{/snippet}
 </Modal>
+
+<AssistantLauncher
+	marketplace
+	title={t('NOVA assistant')}
+	subtitle={t('Find a salon or spa and book it')}
+	intro={t(
+		'Tell me what you need, where and when. I search every business on NOVA, find a free time, and book it once you say yes.'
+	)}
+	starters={[
+		t('Find me a spa in Riyadh this weekend'),
+		t('I need a haircut tomorrow afternoon'),
+		t('Which salons do nails near Jeddah?')
+	]}
+/>

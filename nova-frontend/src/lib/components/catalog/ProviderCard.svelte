@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { pickBilingual } from '../../utils/bilingual.js';
 	import Avatar from '../ui/Avatar.svelte';
 
@@ -9,16 +10,15 @@
 	 *
 	 * @type {{
 	 *   provider: import('../../api/catalog.js').Provider,
-	 *   locale?: 'en'|'ar',
 	 *   selected?: boolean,
 	 *   onselect?: (provider: import('../../api/catalog.js').Provider) => void,
 	 *   actions?: import('svelte').Snippet
 	 * }}
 	 */
-	let { provider, locale = 'en', selected = false, onselect, actions } = $props();
+	let { provider, selected = false, onselect, actions } = $props();
 
-	let name = $derived(pickBilingual(provider, 'name', locale));
-	let title = $derived(pickBilingual(provider, 'title', locale));
+	let name = $derived(pickBilingual(provider, 'name'));
+	let title = $derived(pickBilingual(provider, 'title'));
 
 	let classes = $derived(
 		[
@@ -34,7 +34,10 @@
 	<Avatar {name} size="md" />
 	<div class="min-w-0 flex-1">
 		<p class="truncate font-medium text-fg">{name}</p>
-		<p class="truncate text-xs text-fg-muted">{title || 'Provider'}</p>
+		<p class="truncate text-xs text-fg-muted">
+			{title || t('Provider')}{#if provider.is_active === false}
+				· {t('Inactive')}{/if}
+		</p>
 	</div>
 	{#if actions}
 		<div class="flex shrink-0 items-center gap-2">{@render actions()}</div>

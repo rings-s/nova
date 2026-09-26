@@ -11,7 +11,9 @@ modules' application services as agent tools.
 The roster (docs/13 section 2, `agents.py`):
 
     concierge_agent          customers   routes a message
-    receptionist_agent       customers   a held slot or a place in the queue
+    receptionist_agent       customers   a booking and its QR ticket, or a queue place
+    marketplace_agent        customers   finds a business anywhere on NOVA and books
+                                         there (`/discovery/ai`, no tenant yet)
     customer_service_agent   customers   the caller's own booking or payment
     accountant_agent         staff       earned, collected, paid out, charged
     analyst_agent            staff       metrics and charts        (Studio, Chain)
@@ -35,6 +37,18 @@ model.
 
 No agent can confirm a booking: `confirm` appears in no allowlist, so no agent
 has a tool that could reach it. The business manager has no tool that writes.
+
+A customer agent can *create* a booking, through `book_held_slot`, and only in
+two steps enforced in code rather than the prompt: a hold tool offers a time
+(the slot is held and shown), and `book_held_slot` books only an offer made in
+an EARLIER turn — one the customer has seen and answered — kept server-side in
+conversation memory with its hold token (`history.py`), and only the one whose
+"Yes, book it" the customer pressed: the request's `confirm_hold_token`. A yes
+in words is text the model reads, which a listing or a message could fake. The booking goes
+through `BookingService.create`, the same call and deposit policy as
+`POST /bookings`, so its status (`confirmed`, or `pending_payment` when a
+deposit is due) is the domain's decision, never the model's. The QR ticket
+issued with it goes to the client, never to the model.
 
 Guardrails are CODE, not prompt text (docs/10 section 11, docs/13 section 5):
 

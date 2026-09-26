@@ -31,6 +31,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPKMixin
 from app.modules.billing.domain import (
+    CheckoutStatus,
     CommissionClass,
     CommissionLineStatus,
     InvoiceStatus,
@@ -218,6 +219,51 @@ class InvoiceRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     dunning_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     #: The Moyasar payment collecting this invoice (docs/11 section 7 step 4).
     gateway_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class SubscriptionCheckoutRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
+    """One attempt to pay for a paid plan on Moyasar's hosted page.
+
+    Not a row in `payments`: those are the salon's takings, paid out to it and
+    counted as its revenue. This is what the salon pays NOVA.
+    """
+
+    __tablename__ = "subscription_checkouts"
+    __table_args__ = (
+        Index("ix_subscription_checkouts_tenant_business", "tenant_id", "business_id"),
+        # The webhook finds a checkout by the Moyasar invoice it opened.
+        Index(
+            "uq_subscription_checkouts_gateway_invoice_id",
+            "gateway_invoice_id",
+            unique=True,
+            postgresql_where=text("gateway_invoice_id IS NOT NULL"),
+        ),
+        CheckConstraint("covers_until > covers_from", name="covers_forward"),
+        CheckConstraint("net_amount >= 0 AND vat_amount >= 0", name="amounts_non_negative"),
+    )
+
+    business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    tier: Mapped[PlanTier] = mapped_column(
+        Enum(PlanTier, name="plan_tier", native_enum=False, length=32), nullable=False
+    )
+    annual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="SAR")
+    covers_from: Mapped[date] = mapped_column(Date, nullable=False)
+    covers_until: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[CheckoutStatus] = mapped_column(
+        Enum(CheckoutStatus, name="checkout_status", native_enum=False, length=32),
+        nullable=False,
+        default=CheckoutStatus.PENDING,
+    )
+    gateway_invoice_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gateway_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class PayoutRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):

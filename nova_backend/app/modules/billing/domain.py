@@ -43,6 +43,9 @@ class PlanTier(StrEnum):
 
 class SubscriptionStatus(StrEnum):
     TRIALING = "trialing"
+    #: A paid plan chosen but not yet paid for. Billed and gated as Solo until
+    #: Moyasar confirms the first payment (`SubscriptionCheckout`).
+    PENDING_PAYMENT = "pending_payment"
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELLED = "cancelled"
@@ -503,13 +506,37 @@ class Subscription:
 
     @property
     def plan(self) -> Plan:
+        """The terms in force: Solo's while a paid plan waits for its first
+        payment, so nothing a business has not paid for is unlocked or billed."""
+        if self.status is SubscriptionStatus.PENDING_PAYMENT:
+            return plan_for(PlanTier.SOLO)
         return plan_for(self.tier)
 
+    @property
+    def awaiting_payment(self) -> bool:
+        return self.status is SubscriptionStatus.PENDING_PAYMENT
+
     def subscription_amount(self) -> Money:
-        """The recurring charge for the current footprint."""
+        """The recurring charge for the current footprint, under the terms in force."""
+        if self.awaiting_payment:
+            return self.plan.subscription_amount(locations=self.locations)
+        return self.chosen_monthly_amount()
+
+    def chosen_monthly_amount(self) -> Money:
+        """What the chosen plan costs a month, whether or not it is paid for yet."""
         if self.negotiated_monthly_price is not None:
-            return Money(amount=to_fils(self.negotiated_monthly_price), currency=self.plan.currency)
-        return self.plan.subscription_amount(locations=self.locations)
+            return Money(
+                amount=to_fils(self.negotiated_monthly_price), currency=plan_for(self.tier).currency
+            )
+        return plan_for(self.tier).subscription_amount(locations=self.locations)
+
+    def first_payment(self) -> Money:
+        """The net (pre-VAT) charge that activates the chosen plan: one month,
+        or a year for an annual plan that has an annual price."""
+        chosen = plan_for(self.tier)
+        if self.annual and chosen.annual_price is not None:
+            return Money(amount=to_fils(chosen.annual_price), currency=chosen.currency)
+        return self.chosen_monthly_amount()
 
     def commission_rate(self, commission_class: CommissionClass) -> Decimal:
         return commission_rate_for(self.plan, commission_class)
@@ -533,6 +560,13 @@ class Subscription:
             )
         if annual and target.annual_price is None:
             raise ValidationDomainError(f"The {tier} plan has no annual price.")
+
+        # Moving from a free plan to a paid one is paid for before it applies;
+        # moving to a free plan needs no payment, so a pending one is dropped.
+        if requires_payment(tier) and (self.awaiting_payment or not requires_payment(self.tier)):
+            self.status = SubscriptionStatus.PENDING_PAYMENT
+        elif not requires_payment(tier) and self.awaiting_payment:
+            self.status = SubscriptionStatus.ACTIVE
 
         self.tier = tier
         self.annual = annual
@@ -589,6 +623,93 @@ class Subscription:
         if self.status is not SubscriptionStatus.CANCELLED:
             return True
         return day < self.current_period_end
+
+
+def requires_payment(tier: PlanTier) -> bool:
+    """Whether choosing this plan has to be paid for before it applies."""
+    return plan_for(tier).monthly_price > 0
+
+
+# --- subscription checkout -------------------------------------------------
+
+
+class CheckoutStatus(StrEnum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+
+
+@dataclass
+class SubscriptionCheckout:
+    """One attempt to pay for a paid plan on Moyasar's hosted page.
+
+    Kept apart from the `payment` module's payments on purpose: those are the
+    salon's own takings, paid out to it daily and counted in its revenue. This
+    is money the salon pays NOVA. It covers the months from `covers_from` up to
+    (not including) `covers_until`, so the monthly close does not charge the
+    subscription again for them.
+    """
+
+    id: UUID
+    tenant_id: UUID
+    business_id: UUID
+    subscription_id: UUID
+    tier: PlanTier
+    annual: bool
+    net: Money
+    vat: Money
+    covers_from: date
+    covers_until: date
+    status: CheckoutStatus = CheckoutStatus.PENDING
+    gateway_invoice_id: str | None = None
+    gateway_payment_id: str | None = None
+    paid_at: datetime | None = None
+    failure_code: str | None = None
+
+    @property
+    def total(self) -> Money:
+        return Money(amount=self.net.amount + self.vat.amount, currency=self.net.currency)
+
+    def covers(self, day: date) -> bool:
+        return self.status is CheckoutStatus.PAID and self.covers_from <= day < self.covers_until
+
+    def mark_paid(self, *, now: datetime, gateway_payment_id: str | None) -> None:
+        self.status = CheckoutStatus.PAID
+        self.paid_at = now
+        if gateway_payment_id:
+            self.gateway_payment_id = gateway_payment_id
+
+    def mark_failed(self, *, code: str) -> None:
+        if self.status is CheckoutStatus.PENDING:
+            self.status = CheckoutStatus.FAILED
+            self.failure_code = code
+
+
+def checkout_for(
+    subscription: Subscription, *, today: date, checkout_id: UUID
+) -> SubscriptionCheckout:
+    """Prices the payment that activates `subscription`'s chosen plan.
+
+    It covers the month it is paid in, or twelve months from then for an
+    annual plan, whole calendar months like every NOVA invoice.
+    """
+    net = subscription.first_payment()
+    start = BillingPeriod.month_containing(today)
+    until = start.period_end
+    if subscription.annual and plan_for(subscription.tier).annual_price is not None:
+        until = date(start.period_start.year + 1, start.period_start.month, 1)
+    return SubscriptionCheckout(
+        id=checkout_id,
+        tenant_id=subscription.tenant_id,
+        business_id=subscription.business_id,
+        subscription_id=subscription.id,
+        tier=subscription.tier,
+        annual=subscription.annual,
+        net=net,
+        vat=vat_on(net),
+        covers_from=start.period_start,
+        covers_until=until,
+    )
 
 
 # --- invoice ---------------------------------------------------------------
@@ -767,6 +888,7 @@ __all__ = [
     "PLANS",
     "VAT_RATE",
     "BillingPeriod",
+    "CheckoutStatus",
     "CommissionClass",
     "CommissionLine",
     "CommissionLineStatus",
@@ -779,15 +901,18 @@ __all__ = [
     "PlanFeatureRequiredError",
     "PlanTier",
     "Subscription",
+    "SubscriptionCheckout",
     "SubscriptionStatus",
     "build_commission_line",
     "build_payout",
     "build_reversal",
+    "checkout_for",
     "classify_commission",
     "commission_base",
     "commission_rate_for",
     "percentage_of",
     "plan_for",
+    "requires_payment",
     "to_fils",
     "vat_on",
 ]

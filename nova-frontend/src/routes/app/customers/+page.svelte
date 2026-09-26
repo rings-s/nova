@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * A salon's customer list — staff-only (CLAUDE.md: a customer principal
 	 * has no business reading another customer's record). Search is a plain
@@ -76,7 +77,7 @@
 			customers = [customer, ...customers];
 			addModalOpen = false;
 			form = { fullName: '', phone: '', email: '' };
-			toastStore.success('Customer added.');
+			toastStore.success(t('Customer added.'));
 		} catch (err) {
 			createError = formatApiError(err);
 		} finally {
@@ -85,17 +86,17 @@
 	}
 </script>
 
-<svelte:head><title>Customers — NOVA</title></svelte:head>
+<svelte:head><title>{t('Customers')} — NOVA</title></svelte:head>
 
 <PageHeader
-	eyebrow="Operate"
-	title="Customers"
-	subtitle="Everyone who has booked, or been added, at this business."
+	eyebrow={t('Operate')}
+	title={t('Customers')}
+	subtitle={t('Everyone who has booked, or been added, at this business.')}
 >
 	{#snippet actions()}
 		<Button onclick={() => (addModalOpen = true)}>
 			<Icon name="plus" class="size-4" />
-			Add customer
+			{t('Add customer')}
 		</Button>
 	{/snippet}
 </PageHeader>
@@ -106,8 +107,8 @@
 		class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle"
 	/>
 	<Input
-		placeholder="Search by name or phone"
-		aria-label="Search customers"
+		placeholder={t('Search by name or phone')}
+		aria-label={t('Search customers')}
 		class="ps-9"
 		bind:value={q}
 	/>
@@ -129,10 +130,10 @@
 	</Card>
 {:else if customers.length === 0}
 	<EmptyState
-		title={q ? 'No matches' : 'No customers yet'}
+		title={q ? t('No matches') : t('No customers yet')}
 		description={q
-			? 'Try a different name or phone number.'
-			: "They'll show up here once they book, or you add them."}
+			? t('Try a different name or phone number.')
+			: t("They'll show up here once they book, or you add them.")}
 	>
 		{#snippet icon()}<Icon name="user" class="size-6" />{/snippet}
 	</EmptyState>
@@ -172,16 +173,16 @@
 	</div>
 {/if}
 
-<Modal bind:open={addModalOpen} title="Add customer">
+<Modal bind:open={addModalOpen} title={t('Add customer')}>
 	{#if createError}
 		<Alert tone="error" class="mb-4">{createError}</Alert>
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleCreate}>
-		<Input label="Full name" required bind:value={form.fullName} />
+		<Input label={t('Full name')} required bind:value={form.fullName} />
 		<div class="grid gap-4 sm:grid-cols-2">
-			<Input type="tel" label="Phone" required bind:value={form.phone} />
-			<Input type="email" label="Email" hint="Optional" bind:value={form.email} />
+			<Input type="tel" label={t('Phone')} required bind:value={form.phone} />
+			<Input type="email" label={t('Email')} hint={t('Optional')} bind:value={form.email} />
 		</div>
-		<Button type="submit" loading={creating} fullWidth>Add customer</Button>
+		<Button type="submit" loading={creating} fullWidth>{t('Add customer')}</Button>
 	</form>
 </Modal>

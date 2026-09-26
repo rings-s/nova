@@ -37,12 +37,13 @@ function apply(value) {
 	}
 }
 
-let theme = $state(loadInitial());
+const initial = loadInitial();
+let theme = $state(initial);
 
 // Apply the resolved theme as soon as this module loads. `app.html` may set
 // the class before first paint too; this makes the stored choice take
 // effect even when it doesn't.
-if (browser) document.documentElement.classList.toggle('dark', theme === 'dark');
+if (browser) document.documentElement.classList.toggle('dark', initial === 'dark');
 
 export const themeStore = {
 	get value() {

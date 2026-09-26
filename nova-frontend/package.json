@@ -14,7 +14,9 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test:e2e": "playwright install && playwright test",
-		"test": "npm run test:e2e"
+		"test": "npm run test:e2e",
+		"i18n:check": "node scripts/i18n.js check",
+		"i18n:audit": "node scripts/i18n.js audit"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
@@ -43,7 +45,9 @@
 	"dependencies": {
 		"d3-array": "^3.2.4",
 		"d3-scale": "^4.0.2",
+		"jsqr": "^1.4.0",
 		"layerchart": "^2.5.0",
-		"leaflet": "^1.9.4"
+		"leaflet": "^1.9.4",
+		"uqr": "^0.1.3"
 	}
 }

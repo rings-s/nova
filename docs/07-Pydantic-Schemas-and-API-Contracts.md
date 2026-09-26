@@ -3,13 +3,15 @@ title: Pydantic Schemas and API Contracts
 created: 2026-08-11
 project: NOVA
 type: api
+status: design
 tags: [pydantic, api, schemas, fastapi]
 related_code:
   - app/modules/catalog/schemas.py
   - app/modules/booking/schemas.py
   - app/modules/queue/schemas.py
   - app/modules/payment/schemas.py
-  - app/modules/media/schemas.py
+  - app/modules/review/schemas.py
+  - app/modules/discovery/schemas.py
 ---
 
 # Pydantic Schemas and API Contracts
@@ -28,12 +30,14 @@ related_code:
 > - **Tenant-owned resources are nested under their tenant**, e.g.
 >   `/api/v1/tenants/{tenant_id}/bookings`. `tenant_id` comes only from that path (ADR-0003).
 > - **Every route requires `Authorization: Bearer <token>`** (ADR-0006). The exceptions are
->   `/api/v1/auth/register`, `login` and `refresh`, the signature-verified
+>   `/api/v1/auth/register`, `login` and `refresh`, the `secret_token`-authenticated
 >   `/api/v1/webhooks/moyasar`, and the public marketplace under `/api/v1/discovery/` (ADR-0010).
 >   That marketplace includes a map view: `GET /api/v1/discovery/businesses` takes a
 >   `bbox=west,south,east,north` viewport, and `GET /api/v1/discovery/map` returns the same search
 >   as a GeoJSON FeatureCollection, unpaged and capped. An owner sets where a branch appears on it
 >   with `PATCH /api/v1/tenants/{tenant_id}/catalog/locations/{location_id}/position` (ADR-0012).
+>   Business photos are served publicly by `GET /api/v1/discovery/photos/{photo_id}/{variant}`
+>   (ADR-0013).
 > - **Caller identity is never read from a request body.** The customer is the authenticated
 >   principal, and only staff may name someone else, with `on_behalf_of_customer_id` (ADR-0006).
 
@@ -48,7 +52,8 @@ app/modules/
   booking/schemas.py
   queue/schemas.py
   payment/schemas.py
-  media/schemas.py
+  review/schemas.py
+  discovery/schemas.py
   notification/schemas.py
   ai_agents/schemas.py
 
@@ -218,9 +223,13 @@ class ProviderOut(ApiSchema):
 > Names, descriptions and titles are bilingual column pairs (`name_en`/`name_ar`,
 > `description_en`/`description_ar`, `title_en`/`title_ar`), per ADR-0004. Every `Out` also
 > carries `tenant_id`, `created_at` and `updated_at`. `BusinessOut` adds `is_listed`, the
-> marketplace switch (ADR-0010). `LocationOut` has `slug`, `phone` and an optional `city`, and no
-> address lines or `country` yet. Reads are open to anyone with tenant access, customers included,
-> and every write is staff-only. See `app/modules/catalog/schemas.py`.
+> marketplace switch (ADR-0010). `LocationOut` has `slug` and an optional `city`, and no phone
+> (the tenant's is the contact), address lines or `country` yet. `ServiceOut` has `category_id`
+> and a nested `category` (`id`, `slug`, `name_en`, `name_ar`) instead of free text: categories
+> are one platform list (`service_categories`) that only a superuser edits, at
+> `/admin/catalog/categories`, and anyone reads at `GET /discovery/categories`. Reads are open to
+> anyone with tenant access, customers included, and every write is staff-only. See
+> `app/modules/catalog/schemas.py`.
 
 ## 5. Availability Schemas
 
@@ -428,10 +437,19 @@ Payment rules:
 > `CreatePaymentIntentRequest.amount` and `currency` are optional staff overrides. Left unset,
 > the amount comes from the booking's price and the deposit policy, so a client cannot choose
 > what it owes. `PaymentOut` adds `webhook_verified`, `refunded_amount`, `failure_code` and
-> `captured_at`. `MoyasarWebhookPayload` follows Moyasar's real envelope (`id`, `type`,
-> `secret_token`, `data`), and the signature is verified against the raw body before anything is
-> read (ADR-0007). A refund is staff-only, idempotency-keyed and stored as its own record:
+> `captured_at`. A refund is staff-only, idempotency-keyed and stored as its own record:
 > `POST /api/v1/tenants/{tenant_id}/payments/{payment_id}/refund`.
+>
+> Checkout is a Moyasar **invoice** (hosted page). `POST .../payments/intents` returns a
+> `PaymentIntentOut` (`payment`, `redirect_url`); the payment row keeps the `gateway_invoice_id`,
+> and `gateway_payment_id` is learnt once paid. The page the payer returns to calls
+> `POST .../payments/{payment_id}/sync`, which reads Moyasar's own record and captures only when
+> status, amount, currency and invoice all match; the redirect proves nothing.
+> `MoyasarWebhookPayload` follows Moyasar's real envelope (`id`, `type`, `secret_token`, `data`).
+> Moyasar sends no signature header, so the webhook is authenticated by comparing `secret_token`
+> with `MOYASAR_WEBHOOK_SECRET`, deduplicated by event id, and checked against Moyasar's record like
+> a sync. A mismatch is recorded and answered `amount_mismatch` or `checkout_mismatch` without
+> capturing. Setup is in `nova_backend/README.md`, "Payments (Moyasar)".
 
 ## 9. Nextcloud Media Schemas
 
@@ -478,17 +496,41 @@ Rules:
 - Public URLs should be generated through a controlled media proxy or signed URL.
 - Business owners must not be able to access another tenant's media folder.
 
-> [!note] Implemented differences
-> Upload takes three steps (ADR-0007):
+> [!warning] Superseded by ADR-0013: business photos
+> Nextcloud and the `media` module were removed on 2026-09-17; nothing in this section exists in
+> the code. `MediaAssetKind` in section 3 is gone with it. Photos of a business are now part of
+> `catalog`:
 >
-> 1. `POST .../media/uploads` returns the URL and a signed `upload_token`.
-> 2. The browser PUTs the bytes to Nextcloud.
-> 3. `POST .../media/uploads/{asset_id}/complete` verifies them against storage before the asset
->    is ready.
+> ```python
+> class BusinessPhotoOut(ApiSchema):  # catalog, staff view
+>     id: UUID
+>     business_id: UUID
+>     kind: str                 # "cover" | "gallery"
+>     position: int
+>     width: int
+>     height: int
+>     created_at: datetime
+>     urls: dict[str, str]      # variant ("large" | "thumb") -> signed preview link
 >
-> `MediaAssetOut` has no `public_url` or `thumbnail_url`. Following the signed-URL rule above,
-> `GET .../media/{asset_id}/link` generates a share link on demand and nothing is stored. It adds
-> `is_ready` and `is_public`.
+> class PublicPhotoOut(ApiSchema):  # discovery storefront
+>     id: UUID
+>     kind: Literal["cover", "gallery"]
+>     width: int
+>     height: int
+>     urls: dict[str, str]      # variant -> public image URL
+> ```
+>
+> - `POST /api/v1/tenants/{tenant_id}/catalog/businesses/{business_id}/photos?kind=cover|gallery`
+>   takes the raw JPEG, PNG or WebP file as the request body, not a JSON schema, and needs
+>   `manage_catalog`. The file is re-encoded to WebP before it is stored.
+> - `GET .../catalog/businesses/{business_id}/photos` (staff) and
+>   `DELETE .../catalog/photos/{photo_id}` (`manage_catalog`).
+> - `GET /api/v1/discovery/photos/{photo_id}/{variant}` serves the image: publicly for a listed
+>   business, or through an expiring signed link (`t`, `exp`, `sig`) for the owner's preview.
+> - Discovery cards carry `cover_url`; the storefront carries `photos`, cover first.
+>
+> The rules above still hold in spirit: PostgreSQL stores metadata only, and one tenant cannot
+> reach another's photos (RLS, and storage keys NOVA generates itself).
 
 ## 10. AI Chat Schemas
 
@@ -520,3 +562,49 @@ class AiChatResponse(ApiSchema):
 > deployment can run. Owner-only agents (`billing_agent`, `insights_agent`) refuse non-staff
 > callers with 403 (docs/10 section 4). `AiChatResponse` adds `degraded` and `confidence`, so a
 > fallback reply can be told apart from a confident one.
+
+## 11. Review Schemas
+
+Added by ADR-0014. Routes are under `/api/v1/tenants/{tenant_id}/reviews`.
+
+```python
+class SubmitReviewRequest(ApiSchema):
+    booking_id: UUID
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class MyReviewOut(ApiSchema):
+    id: UUID
+    booking_id: UUID
+    business_id: UUID
+    rating: int
+    comment: str | None
+    created_at: datetime
+
+
+class ReviewOut(MyReviewOut):  # staff only
+    location_id: UUID
+    provider_id: UUID
+    customer_id: UUID
+```
+
+- `POST ""`: the customer of a `completed` booking rates it, once (`MyReviewOut`, 201).
+- `GET /mine`: the caller's reviews at this business.
+- `GET "?business_id=…"`: a staff-only paged list, comments included.
+
+Discovery cards and storefronts expose only `rating_average` and `rating_count`, never comments.
+`GET /api/v1/discovery/businesses` takes `sort=default|distance|rating`.
+
+## 12. Access Schemas
+
+```python
+class MyAccessOut(ApiSchema):
+    role: MembershipRole | None          # None for a service principal
+    permissions: list[StaffPermission]   # e.g. "manage_catalog", "refund_payments"
+    manageable_roles: list[MembershipRole]
+```
+
+`GET /api/v1/tenants/{tenant_id}/memberships/me` (staff) tells a client which screens to show.
+It is informational: every route still checks the permission itself, from the caller's
+`memberships` row in that tenant.

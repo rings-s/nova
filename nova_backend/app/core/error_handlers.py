@@ -92,7 +92,7 @@ async def _handle_domain_error(request: Request, exc: DomainError) -> JSONRespon
         # contract either way. Marking only the IntegrityError path retryable
         # made "that slot was just taken" look retryable or not depending on
         # which layer happened to catch the race.
-        retryable=exc.status_code in (409, 429),
+        retryable=exc.retryable or exc.status_code in (409, 429),
         headers=headers,
     )
 

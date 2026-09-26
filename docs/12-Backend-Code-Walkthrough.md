@@ -3,6 +3,7 @@ title: Backend Code Walkthrough
 created: 2026-08-15
 project: NOVA
 type: guide
+status: current
 tags: [fastapi, ddd, onboarding, tutorial]
 related_code:
   - nova_backend/app/modules/identity/
@@ -163,13 +164,16 @@ nova_backend/
 │   │
 │   ├── modules/         ⭐ the actual product, one folder per business area
 │   │   ├── registry.py    where modules get plugged in
-│   │   ├── identity/      ✅ Tenant — the business account
-│   │   ├── catalog/       ✅ Business, Location, Service, Provider
+│   │   ├── identity/      ✅ Tenant, User, Membership, Customer — who is who
+│   │   ├── catalog/       ✅ Business, Location, Service, Provider, photos
+│   │   ├── discovery/     ✅ the public marketplace (read-only, cross-tenant)
 │   │   ├── booking/       ✅ Booking — the core
 │   │   ├── queue/ payment/ billing/   ✅ tickets, money in, money owed
-│   │   └── media/ notification/ ai_agents/   ✅ files, messages, agents
+│   │   ├── review/        ✅ verified ratings of completed visits
+│   │   ├── analytics/     ✅ owner reports and charts (owns no tables)
+│   │   └── notification/ ai_agents/   ✅ messages, agents
 │   │
-│   ├── integrations/    talking to the outside world (Moyasar, WhatsApp, Nextcloud)
+│   ├── integrations/    talking to the outside world (Moyasar, WhatsApp, image store)
 │   └── worker/          background jobs
 │
 ├── alembic/             database migrations (schema version history)
@@ -179,9 +183,9 @@ nova_backend/
 **Where the product lives is `app/modules/`.** Everything else is support.
 
 > [!note] Implemented differences
-> The map above leaves out `modules/discovery/`, the public marketplace (ADR-0010),
-> `modules/analytics/`, the owner reports and Plotly charts (ADR-0011), and several
-> `core/` files: `security.py`, `throttling.py`, `idempotency.py`, `context.py` and
+> The module list above is current as of 2026-09-23. It covers `discovery/` (ADR-0010),
+> `analytics/` (ADR-0011) and `review/` (ADR-0014); the Nextcloud `media/` module was removed
+> (ADR-0013). It still leaves out several `core/` files: `security.py`, `throttling.py`, `idempotency.py`, `context.py` and
 > `middleware.py` (ADR-0006). `nova_backend/README.md` is kept current.
 
 ---
@@ -664,24 +668,31 @@ Add `GET /api/v1/tenants/by-slug/{slug}` returning a tenant by its slug.
            raise TenantNotFoundError(slug)
        return tenant
    ```
-3. **`router.py`** — add the route:
+3. **`router.py`** — add the route, and import `TenantNotFoundError` from
+   `app.modules.identity.exceptions`:
    ```python
    @router.get("/by-slug/{slug}", response_model=TenantOut)
    async def get_tenant_by_slug(
        slug: str,
+       principal: Principal = Depends(get_principal),
        service: TenantService = Depends(get_tenant_service),
    ) -> Tenant:
-       return await service.get_by_slug(slug)
+       tenant = await service.get_by_slug(slug)
+       # The slug came from the caller, so the tenant it names is not authorized
+       # yet. Answer as if it did not exist rather than confirm that it does.
+       if not principal.can_access_tenant(tenant.id):
+           raise TenantNotFoundError(slug)
+       return tenant
    ```
-4. **Check it** — open `http://localhost:8000/docs`. FastAPI generates interactive documentation
-   from your code; your new endpoint is there and you can call it from the browser.
+   Two lines here are not optional. `Depends(get_principal)` authenticates the caller: NOVA fails
+   closed (ADR-0006), and `tests/test_route_guards.py` fails the build for a route without it. The
+   `can_access_tenant` check is section 9's rule: the path names no tenant, so nothing has
+   authorized this one yet, and without the check a stylist at one salon could read another.
+4. **Check it** — run `make check`, then open `http://localhost:8000/docs`. FastAPI generates
+   interactive documentation from your code, and your endpoint is there. Click **Authorize**,
+   paste an access token from `POST /api/v1/auth/login`, and call it.
 
 Note you touched no schema and no model. That is the structure working.
-
-> [!note] Implemented differences
-> Add `principal: Principal = Depends(get_principal)` to the route as well. NOVA fails closed, so
-> every route authenticates (ADR-0006), and `tests/test_route_guards.py` fails the build when one
-> doesn't.
 
 > [!warning] Route order matters
 > Register `/by-slug/{slug}` **before** `/{tenant_id}`. FastAPI matches top to bottom, so
@@ -691,16 +702,18 @@ Note you touched no schema and no model. That is the structure working.
 
 ## 12. Running it
 
+From the repository root (the Makefile lives there, not in `nova_backend/`):
+
 ```bash
-cd nova_backend
-make dev                  # start everything with Docker
-make migrate              # apply database migrations
-make test                 # run the test suite
-make lint                 # check code style
+make dev                  # start everything with Docker; migrations run first
+make test                 # run the test suite in the tools container
+make check                # ruff, mypy and an app-assembly smoke check, no database
+make revision m="add_x"   # autogenerate a migration (then read it before keeping it)
 ```
 
-Then open **`http://localhost:8000/docs`** — the interactive API documentation, generated from
-your code. It is the fastest way to explore what exists.
+Then open **`http://localhost:8000/docs`**, the interactive API documentation generated from your
+code. It is the fastest way to explore what exists. The SvelteKit app runs from the same `make dev`
+at **`http://localhost:5173`**.
 
 ### Tests worth reading
 

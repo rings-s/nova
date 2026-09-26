@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import Select, func, or_, select, update
@@ -13,7 +13,26 @@ from app.modules.catalog.models import (
     Provider,
     ProviderService,
     Service,
+    ServiceCategory,
 )
+
+
+class ServiceCategoryRepository(BaseRepository[ServiceCategory]):
+    """The platform's category list. Not tenant-owned: one list for everyone."""
+
+    model = ServiceCategory
+
+    async def list_ordered(self, *, include_inactive: bool = False) -> list[ServiceCategory]:
+        stmt = self._base_select().order_by(ServiceCategory.name_en.asc())
+        if not include_inactive:
+            stmt = stmt.where(ServiceCategory.is_active.is_(True))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_slug(self, slug: str) -> ServiceCategory | None:
+        stmt = self._base_select().where(ServiceCategory.slug == slug)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
 
 class _SoftDeleteAwareRepository[ModelT](TenantScopedRepository[ModelT]):
@@ -194,13 +213,17 @@ class ProviderRepository(_SoftDeleteAwareRepository[Provider]):
 def _public_business() -> list:
     """What makes a business publicly visible.
 
-    Three separate flags, because they mean three different things and a
+    Four separate flags, because they mean four different things and a
     listing must satisfy all of them:
 
-      - `is_deleted`  — retired; the row survives only for historical bookings.
-      - `is_active`   — switched off entirely; nothing it owns is bookable.
-      - `is_listed`   — trading normally but not advertised on NOVA, which is
-                        what an unpaid invoice does at day 21 (docs/11 §8).
+      - `is_deleted`         — retired; the row survives only for historical
+                               bookings.
+      - `is_active`          — switched off entirely; nothing it owns is
+                               bookable.
+      - `is_listed`          — trading normally, but the owner chose not to
+                               advertise on NOVA.
+      - `hidden_by_billing`  — trading normally, but not advertised because an
+                               invoice is 21 days unpaid (docs/11 §8).
 
     Returned as a list of clauses so callers can splat it into `.where()`.
     """
@@ -208,6 +231,7 @@ def _public_business() -> list:
         Business.is_deleted.is_(False),
         Business.is_active.is_(True),
         Business.is_listed.is_(True),
+        Business.hidden_by_billing.is_(False),
     ]
 
 
@@ -221,6 +245,11 @@ def _public_service() -> list:
 
 def _public_provider() -> list:
     return [Provider.is_deleted.is_(False), Provider.is_active.is_(True)]
+
+
+def _folded(column: Any) -> Any:
+    """A text column with its accents removed, for accent-insensitive search."""
+    return func.unaccent(column)
 
 
 class PublicCatalogRepository(BaseRepository[Business]):
@@ -291,16 +320,27 @@ class PublicCatalogRepository(BaseRepository[Business]):
             # finds a salon that never mentions the word in its own name.
             # Bilingual on both sides (ADR-0004): a customer typing Arabic must
             # match `name_ar`, and neither language is the canonical one.
-            pattern = f"%{term}%"
+            #
+            # Accent-folded on both sides (`unaccent`, migration e7f8a9b0c1d2):
+            # "Lumiere" must find "Lumière Spa". The term arrives with `%` and
+            # `_` already escaped (`discovery.domain.normalize_search_term`).
+            pattern = func.unaccent(f"%{term}%")
             sells_it = (
                 select(Service.id)
                 .where(
                     Service.location_id == Location.id,
                     *_public_service(),
                     or_(
-                        Service.name_en.ilike(pattern),
-                        Service.name_ar.ilike(pattern),
-                        Service.category.ilike(pattern),
+                        _folded(Service.name_en).ilike(pattern),
+                        _folded(Service.name_ar).ilike(pattern),
+                        Service.category_id.in_(
+                            select(ServiceCategory.id).where(
+                                or_(
+                                    _folded(ServiceCategory.name_en).ilike(pattern),
+                                    _folded(ServiceCategory.name_ar).ilike(pattern),
+                                )
+                            )
+                        ),
                     ),
                 )
                 .correlate(Location)
@@ -308,16 +348,16 @@ class PublicCatalogRepository(BaseRepository[Business]):
             )
             stmt = stmt.where(
                 or_(
-                    Business.name_en.ilike(pattern),
-                    Business.name_ar.ilike(pattern),
-                    Business.description_en.ilike(pattern),
-                    Business.description_ar.ilike(pattern),
+                    _folded(Business.name_en).ilike(pattern),
+                    _folded(Business.name_ar).ilike(pattern),
+                    _folded(Business.description_en).ilike(pattern),
+                    _folded(Business.description_ar).ilike(pattern),
                     sells_it,
                 )
             )
 
         if city:
-            stmt = stmt.where(Location.city.ilike(city))
+            stmt = stmt.where(_folded(Location.city).ilike(func.unaccent(city)))
 
         if category:
             offers_category = (
@@ -325,7 +365,18 @@ class PublicCatalogRepository(BaseRepository[Business]):
                 .where(
                     Service.location_id == Location.id,
                     *_public_service(),
-                    Service.category.ilike(category),
+                    # The slug is what the marketplace's filter sends; a name
+                    # in either language is what the assistant sends when a
+                    # customer types "nails".
+                    Service.category_id.in_(
+                        select(ServiceCategory.id).where(
+                            or_(
+                                ServiceCategory.slug == category.lower(),
+                                func.lower(ServiceCategory.name_en) == category.lower(),
+                                ServiceCategory.name_ar == category,
+                            )
+                        )
+                    ),
                 )
                 .correlate(Location)
                 .exists()

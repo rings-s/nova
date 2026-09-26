@@ -128,6 +128,10 @@ async function performFetch(path, options) {
 		return await fetch(url, {
 			method,
 			headers: requestHeaders,
+			// The refresh token is an httpOnly cookie scoped to /api/v1/auth, which
+			// the API may serve from another origin (localhost:8000 in development).
+			// Only those routes send and store it; nothing else needs a cookie.
+			credentials: path.startsWith('/auth/') ? 'include' : 'same-origin',
 			body:
 				body === undefined ? undefined : raw ? /** @type {Blob} */ (body) : JSON.stringify(body),
 			signal

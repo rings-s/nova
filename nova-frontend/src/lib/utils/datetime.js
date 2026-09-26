@@ -5,15 +5,17 @@
  * salon's own time regardless of the viewer's device.
  */
 
+import { i18n, intlLocale } from '../i18n/index.svelte.js';
+
 export const DEFAULT_TIMEZONE = 'Asia/Riyadh';
 
 /** @param {'en'|'ar'} locale */
 function localeTag(locale) {
-	return locale === 'ar' ? 'ar-SA' : 'en-US';
+	return intlLocale(locale);
 }
 
 /** @param {string|Date} value @param {'en'|'ar'} [locale] */
-export function formatDateTime(value, locale = 'en', { timeZone = DEFAULT_TIMEZONE } = {}) {
+export function formatDateTime(value, locale = i18n.locale, { timeZone = DEFAULT_TIMEZONE } = {}) {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return '—';
 	return new Intl.DateTimeFormat(localeTag(locale), {
@@ -24,14 +26,14 @@ export function formatDateTime(value, locale = 'en', { timeZone = DEFAULT_TIMEZO
 }
 
 /** @param {string|Date} value @param {'en'|'ar'} [locale] */
-export function formatDate(value, locale = 'en', { timeZone = DEFAULT_TIMEZONE } = {}) {
+export function formatDate(value, locale = i18n.locale, { timeZone = DEFAULT_TIMEZONE } = {}) {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return '—';
 	return new Intl.DateTimeFormat(localeTag(locale), { timeZone, dateStyle: 'medium' }).format(date);
 }
 
 /** @param {string|Date} value @param {'en'|'ar'} [locale] */
-export function formatTime(value, locale = 'en', { timeZone = DEFAULT_TIMEZONE } = {}) {
+export function formatTime(value, locale = i18n.locale, { timeZone = DEFAULT_TIMEZONE } = {}) {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return '—';
 	return new Intl.DateTimeFormat(localeTag(locale), { timeZone, timeStyle: 'short' }).format(date);
@@ -41,7 +43,7 @@ export function formatTime(value, locale = 'en', { timeZone = DEFAULT_TIMEZONE }
  * "in 12 minutes" / "3 days ago" — for holds, waits, and expiries.
  * @param {string|Date} value @param {'en'|'ar'} [locale]
  */
-export function formatRelative(value, locale = 'en') {
+export function formatRelative(value, locale = i18n.locale) {
 	const date = value instanceof Date ? value : new Date(value);
 	if (Number.isNaN(date.getTime())) return '—';
 	const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
@@ -97,7 +99,7 @@ export const WEEKDAY_LABELS = {
 };
 
 /** @param {number} weekday Monday = 0. @param {'en'|'ar'} [locale] */
-export function weekdayLabel(weekday, locale = 'en') {
+export function weekdayLabel(weekday, locale = i18n.locale) {
 	return WEEKDAY_LABELS[locale]?.[weekday] ?? WEEKDAY_LABELS.en[weekday] ?? '';
 }
 
@@ -108,6 +110,6 @@ export const SHORT_WEEKDAY_LABELS = {
 };
 
 /** @param {number} weekday Monday = 0. @param {'en'|'ar'} [locale] */
-export function shortWeekdayLabel(weekday, locale = 'en') {
+export function shortWeekdayLabel(weekday, locale = i18n.locale) {
 	return SHORT_WEEKDAY_LABELS[locale]?.[weekday] ?? SHORT_WEEKDAY_LABELS.en[weekday] ?? '';
 }

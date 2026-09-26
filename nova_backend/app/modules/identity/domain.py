@@ -73,6 +73,28 @@ def may_manage_role(
     return target in _ROLE_GRANTS[actor]
 
 
+class ConsentSource(StrEnum):
+    """Who changed a customer's consent. PDPL asks the salon to be able to show
+    that consent was given; who gave it is most of that answer."""
+
+    CUSTOMER = "customer"
+    STAFF = "staff"
+
+
+def may_grant_consent(source: ConsentSource, *, marketing: bool) -> bool:
+    """Whether `source` may turn a consent flag on.
+
+    WhatsApp consent covers the transactional messages — the confirmation, the
+    reminder, "you're next" — and reception records it at the counter for a
+    walk-in, or those customers would never hear from the salon at all.
+    Marketing consent is the customer's alone to give: a salon that could
+    opt its own customers in to promotions has consent in name only.
+
+    Withdrawing either is open to both. Only the turning on is gated.
+    """
+    return source is ConsentSource.CUSTOMER or not marketing
+
+
 class StaffPermission(StrEnum):
     """What a role unlocks beyond a staff member's day-to-day work.
 

@@ -56,14 +56,28 @@ class Business(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     #: it owns is bookable. `is_listed` false means it is simply not advertised
     #: on NOVA: its own booking link, WhatsApp flow and reception keep working.
     #:
-    #: That distinction is what docs/11 section 8 needs when an unpaid invoice
-    #: reaches day 21 — the listing is hidden while "the calendar, queue, and
-    #: existing bookings keep working". Hiding it with `is_active` instead would
-    #: cancel the salon's operations over an overdue bill.
+    #: This flag is the owner's. Billing's day-21 hide is `hidden_by_billing`
+    #: below, which works the same way — the listing goes while "the calendar,
+    #: queue, and existing bookings keep working" (docs/11 section 8). Hiding it
+    #: with `is_active` instead would cancel the salon's operations over an
+    #: overdue bill.
     #:
     #: Defaults to listed because docs/11 section 2 gives every plan tier a
     #: marketplace profile; it is an opt-out, not an opt-in.
     is_listed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    #: Hidden from the marketplace by billing rather than by the owner: set at
+    #: day 21 of an unpaid invoice and cleared when it is paid (docs/11 section
+    #: 8). Kept apart from `is_listed` so that settling a bill never advertises
+    #: a business its owner chose to hide. Mirrored from billing's subscription
+    #: by the worker (`app/worker/handlers.py`), never set through the API.
+    #:
+    #: Unlike `is_listed`, the `public_discovery` RLS policies do not test it.
+    #: They exist so a faulty query cannot leak what was never published; a
+    #: business behind on its bill was published, and hiding it is commercial,
+    #: not confidential — `_public_business()` is the filter that applies it.
+    hidden_by_billing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     #: Running totals of the verified ratings this business has received
     #: (`review` module). Kept here rather than aggregated from `reviews` on
@@ -104,7 +118,6 @@ class Location(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     name_en: Mapped[str] = mapped_column(String(255), nullable=False)
     name_ar: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
-    phone: Mapped[str] = mapped_column(String(20), nullable=False)
 
     #: Free-text city, matched case-insensitively by marketplace search.
     #: Nullable because every existing branch predates the column and because a
@@ -121,13 +134,33 @@ class Location(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     business: Mapped["Business"] = relationship(back_populates="locations")
 
 
+class ServiceCategory(Base, UUIDPKMixin, TimestampMixin):
+    """A kind of treatment ("Hair", "Nails") that services are filed under.
+
+    One list for the whole platform, not per tenant: the marketplace filters
+    every salon by it, and a filter is only useful when "Hair" means the same
+    thing everywhere. So no tenant may add one; only a superuser
+    (`require_superuser`), through `/admin/catalog/categories`. Not
+    tenant-owned, so it carries no RLS policy.
+
+    Retired with `is_active`, never deleted: services keep pointing at it.
+    """
+
+    __tablename__ = "service_categories"
+
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    name_en: Mapped[str] = mapped_column(String(120), nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
 class Service(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMixin):
     """A bookable treatment offered at one location."""
 
     __tablename__ = "services"
     __table_args__ = (
         Index("ix_services_tenant_location", "tenant_id", "location_id"),
-        Index("ix_services_tenant_category", "tenant_id", "category"),
+        Index("ix_services_tenant_category", "tenant_id", "category_id"),
     )
 
     location_id: Mapped[uuid.UUID] = mapped_column(
@@ -137,7 +170,12 @@ class Service(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMix
     name_ar: Mapped[str] = mapped_column(String(255), nullable=False)
     description_en: Mapped[str | None] = mapped_column(Text)
     description_ar: Mapped[str | None] = mapped_column(Text)
-    category: Mapped[str | None] = mapped_column(String(120))
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("service_categories.id", ondelete="RESTRICT")
+    )
+    #: Loaded with every service: each one is rendered with its category's
+    #: name, and an async session cannot lazy-load it afterwards.
+    category: Mapped["ServiceCategory | None"] = relationship(lazy="joined")
 
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     # Numeric, never Float — see Money in app/core/values.py.

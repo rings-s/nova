@@ -62,6 +62,13 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     #: Never the password. See app/core/passwords.py.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: A NOVA administrator, not a salon role: may edit what is shared by every
+    #: tenant, such as the service categories. Never set through the API, only
+    #: with `make superuser email=…`; `require_superuser` re-reads it on every
+    #: request, so clearing it takes effect at once.
+    is_superuser: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # Throttles credential stuffing per-account, independent of the IP-based
     # rate limiter (which an attacker can spread across many addresses).
@@ -198,5 +205,20 @@ class Customer(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     # refuses to send without the matching flag — never assume opt-in.
     marketing_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     whatsapp_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Who last changed each flag, and when (`CustomerService.update_consent`):
+    #: `*_source` is a `ConsentSource`, `*_by` the acting user's id. Null for a
+    #: flag never changed since the record was created with it off.
+    marketing_consent_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    marketing_consent_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    marketing_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    whatsapp_consent_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    whatsapp_consent_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    whatsapp_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -3,7 +3,8 @@ title: Database Models and Persistence
 created: 2026-08-11
 project: NOVA
 type: database
-tags: [database, postgresql, sqlalchemy, persistence, ddd, nextcloud]
+status: design
+tags: [database, postgresql, sqlalchemy, persistence, ddd]
 related_code:
   - app/core/database.py
   - app/modules/*/models.py
@@ -25,8 +26,8 @@ related_code:
 
 - PostgreSQL is the system of record.
 - Redis is used for cache, queues, locks, idempotency keys, and temporary slot holds.
-- Nextcloud stores binary media files.
-- PostgreSQL stores media metadata only.
+- Photo files live in the image store (`MEDIA_ROOT`, ADR-0013), never in PostgreSQL.
+- PostgreSQL stores photo metadata only (`business_photos`).
 - Every tenant-owned table must include `tenant_id`.
 - Every table should include `created_at` and `updated_at`.
 - Soft delete should be preferred for business-critical records.
@@ -102,11 +103,52 @@ erDiagram
     BUSINESS ||--o{ MEDIA_ASSET : owns
 ```
 
-4.x Updated ERD + Ai Agents
+### 3.1 Implemented ERD (2026-09-23)
+
+The diagram above is the original design. This one follows `app/modules/*/models.py`. `tenants`
+and `users` are global. Every other table carries `tenant_id` and a forced `tenant_isolation` RLS
+policy, except `domain_events`, `idempotency_keys` and `webhook_events`, which are scoped in code
+(`tests/test_row_level_security.py`, `UNPOLICED_TENANT_TABLES`). Most links between modules are plain UUID columns rather
+than foreign keys; module boundaries stop at the service layer (CLAUDE.md, "Architecture").
 
 ```mermaid
-
+erDiagram
+    TENANT ||--o{ MEMBERSHIP : has
+    USER ||--o{ MEMBERSHIP : holds
+    TENANT ||--o{ MEMBERSHIP_INVITE : issues
+    USER |o--o{ CUSTOMER : claims
+    TENANT ||--o{ BUSINESS : owns
+    BUSINESS ||--o{ LOCATION : has
+    BUSINESS ||--o{ BUSINESS_PHOTO : shows
+    LOCATION ||--o{ SERVICE : offers
+    LOCATION ||--o{ PROVIDER : employs
+    PROVIDER ||--o{ PROVIDER_SERVICE : qualified_for
+    SERVICE ||--o{ PROVIDER_SERVICE : performed_by
+    PROVIDER ||--o{ PROVIDER_SCHEDULE : works
+    PROVIDER ||--o{ SCHEDULE_EXCEPTION : takes_off
+    PROVIDER ||--o{ SLOT_HOLD : held
+    CUSTOMER ||--o{ BOOKING : makes
+    SERVICE ||--o{ BOOKING : booked_as
+    PROVIDER ||--o{ BOOKING : performs
+    BOOKING ||--o| REVIEW : rated_by
+    BUSINESS ||--o{ REVIEW : receives
+    BOOKING ||--o{ PAYMENT : paid_by
+    PAYMENT ||--o{ PAYMENT_REFUND : refunded_by
+    LOCATION ||--o{ QUEUE : runs
+    QUEUE ||--o{ QUEUE_ENTRY : contains
+    QUEUE_ENTRY ||--o| TICKET : issues
+    TENANT ||--o| SUBSCRIPTION : pays
+    BOOKING ||--o{ COMMISSION_LINE : accrues
+    COMMISSION_LINE }o--o| INVOICE : billed_on
+    BUSINESS ||--o{ PAYOUT : receives
+    CUSTOMER ||--o{ CUSTOMER_BUSINESS_FIRST_BOOKING : first_at
+    BUSINESS ||--o{ MARKETPLACE_REFERRAL : referred_to
+    CUSTOMER ||--o{ NOTIFICATION : receives
 ```
+
+Not shown: `webhook_events` (inbound webhook dedupe), `domain_events` (the outbox),
+`idempotency_keys`, and `analytics`, which owns no tables. The AI agents own no tables either: conversation memory is in
+Redis (`ai_agents/history.py`), and every read or write goes through another module's service.
 
 ---
 
@@ -144,6 +186,13 @@ Rules:
 - `tenant_id` must be enforced on every query.
 - `slug` is public and used for business discovery URLs.
 - Logo and cover assets reference `media_assets`.
+
+> [!note] Implemented differences
+> `logo_asset_id`, `cover_asset_id` and `nextcloud_folder_id` were dropped with the `media`
+> module (migration `a3b4c5d6e7f8`, ADR-0013). Photos are rows in `business_photos`. `businesses`
+> gained `is_listed` (ADR-0010) and the running rating totals `rating_count` / `rating_sum`, bounded
+> by `ck_businesses_rating_sum_in_range` (ADR-0014). Branches (`locations`) keep nullable
+> `latitude` / `longitude`, set by the owner (ADR-0012).
 
 ---
 
@@ -507,9 +556,19 @@ Rules:
 - Payment capture must be idempotent.
 - Moyasar capabilities must be verified against current documentation.
 
+> [!note] Implemented differences
+> Checkout is a Moyasar invoice. `payments.gateway_invoice_id` links the row to it, unique where set
+> (`uq_payments_gateway_invoice_id`, migration `d6e7f8a9b0c1`), because a `payment_paid` webhook
+> names the invoice before NOVA has seen the payment id. `gateway_payment_id` is filled in once
+> paid. Refunds are rows in `payment_refunds`.
+
 ---
 
 ## 15. Media Asset Model
+
+> [!warning] Removed (ADR-0013)
+> `media_assets` was dropped with the Nextcloud `media` module by migration `a3b4c5d6e7f8`. The
+> design below is kept for history. What replaced it is section 15.1.
 
 ```python
 from sqlalchemy import Integer, BigInteger
@@ -560,6 +619,59 @@ Rules:
 - PostgreSQL stores metadata only.
 - Media deletion should be soft-delete first, then background hard delete.
 - Tenant isolation must be enforced on all media queries.
+
+### 15.1 Business Photo Model (implemented)
+
+```python
+class BusinessPhoto(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
+    __tablename__ = "business_photos"
+    __table_args__ = (
+        Index("ix_business_photos_business", "tenant_id", "business_id", "position"),
+        # One cover per business, even under concurrent uploads.
+        Index("uq_business_photos_one_cover", "business_id", unique=True,
+              postgresql_where=text("kind = 'cover'")),
+        CheckConstraint("kind IN ('cover', 'gallery')", name="kind_valid"),
+    )
+
+    business_id: Mapped[uuid.UUID]  # FK businesses.id, ON DELETE CASCADE
+    kind: Mapped[str]               # "cover" | "gallery"
+    position: Mapped[int]           # gallery order; at most 12 gallery photos
+    storage_prefix: Mapped[str]     # "{tenant_id}/{photo_id}"
+    width: Mapped[int]
+    height: Mapped[int]
+```
+
+Rules:
+
+- The files are `{storage_prefix}/{large|thumb}.webp` in the image store (`MEDIA_ROOT`). NOVA
+  generates the keys, and `LocalImageStore` refuses any other shape.
+- Only NOVA-re-encoded WebP is stored (`app/integrations/images.py`). EXIF data is dropped.
+- Files are written before the row and deleted after it, so a row never points at a missing file.
+- RLS has two policies: the forced `tenant_isolation`, and a SELECT-only `public_discovery` that
+  matches photos of live, active, listed businesses (migration `c5d6e7f8a9b0`).
+
+### 15.2 Review Model (implemented, ADR-0014)
+
+```python
+class Review(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
+    __tablename__ = "reviews"
+    __table_args__ = (
+        Index("uq_reviews_booking_id", "booking_id", unique=True),  # one review per visit
+        Index("ix_reviews_tenant_business_created", "tenant_id", "business_id", "created_at"),
+        Index("ix_reviews_tenant_customer", "tenant_id", "customer_id"),
+        CheckConstraint("rating BETWEEN 1 AND 5", name="rating_range"),
+    )
+
+    booking_id: Mapped[uuid.UUID]   # FK bookings.id
+    business_id: Mapped[uuid.UUID]  # FK businesses.id
+    location_id: Mapped[uuid.UUID]
+    provider_id: Mapped[uuid.UUID]
+    customer_id: Mapped[uuid.UUID]  # FK customers.id
+    rating: Mapped[int]             # SmallInteger
+    comment: Mapped[str | None]     # staff-only, at most 1000 characters
+```
+
+The rating also updates `businesses.rating_count` and `rating_sum`, in the same transaction.
 
 ---
 
@@ -625,7 +737,7 @@ class WebhookEvent(TimestampMixin, Base):
 
 Rules:
 
-- Use this table for Moyasar, WhatsApp provider, and Nextcloud webhooks.
+- Use this table for Moyasar and WhatsApp provider webhooks.
 - The unique constraint prevents duplicate webhook processing.
 - Store raw payloads for audit and debugging.
 
@@ -643,7 +755,8 @@ Tenant + provider availability
 Tenant + booking by date
 Tenant + queue state
 Tenant + ticket status
-Tenant + media assets
+Tenant + business photos by position
+Tenant + reviews by business, newest first
 ```
 
 Avoid over-indexing tables with heavy write traffic. Review query plans periodically.
@@ -667,7 +780,7 @@ Suggested migration naming:
 
 ```text
 alembic revision -m "add_booking_no_show_status"
-alembic revision -m "add_media_asset_thumbnail_path"
+alembic revision -m "add_business_photo_alt_text"
 alembic revision -m "create_webhook_events_table"
 ```
 
@@ -681,7 +794,7 @@ Because NOVA runs on local infrastructure:
 - Use `pg_dump` for logical backups and/or WAL archiving for point-in-time recovery.
 - Store backups on a separate physical disk or offsite storage.
 - Test restore procedures monthly.
-- Nextcloud data must also be backed up.
+- The photo store (`MEDIA_ROOT`) must also be backed up; `business_photos` rows are useless without it.
 - Redis is cache/queue state and may be treated as recreatable, except for critical idempotency keys.
 - Cloudflare Tunnel configuration should be version-controlled.
 
@@ -696,7 +809,7 @@ Update this file whenever:
 - A new index is added.
 - A migration changes tenant isolation behavior.
 - A webhook storage rule changes.
-- Nextcloud media metadata changes.
+- Photo storage layout or metadata changes.
 - Payment or ticket state changes.
 
 This document must always reflect the actual database schema.

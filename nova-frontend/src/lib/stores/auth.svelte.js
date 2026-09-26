@@ -1,6 +1,10 @@
 /**
- * Session state: tokens, and the principal decoded from them for UI purposes
- * (see `$lib/utils/jwt.js` — never treat that decode as verification).
+ * Session state: the access token, and the principal decoded from it for UI
+ * purposes (see `$lib/utils/jwt.js` — never treat that decode as verification).
+ *
+ * The refresh token is not here. It is an httpOnly cookie the API sets at
+ * sign-in, so script on the page, including anything injected into it, cannot
+ * read it. Only the 15-minute access token is kept in localStorage.
  *
  * A Svelte 5 "universal reactive module": top-level `$state`/`$derived` in a
  * `.svelte.js` file is a singleton store importable from anywhere, no context
@@ -25,7 +29,7 @@ function loadPersisted() {
 	}
 }
 
-/** @param {{ accessToken: string, refreshToken: string }|null} value */
+/** @param {{ accessToken: string }|null} value */
 function persist(value) {
 	if (!browser) return;
 	try {
@@ -38,21 +42,23 @@ function persist(value) {
 }
 
 const persisted = loadPersisted();
+// A session saved before the refresh token moved to a cookie: forget the
+// token rather than keep it in storage. Signing in again sets the cookie.
+if (persisted?.refreshToken)
+	persist(persisted.accessToken ? { accessToken: persisted.accessToken } : null);
 
 let accessToken = $state(persisted?.accessToken ?? null);
-let refreshToken = $state(persisted?.refreshToken ?? null);
 /** @type {'anonymous'|'authenticating'|'authenticated'} */
 let status = $state(persisted?.accessToken ? 'authenticated' : 'anonymous');
 
 let principal = $derived(accessToken ? decodeJwtPayload(accessToken) : null);
 
 function save() {
-	persist(accessToken ? { accessToken, refreshToken } : null);
+	persist(accessToken ? { accessToken } : null);
 }
 
 function clear() {
 	accessToken = null;
-	refreshToken = null;
 	status = 'anonymous';
 	save();
 }
@@ -60,7 +66,6 @@ function clear() {
 /** @param {import('../api/auth.js').TokenPair} tokens */
 function applyTokens(tokens) {
 	accessToken = tokens.access_token;
-	refreshToken = tokens.refresh_token;
 	status = 'authenticated';
 	save();
 }
@@ -69,10 +74,9 @@ function applyTokens(tokens) {
 let refreshPromise = null;
 
 async function refresh() {
-	if (!refreshToken) throw new Error('No refresh token to use.');
 	if (!refreshPromise) {
 		refreshPromise = authApi
-			.refresh(refreshToken)
+			.refresh()
 			.then((tokens) => {
 				applyTokens(tokens);
 				return accessToken;
@@ -154,8 +158,9 @@ export const authStore = {
 		clear();
 	},
 
-	/** Clears this tab's session only, without revoking the refresh token elsewhere. */
+	/** Signs this browser out: the server deletes the refresh cookie. Other devices stay signed in. */
 	logout() {
+		authApi.logout().catch(() => {});
 		clear();
 	},
 

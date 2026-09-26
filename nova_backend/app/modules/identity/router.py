@@ -22,6 +22,7 @@ from app.modules.identity.dependencies import (
     get_membership_service_unauthorized,
     get_tenant_service,
 )
+from app.modules.identity.domain import ConsentSource
 from app.modules.identity.models import Customer, Membership, MembershipInvite, Tenant
 from app.modules.identity.schemas import (
     AcceptInviteRequest,
@@ -33,6 +34,7 @@ from app.modules.identity.schemas import (
     MembershipInviteSummary,
     MembershipOut,
     MyAccessOut,
+    MyConsentOut,
     TenantOut,
     UpdateCustomerConsentRequest,
     UpdateMembershipRoleRequest,
@@ -109,8 +111,16 @@ async def create_customer(
     payload: CreateCustomerRequest,
     session: AsyncSession = Depends(get_db_session),
     service: CustomerService = Depends(get_customer_service),
+    principal: Principal = Depends(get_principal),
 ) -> Customer:
-    customer = await service.create(**payload.model_dump())
+    """Adds a customer to this business's book, such as a walk-in at the desk. Staff only.
+
+    The phone number must be unique in the business. Staff may record WhatsApp
+    consent here but not marketing consent, which only the customer can give
+    (`PATCH /customers/me/consent`)."""
+    customer = await service.create(
+        **payload.model_dump(), consent_source=ConsentSource.STAFF, consent_by=principal.subject_id
+    )
     await session.commit()
     return customer
 
@@ -122,6 +132,7 @@ async def list_customers(
     params: PageParams = Depends(),
     service: CustomerService = Depends(get_customer_service),
 ) -> Page[CustomerOut]:
+    """This business's customers. Staff only. `q` matches part of a name or phone number."""
     rows = (
         await service.search(q, limit=params.limit, offset=params.offset)
         if q
@@ -138,7 +149,28 @@ async def get_customer(
     customer_id: UUID,
     service: CustomerService = Depends(get_customer_service),
 ) -> Customer:
+    """One customer, with their consent flags and who last changed each. Staff only."""
     return await service.get(customer_id)
+
+
+@customers_router.patch(
+    "/me/consent",
+    response_model=MyConsentOut,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def update_my_consent(
+    tenant_id: UUID,
+    payload: UpdateCustomerConsentRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: CustomerService = Depends(get_customer_service),
+    principal: Principal = Depends(get_principal),
+) -> Customer:
+    """The signed-in customer's own consent at this salon — the only way to
+    opt in to marketing. Declared before `/{customer_id}/consent`, which
+    would otherwise claim the path and refuse "me" as a UUID."""
+    customer = await service.update_own_consent(principal.subject_id, **payload.model_dump())
+    await session.commit()
+    return customer
 
 
 @customers_router.patch(
@@ -152,9 +184,19 @@ async def update_customer_consent(
     payload: UpdateCustomerConsentRequest,
     session: AsyncSession = Depends(get_db_session),
     service: CustomerService = Depends(get_customer_service),
+    principal: Principal = Depends(get_principal),
 ) -> Customer:
-    """PDPL: withdrawing consent must be as easy as giving it."""
-    customer = await service.update_consent(customer_id, **payload.model_dump())
+    """PDPL: withdrawing consent must be as easy as giving it.
+
+    Staff may record WhatsApp consent and withdraw either flag, but not opt a
+    customer in to marketing: that answers 403 `marketing_consent_customer_only`.
+    """
+    customer = await service.update_consent(
+        customer_id,
+        source=ConsentSource.STAFF,
+        by=principal.subject_id,
+        **payload.model_dump(),
+    )
     await session.commit()
     return customer
 

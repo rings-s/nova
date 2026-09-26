@@ -7,7 +7,15 @@
 /** One decimal number: `24.7`, `-46`, `.5`, `+3.`. Not `1e2`, `0x10`, `NaN`. */
 const NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 
-const SHAPE = 'Enter latitude and longitude, like 24.7136, 46.6753.';
+/**
+ * Marks a message for translation (see `$lib/i18n`). This module stays free
+ * of the i18n runtime so it can be tested in Node; the page translates the
+ * message when it shows it.
+ * @param {string} message
+ */
+const m = (message) => message;
+
+const SHAPE = m('Enter latitude and longitude, like 24.7136, 46.6753.');
 
 /**
  * @typedef {{ status: 'empty' }
@@ -33,10 +41,10 @@ export function parseCoordinates(text) {
 	}
 	const [latitude, longitude] = parts.map(Number);
 	if (latitude < -90 || latitude > 90) {
-		return { status: 'invalid', message: 'Latitude must be between -90 and 90.' };
+		return { status: 'invalid', message: m('Latitude must be between -90 and 90.') };
 	}
 	if (longitude < -180 || longitude > 180) {
-		return { status: 'invalid', message: 'Longitude must be between -180 and 180.' };
+		return { status: 'invalid', message: m('Longitude must be between -180 and 180.') };
 	}
 	return { status: 'ok', latitude, longitude };
 }

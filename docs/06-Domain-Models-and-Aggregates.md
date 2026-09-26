@@ -3,6 +3,7 @@ title: Domain Models and Aggregates
 created: 2026-08-11
 project: NOVA
 type: domain
+status: design
 tags: [domain, ddd, models, aggregates, beauty]
 related_code:
   - app/modules/booking/domain.py
@@ -15,7 +16,7 @@ related_code:
 > [!important] Purpose
 > This document defines the core domain models for NOVA Beauty.
 >
-> These models represent the business truth of the system. FastAPI, SQLAlchemy, PydanticAI, Nextcloud, and Cloudflare are infrastructure concerns and must not dictate the domain model.
+> These models represent the business truth of the system. FastAPI, SQLAlchemy, PydanticAI, the image store, and Cloudflare are infrastructure concerns and must not dictate the domain model.
 
 ---
 
@@ -30,7 +31,7 @@ app/modules/
   booking/domain.py
   queue/domain.py
   payment/domain.py
-  media/domain.py
+  review/domain.py
   notification/domain.
 
 
@@ -53,26 +54,27 @@ Domain files must not contain:
 - SQLAlchemy imports
 - HTTP concerns
 - WhatsApp concerns
-- Nextcloud concerns
+- Storage or image-decoding concerns
 - PydanticAI agent logic
 
 ## 2. Core Aggregates
 
-| Aggregate        | Responsibility                                 |
-| ---------------- | ---------------------------------------------- |
-| **Business**     | Tenant-level business profile and settings     |
-| **Location**     | Physical branch and operating rules            |
-| **Service**      | Bookable beauty/wellness service               |
-| **Provider**     | Staff member or resource performing services   |
-| **Availability** | Bookable time for a provider/service/location  |
-| **Customer**     | End-customer profile and consent               |
-| **Booking**      | Scheduled appointment                          |
-| **Queue**        | Live queue for a location                      |
-| **QueueEntry**   | A customer's position in a queue               |
-| **Ticket**       | Secure virtual QR ticket                       |
-| **Payment**      | Payment intent, capture, refund, webhook state |
-| **MediaAsset**   | Nextcloud-backed media metadata                |
-| **Notification** | Customer communication state                   |
+| Aggregate         | Responsibility                                 |
+| ----------------- | ---------------------------------------------- |
+| **Business**      | Tenant-level business profile and settings     |
+| **Location**      | Physical branch and operating rules            |
+| **Service**       | Bookable beauty/wellness service               |
+| **Provider**      | Staff member or resource performing services   |
+| **Availability**  | Bookable time for a provider/service/location  |
+| **Customer**      | End-customer profile and consent               |
+| **Booking**       | Scheduled appointment                          |
+| **Queue**         | Live queue for a location                      |
+| **QueueEntry**    | A customer's position in a queue               |
+| **Ticket**        | Secure virtual QR ticket                       |
+| **Payment**       | Payment intent, capture, refund, webhook state |
+| **BusinessPhoto** | Cover/gallery index; files in the image store  |
+| **Review**        | Verified 1-5 rating of one completed booking   |
+| **Notification**  | Customer communication state                   |
 
 ## 3. Shared Value Objects
 
@@ -395,7 +397,8 @@ class Payment:
 - Walk-ins and appointments may share the same provider timeline.
 - Queue ordering must be deterministic.
 - Ticket QR payloads must contain only secure identifiers and signatures.
-- Media files must be stored in Nextcloud, not in PostgreSQL.
+- Photo files must be stored in the image store, not in PostgreSQL; only NOVA-re-encoded images are stored.
+- A review rates exactly one completed booking, by that booking's customer, once.
 
 ## 9. Domain Exceptions
 

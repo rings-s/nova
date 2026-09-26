@@ -38,6 +38,7 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/auth/register"),  # per-IP rate limit
         ("POST", "/auth/login"),  # per-IP rate limit, account lockout
         ("POST", "/auth/refresh"),  # the refresh token itself
+        ("POST", "/auth/logout"),  # only deletes the caller's own cookie; per-IP limit
         ("POST", "/webhooks/moyasar"),  # the gateway's signature over the raw body
     }
 )
@@ -85,6 +86,8 @@ ROLE_GATED_ROUTES: dict[tuple[str, str], frozenset[StaffPermission]] = {
     ("POST", f"{_BILLING}/subscriptions"): _MANAGE,
     ("POST", f"{_BILLING}/subscriptions/{{business_id}}/plan"): _MANAGE,
     ("POST", f"{_BILLING}/subscriptions/{{business_id}}/cancel"): _MANAGE,
+    ("POST", f"{_BILLING}/subscriptions/{{business_id}}/checkout"): _MANAGE,
+    ("POST", f"{_BILLING}/checkouts/{{checkout_id}}/sync"): _MANAGE,
     ("GET", f"{_BILLING}/subscriptions/{{business_id}}"): _FINANCIALS,
     ("GET", f"{_BILLING}/invoices"): _FINANCIALS,
     ("GET", f"{_BILLING}/invoices/{{invoice_id}}"): _FINANCIALS,
@@ -243,3 +246,15 @@ def test_every_exemption_still_names_a_real_route() -> None:
     assert routes >= SELF_AUTHORIZING_TENANT_ROUTES
     assert routes >= set(ROLE_GATED_ROUTES) | UNGATED_BILLING_ROUTES
     assert any(path.startswith(PUBLIC_PREFIX) for _, path in routes)
+
+
+def test_the_marketplace_assistant_authenticates_although_it_sits_under_discovery() -> None:
+    """`/discovery/` is otherwise anonymous (ADR-0010). The assistant books in the
+    caller's name, so its routes must know who the caller is."""
+    assistant = [(m, p, r) for m, p, r in _routes() if p.startswith("/discovery/ai/")]
+    assert {(m, p) for m, p, _ in assistant} == {
+        ("POST", "/discovery/ai/chat"),
+        ("GET", "/discovery/ai/status"),
+    }
+    for _, path, route in assistant:
+        assert _depends_on(route.dependant, get_principal), path

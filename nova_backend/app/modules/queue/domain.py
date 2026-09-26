@@ -410,9 +410,20 @@ def verify_qr_token(presented_token: str, *, stored_hash: str) -> bool:
     return hmac.compare_digest(hash_qr_token(presented_token), stored_hash)
 
 
-def default_ticket_expiry(*, now: datetime, ttl_hours: int) -> datetime:
-    """A ticket is a bearer credential; an unbounded one is a standing key."""
-    return now + timedelta(hours=ttl_hours)
+def default_ticket_expiry(
+    *, now: datetime, ttl_hours: int, appointment_ends_at: datetime | None = None
+) -> datetime:
+    """A ticket is a bearer credential; an unbounded one is a standing key.
+
+    A walk-in's ticket lasts `ttl_hours`. A booking's is issued when the
+    booking is made, often days ahead, so it lasts until the appointment ends
+    plus the same allowance for a customer running late. Tied to the
+    appointment rather than open-ended, it stops working once the visit is over.
+    """
+    expiry = now + timedelta(hours=ttl_hours)
+    if appointment_ends_at is not None:
+        expiry = max(expiry, appointment_ends_at + timedelta(hours=ttl_hours))
+    return expiry
 
 
 @dataclass(frozen=True)

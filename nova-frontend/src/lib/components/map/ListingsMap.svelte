@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	// Leaflet's own stylesheet. Safe to import here: it is CSS, not the library,
 	// and the library itself is only ever loaded in the browser (see onMount).
 	import 'leaflet/dist/leaflet.css';
@@ -141,7 +142,7 @@
 				icon: pinIcon(L),
 				// Leaflet sets this as a property, not markup, and it becomes the
 				// pin's accessible name: the pin is a keyboard-focusable button.
-				title: `${pickBilingual(listing, 'name', 'en')} — ${listing.location_name_en}`,
+				title: `${pickBilingual(listing, 'name')} — ${pickBilingual(listing, 'location_name')}`,
 				riseOnHover: true
 			})
 				.on('click', () => onselect?.(listing))
@@ -188,7 +189,7 @@
 			icon: hereIcon(L),
 			draggable: Boolean(onmovehere),
 			keyboard: true,
-			title: 'You are here — drag to correct',
+			title: t('You are here — drag to correct'),
 			zIndexOffset: 1000
 		}).addTo(hereLayer);
 		marker.on('dragend', () => {
@@ -234,14 +235,15 @@
 	<div
 		bind:this={container}
 		class="absolute inset-0"
+		dir="ltr"
 		role="region"
-		aria-label="Map of salons and spas"
+		aria-label={t('Map of salons and spas')}
 	></div>
 
 	{#if failed}
 		<div class="absolute inset-0 flex items-center justify-center p-6 text-center">
 			<p class="text-sm text-fg-muted">
-				The map could not be loaded. The list still shows every result.
+				{t('The map could not be loaded. The list still shows every result.')}
 			</p>
 		</div>
 	{:else}
@@ -249,12 +251,12 @@
 			{#if areaActive}
 				<button type="button" class={overlayButton} onclick={() => onclear?.()}>
 					<Icon name="x" class="size-3.5" />
-					Clear area
+					{t('Clear area')}
 				</button>
 			{:else}
 				<button type="button" class={overlayButton} onclick={searchThisArea} disabled={!ready}>
 					<Icon name="search" class="size-3.5" />
-					Search this area
+					{t('Search this area')}
 				</button>
 			{/if}
 		</div>
@@ -262,10 +264,12 @@
 		<div class="pointer-events-none absolute start-3 bottom-8 z-[1000] max-w-[70%]">
 			{#if truncated}
 				<p class={overlayNote}>
-					Showing the first {listings.length} branches. Zoom in and search an area to see more.
+					{t('Showing the first {count} branches. Zoom in and search an area to see more.', {
+						count: listings.length
+					})}
 				</p>
 			{:else if ready && !loading && listings.length === 0}
-				<p class={overlayNote}>No branches with a location match this search.</p>
+				<p class={overlayNote}>{t('No branches with a location match this search.')}</p>
 			{/if}
 		</div>
 	{/if}

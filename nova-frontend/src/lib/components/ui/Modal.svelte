@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { iconButton } from './styles.js';
 
 	/**
@@ -69,7 +70,7 @@
 					type="button"
 					onclick={close}
 					class={`${iconButton} -me-2 size-8`}
-					aria-label="Close"
+					aria-label={t('Close')}
 				>
 					<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
 						<path

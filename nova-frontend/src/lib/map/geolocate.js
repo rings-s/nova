@@ -233,37 +233,64 @@ export async function locate(options) {
  * "12 m", "850 m", "3.4 km", "40 km".
  * @param {number} metres
  */
-export function describeAccuracy(metres) {
-	if (metres < 1000) return `${Math.round(metres)} m`;
+/**
+ * English with `{name}` placeholders filled: what these messages are when no
+ * translator is passed. The pages pass `$lib/i18n`'s `t`; this module stays
+ * free of it so it can be tested in Node.
+ * @param {string} message
+ * @param {Record<string, unknown>} [params]
+ */
+function plain(message, params) {
+	return message.replace(/\{(\w+)\}/g, (whole, name) =>
+		params && name in params ? String(params[name]) : whole
+	);
+}
+
+/**
+ * @param {number} metres
+ * @param {typeof plain} [t]
+ */
+export function describeAccuracy(metres, t = plain) {
+	if (metres < 1000) return t('{n} m', { n: Math.round(metres) });
 	const km = metres / 1000;
-	return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+	return t('{n} km', { n: km < 10 ? km.toFixed(1) : Math.round(km) });
 }
 
 /**
  * What to tell the owner about a fix.
  * @param {Fix} fix
+ * @param {typeof plain} [t]
  * @returns {{ tone: 'success' | 'warning', text: string, pin: boolean }}
  */
-export function explainFix(fix) {
-	const within = describeAccuracy(fix.accuracy);
+export function explainFix(fix, t = plain) {
+	const within = describeAccuracy(fix.accuracy, t);
 	if (fix.accuracy <= PRECISE_ENOUGH_M) {
 		return {
 			tone: 'success',
 			pin: true,
-			text: `Located you to within about ${within}. Drag the pin if it is not exactly at your branch.`
+			text: t(
+				'Located you to within about {within}. Drag the pin if it is not exactly at your branch.',
+				{ within }
+			)
 		};
 	}
 	if (fix.accuracy <= PIN_WORTHY_M) {
 		return {
 			tone: 'success',
 			pin: true,
-			text: `Located you to within about ${within}, which is approximate. Zoom in and drag the pin to your branch.`
+			text: t(
+				'Located you to within about {within}, which is approximate. Zoom in and drag the pin to your branch.',
+				{ within }
+			)
 		};
 	}
 	return {
 		tone: 'warning',
 		pin: false,
-		text: `Your device could only place you within about ${within}, which is too rough for a pin, so none was placed. Zoom in and click your branch on the map.`
+		text: t(
+			'Your device could only place you within about {within}, which is too rough for a pin, so none was placed. Zoom in and click your branch on the map.',
+			{ within }
+		)
 	};
 }
 
@@ -272,23 +299,31 @@ export function explainFix(fix) {
  * @param {LocateError} error
  * @param {{ origin?: string, linux?: boolean }} [context] `linux` adds the hint that
  *   matters there: browsers lean on a system service that is often switched off.
+ * @param {typeof plain} [t]
  * @returns {string}
  */
-export function explainLocateError(error, { origin = '', linux = false } = {}) {
-	const instead = 'Click the map, paste coordinates, or type your city instead.';
+export function explainLocateError(error, { origin = '', linux = false } = {}, t = plain) {
+	const instead = t('Click the map, paste coordinates, or type your city instead.');
 	switch (error.kind) {
 		case 'unsupported':
-			return `This browser cannot share its location. ${instead}`;
+			return `${t('This browser cannot share its location.')} ${instead}`;
 		case 'insecure':
-			return `Your browser only shares your location with secure pages (https, or http://localhost), and this page is at ${origin || 'an insecure address'}. ${instead}`;
+			return `${t(
+				'Your browser only shares your location with secure pages (https, or http://localhost), and this page is at {origin}.',
+				{ origin: origin || t('an insecure address') }
+			)} ${instead}`;
 		case 'denied':
-			return `Location access is blocked for this site. Click the icon at the left of the address bar, set Location to Allow, and try again. ${instead}`;
+			return `${t(
+				'Location access is blocked for this site. Click the icon at the left of the address bar, set Location to Allow, and try again.'
+			)} ${instead}`;
 		case 'timeout':
-			return `Your browser did not answer in time. Try again, or ${instead.charAt(0).toLowerCase()}${instead.slice(1)}`;
+			return t(
+				'Your browser did not answer in time. Try again, or click the map, paste coordinates, or type your city instead.'
+			);
 		default:
-			return `Your browser could not work out where you are.${
+			return `${t('Your browser could not work out where you are.')}${
 				linux
-					? ' On Linux the browser relies on the system location service, which is often off (on GNOME: Settings, Privacy & Security, Location Services).'
+					? ` ${t('On Linux the browser relies on the system location service, which is often off (on GNOME: Settings, Privacy & Security, Location Services).')}`
 					: ''
 			} ${instead}`;
 	}

@@ -53,9 +53,25 @@ class CustomerOut(ApiSchema):
     preferred_language: str
     marketing_consent: bool
     whatsapp_consent: bool
+    #: Who last changed each flag ("customer" or "staff") and when; null until
+    #: the flag is first turned on.
+    marketing_consent_source: str | None = None
+    marketing_consent_at: datetime | None = None
+    whatsapp_consent_source: str | None = None
+    whatsapp_consent_at: datetime | None = None
     notes: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class MyConsentOut(ApiSchema):
+    """What a customer sees of their own record: their consent, and nothing
+    staff wrote about them (`CustomerOut.notes`)."""
+
+    marketing_consent: bool
+    whatsapp_consent: bool
+    marketing_consent_at: datetime | None = None
+    whatsapp_consent_at: datetime | None = None
 
 
 class CreateMembershipRequest(ApiSchema):
@@ -152,6 +168,10 @@ class RegisterRequest(ApiSchema):
 class LoginRequest(ApiSchema):
     email: str = Field(max_length=255)
     password: str = Field(max_length=200)
+    #: For browsers: set the refresh token as an httpOnly cookie instead of
+    #: returning it, so no script on the page ever holds it. API clients leave
+    #: it off and keep the token themselves.
+    refresh_cookie: bool = False
 
     @field_validator("email")
     @classmethod
@@ -160,7 +180,9 @@ class LoginRequest(ApiSchema):
 
 
 class RefreshRequest(ApiSchema):
-    refresh_token: str
+    #: Omit it to use the cookie a `refresh_cookie` sign-in set; the new refresh
+    #: token then replaces the cookie and is not returned.
+    refresh_token: str | None = Field(default=None, max_length=4096)
 
 
 class ConfirmPhoneVerificationRequest(ApiSchema):
@@ -173,7 +195,8 @@ class ConfirmPhoneVerificationRequest(ApiSchema):
 
 class TokenOut(ApiSchema):
     access_token: str
-    refresh_token: str
+    #: None when it was set as the httpOnly refresh cookie instead.
+    refresh_token: str | None
     token_type: str
     expires_in: int
 
@@ -182,3 +205,6 @@ class UserOut(ApiSchema):
     id: str
     email: str
     full_name: str
+    #: A NOVA administrator (`User.is_superuser`). Tells the web app to show
+    #: the admin pages; every admin route checks it for itself.
+    is_superuser: bool = False

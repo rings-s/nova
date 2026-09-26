@@ -10,9 +10,11 @@ import { http, tenantPath } from './client.js';
 
 /**
  * @typedef {'solo'|'studio'|'chain'} PlanTier
- * @typedef {'trialing'|'active'|'past_due'|'cancelled'} SubscriptionStatus
+ * `pending_payment`: a paid plan chosen but not paid for yet; billed and gated as
+ * Solo until `startPlanCheckout` is paid.
+ * @typedef {'trialing'|'pending_payment'|'active'|'past_due'|'cancelled'} SubscriptionStatus
  * @typedef {'draft'|'issued'|'paid'|'overdue'|'void'} InvoiceStatus
- * @typedef {'new_marketplace'|'prepaid_online'} CommissionClass
+ * @typedef {'new_marketplace'|'repeat'|'direct'|'exempt'} CommissionClass
  * @typedef {'draft'|'accrued'|'invoiced'|'reversed'} CommissionLineStatus
  */
 
@@ -29,6 +31,8 @@ import { http, tenantPath } from './client.js';
  * @property {boolean} priced_per_location
  * @property {number|null} max_seats
  * @property {number|null} max_locations
+ * @property {number|null} whatsapp_reminders_per_month Null means unlimited.
+ * @property {number} contract_months 0 means month to month.
  */
 
 /**
@@ -42,6 +46,7 @@ import { http, tenantPath } from './client.js';
  * @property {number} seats
  * @property {number} locations
  * @property {boolean} cancel_at_period_end
+ * @property {boolean} annual Billed yearly; `monthly_amount` is still per month.
  * @property {string} monthly_amount
  * @property {string} currency
  * @property {boolean} marketplace_listing_hidden True means 21+ days overdue: the
@@ -153,6 +158,46 @@ export function changePlan(tenantId, businessId, { tier, annual = false }) {
 		tier,
 		annual
 	});
+}
+
+/**
+ * One payment for a paid plan, on Moyasar's hosted page.
+ * @typedef {Object} PlanCheckout
+ * @property {string} id
+ * @property {string} business_id
+ * @property {PlanTier} tier
+ * @property {boolean} annual
+ * @property {'pending'|'paid'|'failed'} status
+ * @property {string} net_amount
+ * @property {string} vat_amount
+ * @property {string} total_amount
+ * @property {string} currency
+ * @property {string} covers_from
+ * @property {string} covers_until First day NOT covered.
+ * @property {string|null} paid_at
+ * @property {string|null} redirect_url Moyasar's page; only when just opened.
+ */
+
+/**
+ * Opens Moyasar's payment page for a plan waiting on payment (owner only).
+ * Moyasar sends the owner back to `returnUrl?checkout=<id>`; call
+ * `syncPlanCheckout` from there. 503 `integration_not_configured` without keys.
+ * @param {string} tenantId @param {string} businessId @param {string} returnUrl
+ * @returns {Promise<PlanCheckout>}
+ */
+export function startPlanCheckout(tenantId, businessId, returnUrl) {
+	return http.post(tenantPath(tenantId, `/billing/subscriptions/${businessId}/checkout`), {
+		return_url: returnUrl
+	});
+}
+
+/**
+ * Asks Moyasar how the payment went and activates the plan if it was paid.
+ * Safe to call again.
+ * @param {string} tenantId @param {string} checkoutId @returns {Promise<PlanCheckout>}
+ */
+export function syncPlanCheckout(tenantId, checkoutId) {
+	return http.post(tenantPath(tenantId, `/billing/checkouts/${checkoutId}/sync`));
 }
 
 /** @param {string} tenantId @param {string} businessId @param {boolean} [atPeriodEnd] @returns {Promise<Subscription>} */

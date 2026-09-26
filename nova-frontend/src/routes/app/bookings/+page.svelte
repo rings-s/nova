@@ -1,4 +1,5 @@
 <script>
+	import { t, tp } from '$lib/i18n/index.svelte.js';
 	/**
 	 * The day sheet: one provider's appointments for one day, and the
 	 * check-in → in-service → complete lifecycle staff drive by hand.
@@ -178,7 +179,7 @@
 				if (startsOnScreenDay) bookings = [...bookings, updated];
 			}
 			rescheduleTarget = null;
-			toastStore.success('Booking rescheduled.');
+			toastStore.success(t('Booking rescheduled.'));
 		} catch (err) {
 			toastStore.fromError(err);
 		} finally {
@@ -195,67 +196,79 @@
 	});
 </script>
 
-<svelte:head><title>Bookings — NOVA</title></svelte:head>
+<svelte:head><title>{t('Bookings')} — NOVA</title></svelte:head>
 
-<PageHeader eyebrow="Operate" title="Bookings" subtitle="One provider's day sheet." />
+<PageHeader
+	eyebrow={t('Operate')}
+	title={t('Bookings')}
+	subtitle={t("One provider's day sheet.")}
+/>
 
 {#if !businessId}
-	<Alert tone="info">Set up your storefront in Catalog first.</Alert>
+	<Alert tone="info">{t('Set up your storefront in Catalog first.')}</Alert>
 {:else if loadingSetup}
 	<div class="flex justify-center py-12"><Spinner /></div>
 {:else if setupErrorMessage}
 	<Alert tone="error">{setupErrorMessage}</Alert>
 {:else if locations.length === 0}
-	<EmptyState title="Add a location first" description="Bookings belong to one branch." />
+	<EmptyState title={t('Add a location first')} description={t('Bookings belong to one branch.')} />
 {:else}
 	<div class="mb-6 flex flex-wrap items-end gap-3">
 		<div class="w-full sm:w-56">
 			<Select
-				label="Location"
+				label={t('Location')}
 				bind:value={selectedLocationId}
-				options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name', 'en') }))}
+				options={locations.map((l) => ({ value: l.id, label: pickBilingual(l, 'name') }))}
 			/>
 		</div>
 		<div class="w-full sm:w-56">
 			<Select
-				label="Provider"
+				label={t('Provider')}
 				disabled={providers.length === 0}
 				bind:value={selectedProviderId}
-				placeholder={providers.length === 0 ? 'No providers at this location' : null}
-				options={providers.map((p) => ({ value: p.id, label: pickBilingual(p, 'name', 'en') }))}
+				placeholder={providers.length === 0 ? t('No providers at this location') : null}
+				options={providers.map((p) => ({ value: p.id, label: pickBilingual(p, 'name') }))}
 			/>
 		</div>
 		<div class="flex items-end gap-1.5">
-			<Button variant="outline" size="icon" onclick={() => shiftDay(-1)} aria-label="Previous day">
+			<Button
+				variant="outline"
+				size="icon"
+				onclick={() => shiftDay(-1)}
+				aria-label={t('Previous day')}
+			>
 				<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
 			</Button>
 			<input
 				type="date"
-				aria-label="Day"
+				aria-label={t('Day')}
 				bind:value={selectedDate}
 				class={`${fieldBase} ${fieldBorder(false)} h-10 w-40`}
 			/>
-			<Button variant="outline" size="icon" onclick={() => shiftDay(1)} aria-label="Next day">
+			<Button variant="outline" size="icon" onclick={() => shiftDay(1)} aria-label={t('Next day')}>
 				<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
 			</Button>
 		</div>
 	</div>
 
 	{#if !selectedProviderId}
-		<EmptyState title="Add a provider first" description="The day sheet is per provider." />
+		<EmptyState
+			title={t('Add a provider first')}
+			description={t('The day sheet is per provider.')}
+		/>
 	{:else if loading}
 		<div class="flex justify-center py-12"><Spinner /></div>
 	{:else if loadErrorMessage}
 		<Alert tone="error">{loadErrorMessage}</Alert>
 	{:else if bookings.length === 0}
-		<EmptyState title="Nothing booked" description={formatDate(selectedDate, 'en')}>
+		<EmptyState title={t('Nothing booked')} description={formatDate(selectedDate)}>
 			{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
 		</EmptyState>
 	{:else}
 		<div class="mb-3 flex items-baseline justify-between">
-			<h2 class="text-sm font-semibold text-fg">{formatDate(selectedDate, 'en')}</h2>
+			<h2 class="text-sm font-semibold text-fg">{formatDate(selectedDate)}</h2>
 			<p class="text-xs text-fg-muted">
-				{bookings.length} appointment{bookings.length === 1 ? '' : 's'}
+				{tp(bookings.length, '{count} appointment', '{count} appointments')}
 			</p>
 		</div>
 		<div class="flex flex-col gap-3">
@@ -268,7 +281,7 @@
 								loading={actingId === booking.id}
 								onclick={() => runAction(booking, () => confirmBooking(tenantId, booking.id))}
 							>
-								Confirm
+								{t('Confirm')}
 							</Button>
 						{/if}
 						{#if booking.status === 'confirmed'}
@@ -277,7 +290,7 @@
 								loading={actingId === booking.id}
 								onclick={() => runAction(booking, () => checkInBooking(tenantId, booking.id))}
 							>
-								Check in
+								{t('Check in')}
 							</Button>
 							<Button
 								size="sm"
@@ -285,7 +298,7 @@
 								loading={actingId === booking.id}
 								onclick={() => runAction(booking, () => markBookingNoShow(tenantId, booking.id))}
 							>
-								No-show
+								{t('No-show')}
 							</Button>
 						{/if}
 						{#if booking.status === 'checked_in'}
@@ -294,7 +307,7 @@
 								loading={actingId === booking.id}
 								onclick={() => runAction(booking, () => startBookingService(tenantId, booking.id))}
 							>
-								Start service
+								{t('Start service')}
 							</Button>
 						{/if}
 						{#if booking.status === 'in_service'}
@@ -303,12 +316,12 @@
 								loading={actingId === booking.id}
 								onclick={() => runAction(booking, () => completeBooking(tenantId, booking.id))}
 							>
-								Complete
+								{t('Complete')}
 							</Button>
 						{/if}
 						{#if ['draft', 'pending_payment', 'confirmed'].includes(booking.status)}
 							<Button size="sm" variant="outline" onclick={() => (rescheduleTarget = booking)}>
-								Reschedule
+								{t('Reschedule')}
 							</Button>
 							<Button
 								size="sm"
@@ -317,7 +330,7 @@
 								onclick={() =>
 									runAction(booking, () => cancelBooking(tenantId, booking.id, { byStaff: true }))}
 							>
-								Cancel
+								{t('Cancel')}
 							</Button>
 						{/if}
 					{/snippet}
@@ -329,7 +342,7 @@
 
 <Modal
 	open={rescheduleTarget !== null}
-	title="Reschedule"
+	title={t('Reschedule')}
 	onclose={() => (rescheduleTarget = null)}
 >
 	{#if rescheduleTarget}

@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -22,13 +23,13 @@
 	});
 
 	function handleSuccess() {
-		toastStore.success('Signed in successfully.');
+		toastStore.success(t('Signed in successfully.'));
 		leave();
 	}
 </script>
 
 <svelte:head>
-	<title>Sign in — NOVA</title>
+	<title>{t('Sign in')} — NOVA</title>
 </svelte:head>
 
 <div class="animate-scale-in rounded-panel border border-line bg-surface p-7 shadow-overlay sm:p-9">
@@ -36,17 +37,19 @@
 	<div class="flex items-center justify-between gap-4">
 		<Logo />
 
-		<Badge tone="accent" size="sm">GCC Salon OS</Badge>
+		<Badge tone="accent" size="sm">{t('GCC Salon OS')}</Badge>
 	</div>
 
 	<!-- Intro -->
 	<div class="mt-8">
-		<p class="text-xs font-semibold tracking-wider text-accent uppercase">Welcome back</p>
+		<p class="text-xs font-semibold tracking-wider text-accent uppercase">{t('Welcome back')}</p>
 
-		<h1 class="mt-2 text-display-md font-semibold tracking-tight text-fg">Sign in to NOVA</h1>
+		<h1 class="mt-2 text-display-md font-semibold tracking-tight text-fg">
+			{t('Sign in to NOVA')}
+		</h1>
 
 		<p class="mt-2 max-w-sm text-sm leading-6 text-fg-muted">
-			Access your salon workspace, front desk, and personal appointments.
+			{t('Access your salon workspace, front desk, and personal appointments.')}
 		</p>
 	</div>
 
@@ -58,9 +61,9 @@
 	<!-- Register -->
 	<div class="mt-8 border-t border-line-subtle pt-6 text-center">
 		<p class="text-sm text-fg-muted">
-			New to NOVA?
+			{t('New to NOVA?')}
 			<a href={resolve('/register')} class="ms-1 font-semibold text-accent hover:underline">
-				Create an account
+				{t('Create an account')}
 			</a>
 		</p>
 	</div>

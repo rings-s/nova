@@ -1,4 +1,6 @@
 <script>
+	import { t, i18n } from '$lib/i18n/index.svelte.js';
+	import { pickBilingual } from '$lib/utils/bilingual.js';
 	/**
 	 * One chart from the catalog (docs/13 section 7): fetches it, reads the
 	 * Plotly figure into a chart model (`chartData.js`) and draws it with the
@@ -12,6 +14,8 @@
 	 *   window are expected states, shown quietly rather than as errors.
 	 * - A plan-gated chart the business's plan lacks renders locked, without
 	 *   a request that would only 403.
+	 * - Given `chart` (one an AI agent already rendered), nothing is fetched and
+	 *   the header comes from the chart itself; `entry` may then be omitted.
 	 */
 	import { resolve } from '$app/paths';
 	import { getChart } from '../../api/analytics.js';
@@ -32,7 +36,8 @@
 	 * @type {{
 	 *   tenantId: string,
 	 *   businessId: string,
-	 *   entry: import('../../api/analytics.js').ChartCatalogEntry,
+	 *   entry?: import('../../api/analytics.js').ChartCatalogEntry|null,
+	 *   chart?: import('../../api/analytics.js').Chart|null,
 	 *   dateFrom?: string|null,
 	 *   dateTo?: string|null,
 	 *   currency?: string,
@@ -43,7 +48,8 @@
 	let {
 		tenantId,
 		businessId,
-		entry,
+		entry = null,
+		chart: provided = null,
 		dateFrom = null,
 		dateTo = null,
 		currency = 'SAR',
@@ -60,8 +66,14 @@
 	let showTable = $state(false);
 
 	$effect(() => {
-		if (locked) return;
-		const params = { businessId, dateFrom, dateTo };
+		if (provided) {
+			chart = provided;
+			loading = false;
+			return;
+		}
+		if (locked || !entry) return;
+		// The backend names series and categories in the language asked for.
+		const params = { businessId, dateFrom, dateTo, locale: i18n.locale };
 		let cancelled = false;
 		loading = true;
 		getChart(tenantId, entry.chart_id, params)
@@ -82,6 +94,11 @@
 			cancelled = true;
 		};
 	});
+
+	// A catalog entry names the chart in both languages; an agent's chart
+	// arrives already titled in the language the turn was asked in.
+	let heading = $derived(entry ? pickBilingual(entry, 'title') : (chart?.title ?? ''));
+	let subheading = $derived(entry ? pickBilingual(entry, 'question') : (chart?.description ?? ''));
 
 	let model = $derived(chart ? chartModel(chart) : null);
 	let empty = $derived(model ? !hasData(model) : false);
@@ -115,21 +132,23 @@
 	<header class="mb-4 flex items-start justify-between gap-3">
 		<div class="min-w-0">
 			<h3 id={`${uid}-title`} class="flex items-center gap-2 text-sm font-semibold text-fg">
-				{entry.title_en}
+				{heading}
 				{#if locked}<Icon name="lock" class="size-3.5 text-fg-subtle" />{/if}
 			</h3>
-			<p class="mt-0.5 text-[13px] text-fg-muted">{entry.question_en}</p>
+			<p class="mt-0.5 text-[13px] text-fg-muted">{subheading}</p>
 		</div>
 		{#if model && !empty && !locked}
 			<button
 				type="button"
 				class={[
 					'flex size-8 shrink-0 items-center justify-center rounded-control focus-ring transition-colors duration-fast',
-					showTable ? 'bg-accent-soft text-accent' : 'text-fg-subtle hover:bg-surface-muted hover:text-fg'
+					showTable
+						? 'bg-accent-soft text-accent'
+						: 'text-fg-subtle hover:bg-surface-muted hover:text-fg'
 				].join(' ')}
 				aria-pressed={showTable}
-				aria-label={showTable ? 'Show chart' : 'Show as table'}
-				title={showTable ? 'Show chart' : 'Show as table'}
+				aria-label={showTable ? t('Show chart') : t('Show as table')}
+				title={showTable ? t('Show chart') : t('Show as table')}
 				onclick={() => (showTable = !showTable)}
 			>
 				<Icon name={showTable ? 'chart-bar' : 'table'} class="size-4" />
@@ -138,19 +157,28 @@
 	</header>
 
 	{#if locked}
-		<div class="relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-control">
-			<div class="absolute inset-0 flex items-end gap-2 px-4 pb-3 opacity-40 blur-[2px]" aria-hidden="true">
+		<div
+			class="relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-control"
+		>
+			<div
+				class="absolute inset-0 flex items-end gap-2 px-4 pb-3 opacity-40 blur-[2px]"
+				aria-hidden="true"
+			>
 				{#each [38, 62, 45, 80, 56, 70, 48, 90, 64, 52] as h, i (i)}
 					<div class="flex-1 rounded-t-[4px] bg-line-strong" style:height={`${h}%`}></div>
 				{/each}
 			</div>
-			<div class="relative flex flex-col items-center gap-2 rounded-card border border-line bg-surface/90 px-5 py-4 text-center shadow-raised backdrop-blur">
-				<span class="flex size-9 items-center justify-center rounded-full bg-accent-soft text-accent">
+			<div
+				class="relative flex flex-col items-center gap-2 rounded-card border border-line bg-surface/90 px-5 py-4 text-center shadow-raised backdrop-blur"
+			>
+				<span
+					class="flex size-9 items-center justify-center rounded-full bg-accent-soft text-accent"
+				>
 					<Icon name="lock" class="size-4" />
 				</span>
-				<p class="text-sm font-medium text-fg">Not in your current plan</p>
+				<p class="text-sm font-medium text-fg">{t('Not in your current plan')}</p>
 				<a href={resolve('/app/billing')} class="text-sm font-semibold text-accent hover:underline">
-					See plans
+					{t('See plans')}
 				</a>
 			</div>
 		</div>
@@ -158,7 +186,9 @@
 		<Skeleton class="h-56 w-full rounded-control" />
 	{:else if error && !chart}
 		{#if errorIsExpected}
-			<div class="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 rounded-control bg-surface-sunken p-6 text-center">
+			<div
+				class="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 rounded-control bg-surface-sunken p-6 text-center"
+			>
 				<Icon name="clock" class="size-5 text-fg-subtle" />
 				<p class="max-w-xs text-sm text-fg-muted">{error}</p>
 			</div>
@@ -167,13 +197,18 @@
 		{/if}
 	{:else if model}
 		<div
-			class={['flex flex-1 flex-col transition-opacity duration-base', loading ? 'opacity-50' : ''].join(' ')}
+			class={[
+				'flex flex-1 flex-col transition-opacity duration-base',
+				loading ? 'opacity-50' : ''
+			].join(' ')}
 			aria-busy={loading}
 		>
 			{#if empty}
-				<div class="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 rounded-control bg-surface-sunken p-6 text-center">
+				<div
+					class="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 rounded-control bg-surface-sunken p-6 text-center"
+				>
 					<Icon name="chart-bar" class="size-5 text-fg-subtle" />
-					<p class="text-sm text-fg-muted">Nothing in this window yet.</p>
+					<p class="text-sm text-fg-muted">{t('Nothing in this window yet.')}</p>
 				</div>
 			{:else if showTable && table}
 				<div class="max-h-72 overflow-auto rounded-control border border-line-subtle">
@@ -183,8 +218,10 @@
 								{#each table.head as cell, i (i)}
 									<th
 										scope="col"
-										class={['px-3 py-2 font-medium whitespace-nowrap text-fg-muted', i ? 'text-end' : 'text-start'].join(' ')}
-										>{cell}</th
+										class={[
+											'px-3 py-2 font-medium whitespace-nowrap text-fg-muted',
+											i ? 'text-end' : 'text-start'
+										].join(' ')}>{cell}</th
 									>
 								{/each}
 							</tr>
@@ -194,7 +231,11 @@
 								<tr>
 									{#each row as cell, i (i)}
 										{#if i === 0}
-											<th scope="row" class="px-3 py-1.5 text-start font-normal whitespace-nowrap text-fg-secondary">{cell}</th>
+											<th
+												scope="row"
+												class="px-3 py-1.5 text-start font-normal whitespace-nowrap text-fg-secondary"
+												>{cell}</th
+											>
 										{:else}
 											<td class="px-3 py-1.5 text-end text-fg tabular-nums">{cell}</td>
 										{/if}
@@ -216,9 +257,9 @@
 					</ul>
 				{/if}
 				{#if model.type === 'columns'}
-					<ColumnChart {model} {currency} label={entry.title_en} />
+					<ColumnChart {model} {currency} label={heading} />
 				{:else if model.type === 'line'}
-					<LineChart {model} {currency} label={entry.title_en} />
+					<LineChart {model} {currency} label={heading} />
 				{:else if model.type === 'combo'}
 					<!-- Two measures on one x axis: two charts, never one chart with two y-axes. -->
 					<ColumnChart
@@ -229,7 +270,12 @@
 						label={model.columns.series[0]?.label}
 					/>
 					<p class="mt-3 mb-1 text-xs font-medium text-fg-muted">{model.line.series[0]?.label}</p>
-					<LineChart model={model.line} {currency} height={130} label={model.line.series[0]?.label} />
+					<LineChart
+						model={model.line}
+						{currency}
+						height={130}
+						label={model.line.series[0]?.label}
+					/>
 				{:else if model.type === 'ranked'}
 					<RankedBars {model} {currency} />
 				{:else if model.type === 'parts'}
@@ -240,6 +286,6 @@
 			{/if}
 		</div>
 	{:else}
-		<Alert tone="warning">This chart can't be shown here yet.</Alert>
+		<Alert tone="warning">{t("This chart can't be shown here yet.")}</Alert>
 	{/if}
 </section>

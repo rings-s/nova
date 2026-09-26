@@ -3,6 +3,7 @@ title: RFC Template
 created: 2026-08-11
 project: NOVA
 type: template
+status: template
 tags: [rfc, process, architecture]
 ---
 

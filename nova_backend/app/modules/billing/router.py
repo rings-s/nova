@@ -25,16 +25,23 @@ from app.core.pagination import PageParams
 from app.core.schemas import Page
 from app.core.throttling import write_rate_limit
 from app.modules.billing.dependencies import get_billing_service
-from app.modules.billing.domain import CommissionLine, Invoice, Subscription
+from app.modules.billing.domain import (
+    CommissionLine,
+    Invoice,
+    Subscription,
+    SubscriptionCheckout,
+)
 from app.modules.billing.schemas import (
     CancelSubscriptionRequest,
     ChangePlanRequest,
+    CheckoutOut,
     CommissionExplanationOut,
     CommissionLineOut,
     CreateSubscriptionRequest,
     InvoiceOut,
     PayoutOut,
     PlanOut,
+    StartCheckoutRequest,
     SubscriptionOut,
 )
 from app.modules.billing.service import BillingService
@@ -49,7 +56,8 @@ _VIEW_FINANCIALS = Depends(RequirePermission(StaffPermission.VIEW_FINANCIALS))
 
 
 def _subscription_out(subscription: Subscription) -> SubscriptionOut:
-    amount = subscription.subscription_amount()
+    # The chosen plan's price, also while it waits on its first payment.
+    amount = subscription.chosen_monthly_amount()
     return SubscriptionOut(
         id=subscription.id,
         business_id=subscription.business_id,
@@ -60,9 +68,28 @@ def _subscription_out(subscription: Subscription) -> SubscriptionOut:
         seats=subscription.seats,
         locations=subscription.locations,
         cancel_at_period_end=subscription.cancel_at_period_end,
+        annual=subscription.annual,
         monthly_amount=amount.amount,
         currency=amount.currency,
         marketplace_listing_hidden=subscription.marketplace_listing_hidden,
+    )
+
+
+def _checkout_out(checkout: SubscriptionCheckout, redirect_url: str | None = None) -> CheckoutOut:
+    return CheckoutOut(
+        id=checkout.id,
+        business_id=checkout.business_id,
+        tier=checkout.tier,
+        annual=checkout.annual,
+        status=checkout.status,
+        net_amount=checkout.net.amount,
+        vat_amount=checkout.vat.amount,
+        total_amount=checkout.total.amount,
+        currency=checkout.total.currency,
+        covers_from=checkout.covers_from,
+        covers_until=checkout.covers_until,
+        paid_at=checkout.paid_at,
+        redirect_url=redirect_url,
     )
 
 
@@ -139,6 +166,14 @@ async def create_subscription(
     session: AsyncSession = Depends(get_db_session),
     service: BillingService = Depends(get_billing_service),
 ) -> SubscriptionOut:
+    """Subscribes a business to a plan. Owners only (`manage_subscription`).
+
+    One subscription per business: change it with `/plan` afterwards. A business
+    that never subscribes is billed as Solo. `trial_days` is at most 90.
+
+    A paid plan (Studio, Chain) without a trial starts as `pending_payment`, and
+    is billed and gated as Solo until paid: open the payment page with
+    `POST /subscriptions/{business_id}/checkout`."""
     subscription = await service.subscribe(**payload.model_dump())
     await session.commit()
     return _subscription_out(subscription)
@@ -177,10 +212,59 @@ async def change_plan(
     service: BillingService = Depends(get_billing_service),
 ) -> SubscriptionOut:
     """Moves plan. A downgrade below current seats or locations is refused by
-    the domain with a 409, naming what is in the way."""
+    the domain with a 409, naming what is in the way.
+
+    Moving from Solo to a paid plan leaves the subscription `pending_payment`
+    until it is paid for (`POST /subscriptions/{business_id}/checkout`)."""
     subscription = await service.change_plan(business_id, tier=payload.tier, annual=payload.annual)
     await session.commit()
     return _subscription_out(subscription)
+
+
+@router.post(
+    "/subscriptions/{business_id}/checkout",
+    response_model=CheckoutOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_MANAGE_SUBSCRIPTION, Depends(write_rate_limit)],
+)
+async def start_checkout(
+    tenant_id: UUID,
+    business_id: UUID,
+    payload: StartCheckoutRequest,
+    session: AsyncSession = Depends(get_db_session),
+    service: BillingService = Depends(get_billing_service),
+) -> CheckoutOut:
+    """Opens Moyasar's payment page for a plan waiting on payment. Owners only.
+
+    Send the owner's browser to `redirect_url`. It charges the plan's price plus
+    15% VAT for the current month (a year for an annual plan). Moyasar sends
+    them back to `return_url?checkout=<id>`; call
+    `POST /checkouts/{checkout_id}/sync` from there. 409
+    `subscription_not_awaiting_payment` if there is nothing to pay; 503
+    `integration_not_configured` without Moyasar keys."""
+    started = await service.start_checkout(business_id, return_url=payload.return_url)
+    await session.commit()
+    return _checkout_out(started.checkout, started.redirect_url)
+
+
+@router.post(
+    "/checkouts/{checkout_id}/sync",
+    response_model=CheckoutOut,
+    dependencies=[_MANAGE_SUBSCRIPTION, Depends(write_rate_limit)],
+)
+async def sync_checkout(
+    tenant_id: UUID,
+    checkout_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    service: BillingService = Depends(get_billing_service),
+) -> CheckoutOut:
+    """Asks Moyasar how a plan payment went, and activates the plan if it was
+    paid. Owners only. Called by the page Moyasar sends the owner back to; the
+    redirect itself proves nothing, so this checks Moyasar's own record of the
+    payment (amount, currency and checkout). Safe to call again."""
+    checkout = await service.sync_checkout(checkout_id)
+    await session.commit()
+    return _checkout_out(checkout)
 
 
 @router.post(
@@ -195,6 +279,10 @@ async def cancel_subscription(
     session: AsyncSession = Depends(get_db_session),
     service: BillingService = Depends(get_billing_service),
 ) -> SubscriptionOut:
+    """Cancels a business's subscription. Owners only.
+
+    By default it runs to the end of the period already paid for
+    (`at_period_end: true`); send `false` to end it now."""
     subscription = await service.cancel_subscription(
         business_id, at_period_end=payload.at_period_end
     )
@@ -216,6 +304,7 @@ async def list_invoices(
     params: PageParams = Depends(),
     service: BillingService = Depends(get_billing_service),
 ) -> Page[InvoiceOut]:
+    """A business's monthly invoices from NOVA, newest first. Owners and managers."""
     invoices = await service.list_invoices(business_id, limit=params.limit, offset=params.offset)
     return Page(items=[_invoice_out(tenant_id, inv) for inv in invoices])
 
@@ -230,6 +319,10 @@ async def get_invoice(
     invoice_id: UUID,
     service: BillingService = Depends(get_billing_service),
 ) -> InvoiceOut:
+    """One invoice. Owners and managers.
+
+    `GET /billing/invoices/{invoice_id}/lines` lists the commission lines behind
+    its total."""
     return _invoice_out(tenant_id, await service.get_invoice(invoice_id))
 
 

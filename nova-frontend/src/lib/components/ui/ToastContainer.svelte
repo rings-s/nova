@@ -1,4 +1,5 @@
 <script>
+	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * Mount once in the root layout: `<ToastContainer />`. Everything else
 	 * pushes to it via `$lib/stores/toast.svelte.js` — `toastStore.success(...)`.
@@ -42,7 +43,7 @@
 				type="button"
 				onclick={() => toastStore.dismiss(toast.id)}
 				class={`${iconButton} -me-1.5 -mt-0.5 size-7`}
-				aria-label="Dismiss"
+				aria-label={t('Dismiss')}
 			>
 				<svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
 					<path
