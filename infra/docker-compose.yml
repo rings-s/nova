@@ -57,6 +57,13 @@ x-backend: &backend
   image: nova-backend:dev
   env_file: .env
   environment: *backend-environment
+  # The local model server (LM Studio or Ollama) runs on the host, not in this
+  # stack. `host-gateway` is the host's address on the default bridge, so
+  # AI_BASE_URL=http://host.docker.internal:1234/v1 reaches it. The server must
+  # listen on more than 127.0.0.1 for this to connect: see nova_backend/README.md,
+  # "AI agents".
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   volumes:
     # Bind mount for reload-on-save. The image keeps its virtualenv at
     # /opt/venv precisely so this mount cannot shadow it.
@@ -226,6 +233,11 @@ services:
     restart: "no"
     environment: *owner-environment
     command: ["true"]
+    volumes:
+      - ../nova_backend:/app:z
+      # Read-only, for tests that hold a document to the code
+      # (tests/test_error_catalog.py reads docs/15). `:z` as above.
+      - ../docs:/docs:ro,z
     healthcheck:
       disable: true
     depends_on:
