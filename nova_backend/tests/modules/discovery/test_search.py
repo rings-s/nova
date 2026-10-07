@@ -149,6 +149,21 @@ async def test_city_filters_the_result(client, tenant_factory, business_factory,
     assert items[0]["city"] == "Riyadh"
 
 
+async def test_a_city_is_matched_exactly_not_as_a_pattern(
+    client, tenant_factory, business_factory, location_factory
+):
+    """The filter used ILIKE, so `%` named every city. It is an equality now."""
+    tenant = await tenant_factory()
+    riyadh = await business_factory(tenant, name_en="Wildcard Salon")
+    await location_factory(riyadh, city="Riyadh")
+
+    for city in ("%", "Riy%", "R_yadh"):
+        response = await client.get(
+            DISCOVERY + "/businesses", params={"q": "Wildcard", "city": city}
+        )
+        assert response.json()["items"] == [], city
+
+
 async def test_a_nearby_branch_is_returned_with_its_distance_and_a_far_one_is_not(
     client, tenant_factory, business_factory, location_factory
 ):

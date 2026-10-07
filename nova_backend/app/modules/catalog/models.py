@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Computed,
     Float,
     ForeignKey,
     Index,
@@ -105,11 +106,15 @@ class Location(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     __table_args__ = (
         UniqueConstraint("tenant_id", "slug", name="uq_locations_tenant_id_slug"),
         Index("ix_locations_tenant_business", "tenant_id", "business_id"),
-        # Marketplace search filters on city case-insensitively, which a plain
-        # index on `city` cannot serve. Declared here as well as in the
-        # migration so autogenerate does not propose dropping it on every run —
-        # the same reason `uq_users_email_lower` is declared on `User`.
-        Index("ix_locations_city_lower", text("lower(city)")),
+        # Discovery has no tenant to lead with, so the tenant-led composite
+        # above cannot serve the businesses -> locations join.
+        Index("ix_locations_business_id", "business_id"),
+        # Marketplace search filters on city. An expression index on
+        # `lower(city)` cannot serve it: as `nova_app`, RLS only lets the
+        # planner use an index for operators known to be leakproof, and
+        # `lower()` and ILIKE are not. A stored generated column compared with
+        # `=` is, so search matches `city_key` instead.
+        Index("ix_locations_city_key", "city_key"),
     )
 
     business_id: Mapped[uuid.UUID] = mapped_column(
@@ -124,6 +129,11 @@ class Location(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     #: home-service provider genuinely has no address; such a row is reachable
     #: by name and by map radius, just not by a city filter.
     city: Mapped[str | None] = mapped_column(String(120))
+    #: `lower(city)`, kept by the database. What the city filter compares; see
+    #: `ix_locations_city_key`. Never written by the application.
+    city_key: Mapped[str | None] = mapped_column(
+        String(120), Computed("lower(city)", persisted=True)
+    )
     latitude: Mapped[float | None] = mapped_column(Float)
     longitude: Mapped[float | None] = mapped_column(Float)
     # Required, not defaulted at the app layer: availability and queue maths are
@@ -161,6 +171,10 @@ class Service(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMix
     __table_args__ = (
         Index("ix_services_tenant_location", "tenant_id", "location_id"),
         Index("ix_services_tenant_category", "tenant_id", "category_id"),
+        # Discovery's correlated lookups (cheapest price, "sells it") have no
+        # tenant to lead with either.
+        Index("ix_services_location_id", "location_id"),
+        Index("ix_services_category_id", "category_id"),
     )
 
     location_id: Mapped[uuid.UUID] = mapped_column(
@@ -189,7 +203,10 @@ class Provider(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     """A staff member who performs services at a location."""
 
     __tablename__ = "providers"
-    __table_args__ = (Index("ix_providers_tenant_location", "tenant_id", "location_id"),)
+    __table_args__ = (
+        Index("ix_providers_tenant_location", "tenant_id", "location_id"),
+        Index("ix_providers_location_id", "location_id"),
+    )
 
     location_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id", ondelete="CASCADE"), nullable=False

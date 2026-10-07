@@ -357,7 +357,10 @@ class PublicCatalogRepository(BaseRepository[Business]):
             )
 
         if city:
-            stmt = stmt.where(_folded(Location.city).ilike(func.unaccent(city)))
+            # Equality on the generated `lower(city)` column, so the index is usable
+            # under RLS (migration a1d2e3f4b5c6). Accents are not folded here:
+            # cities come from a short list, unlike the free text of `term`.
+            stmt = stmt.where(Location.city_key == city.strip().lower())
 
         if category:
             offers_category = (
