@@ -137,7 +137,9 @@ async def list_customers(
     params: PageParams = Depends(),
     service: CustomerService = Depends(get_customer_service),
 ) -> Page[CustomerOut]:
-    """This business's customers. Needs `view_customers` (owner, manager, receptionist). `q` matches part of a name or phone number."""
+    """This business's customers. Needs `view_customers` (owner, manager, receptionist).
+
+    `q` matches part of a name or phone number."""
     rows = (
         await service.search(q, limit=params.limit, offset=params.offset)
         if q

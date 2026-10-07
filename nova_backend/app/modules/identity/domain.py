@@ -41,7 +41,7 @@ _ROLE_GRANTS: dict[MembershipRole, frozenset[MembershipRole]] = {
     # A manager runs the salon day to day but cannot appoint a peer or an
     # owner — otherwise "manager" is just "owner" with one extra step.
     MembershipRole.MANAGER: frozenset({MembershipRole.RECEPTIONIST, MembershipRole.PROVIDER}),
-    MembershipRole.RECEPTIONIST: frozenset({StaffPermission.VIEW_CUSTOMERS}),
+    MembershipRole.RECEPTIONIST: frozenset(),
     MembershipRole.PROVIDER: frozenset(),
 }
 
@@ -143,7 +143,7 @@ _ROLE_PERMISSIONS: dict[MembershipRole, frozenset[StaffPermission]] = {
     # The front desk and the chair: the calendar and the queue, and nothing that
     # moves or reveals money or changes what the salon sells. A stylist has no
     # business reading a colleague's takings, or repricing the menu.
-    MembershipRole.RECEPTIONIST: frozenset(),
+    MembershipRole.RECEPTIONIST: frozenset({StaffPermission.VIEW_CUSTOMERS}),
     MembershipRole.PROVIDER: frozenset(),
 }
 
