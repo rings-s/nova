@@ -13,9 +13,11 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from app.core.values import TimeRange
 from app.db.session import set_tenant_scope
 from app.modules.booking.domain import BookingStatus
 from app.modules.booking.models import BookingRecord
+from app.modules.booking.repository import BookingRepository
 
 
 @pytest.fixture
@@ -89,3 +91,25 @@ async def test_a_cancelled_booking_frees_the_slot(db_session, setup) -> None:
 
     db_session.add(_booking(setup, start, BookingStatus.CONFIRMED))
     await db_session.flush()
+
+
+async def test_conflict_search_sees_a_long_running_booking_and_ignores_ancient_ones(
+    db_session, setup
+) -> None:
+    """The overlap queries bound their scan by `MAX_BOOKING_SPAN`; that bound must
+    not hide a booking that is still running, nor drag history back in."""
+    tenant, *_, provider, _customer = setup
+    now = datetime.now(UTC) + timedelta(days=3)
+    # Eight hours long, the longest a service can be, and still running.
+    long_one = _booking(setup, now - timedelta(hours=7), BookingStatus.CONFIRMED)
+    long_one.ends_at = now + timedelta(hours=1)
+    ancient = _booking(setup, now - timedelta(days=200), BookingStatus.COMPLETED)
+    db_session.add_all([long_one, ancient])
+    await db_session.flush()
+
+    repo = BookingRepository(db_session, tenant.id)
+    probe = TimeRange(starts_at=now, ends_at=now + timedelta(minutes=30))
+    found = await repo.find_conflicting(provider_id=provider.id, slot=probe)
+
+    assert found is not None
+    assert found.id == long_one.id

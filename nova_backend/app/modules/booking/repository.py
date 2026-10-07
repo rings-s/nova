@@ -9,7 +9,7 @@ this file.
 """
 
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import and_, case, delete, func, select, text
@@ -33,6 +33,13 @@ from app.modules.booking.models import (
     ScheduleExceptionRecord,
     SlotHoldRecord,
 )
+
+#: The longest a booking or hold can run. A service is capped at 8 hours
+#: (`catalog.domain.MAX_SERVICE_DURATION_MINUTES`) and a slot is one service
+#: long; the margin is for rescheduling and for rows older than the cap. An
+#: overlap query may therefore ignore anything that started this long before
+#: the window: it cannot still be running.
+MAX_BOOKING_SPAN = timedelta(hours=24)
 
 
 def _to_domain(record: BookingRecord) -> Booking:
@@ -145,6 +152,9 @@ class BookingRepository(TenantScopedRepository[BookingRecord]):
                 BookingRecord.status.in_(tuple(BLOCKING_STATUSES)),
                 BookingRecord.starts_at < slot.ends_at,
                 BookingRecord.ends_at > slot.starts_at,
+                # Lets the (tenant, provider, starts_at) index start near the window
+                # instead of at the provider's first booking.
+                BookingRecord.starts_at > slot.starts_at - MAX_BOOKING_SPAN,
             )
         )
         if exclude_booking_id is not None:
@@ -187,6 +197,9 @@ class BookingRepository(TenantScopedRepository[BookingRecord]):
                 BookingRecord.provider_id == provider_id,
                 BookingRecord.starts_at < window.ends_at,
                 BookingRecord.ends_at > window.starts_at,
+                # Lets the (tenant, provider, starts_at) index start near the window
+                # instead of at the provider's first booking.
+                BookingRecord.starts_at > window.starts_at - MAX_BOOKING_SPAN,
             )
             .order_by(BookingRecord.starts_at)
         )
@@ -251,6 +264,9 @@ class BookingRepository(TenantScopedRepository[BookingRecord]):
                 BookingRecord.status.in_(tuple(BLOCKING_STATUSES)),
                 BookingRecord.starts_at < window.ends_at,
                 BookingRecord.ends_at > window.starts_at,
+                # Lets the (tenant, provider, starts_at) index start near the window
+                # instead of at the provider's first booking.
+                BookingRecord.starts_at > window.starts_at - MAX_BOOKING_SPAN,
             )
         )
         result = await self.session.execute(stmt)
@@ -511,6 +527,9 @@ class SlotHoldRepository(TenantScopedRepository[SlotHoldRecord]):
                 SlotHoldRecord.expires_at > now,
                 SlotHoldRecord.starts_at < window.ends_at,
                 SlotHoldRecord.ends_at > window.starts_at,
+                # Lets the (tenant, provider, starts_at) index start near the window
+                # instead of at the provider's first booking.
+                SlotHoldRecord.starts_at > window.starts_at - MAX_BOOKING_SPAN,
             )
         )
         result = await self.session.execute(stmt)
@@ -527,6 +546,9 @@ class SlotHoldRepository(TenantScopedRepository[SlotHoldRecord]):
                 SlotHoldRecord.expires_at > now,
                 SlotHoldRecord.starts_at < slot.ends_at,
                 SlotHoldRecord.ends_at > slot.starts_at,
+                # Lets the (tenant, provider, starts_at) index start near the window
+                # instead of at the provider's first booking.
+                SlotHoldRecord.starts_at > slot.starts_at - MAX_BOOKING_SPAN,
             )
         )
         result = await self.session.execute(stmt.limit(1))
