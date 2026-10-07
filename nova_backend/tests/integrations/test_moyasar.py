@@ -23,11 +23,16 @@ from app.integrations.payments.moyasar import (
 SECRET_KEY = "sk_test_abc123"
 
 
+async def _no_wait(seconds: float) -> None:
+    """A retry's backoff, skipped: these tests are about what is retried."""
+
+
 def _gateway(handler, *, webhook_secret: str | None = "whsec") -> MoyasarGateway:
     return MoyasarGateway(
         api_key=SECRET_KEY,
         webhook_secret=webhook_secret,
         transport=httpx.MockTransport(handler),
+        sleep=_no_wait,
     )
 
 
@@ -169,3 +174,67 @@ def test_without_a_key_the_placeholder_is_used() -> None:
         api_key=None, webhook_secret=None, base_url="https://api.moyasar.com/v1"
     )
     assert isinstance(gateway, NotConfiguredPaymentGateway)
+
+
+async def test_a_read_is_retried_through_a_brief_outage() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) < 3:
+            return httpx.Response(503, json={"message": "unavailable"})
+        return httpx.Response(200, json={"id": "inv_1", "status": "paid"})
+
+    invoice = await _gateway(handler).fetch_invoice("inv_1")
+
+    assert invoice["status"] == "paid"
+    assert len(calls) == 3
+
+
+async def test_a_read_gives_up_after_three_attempts() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(PaymentGatewayError):
+        await _gateway(handler).fetch_payment("pay_1")
+
+    assert len(calls) == 3
+
+
+async def test_a_client_error_is_an_answer_and_is_not_retried() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(404, json={"message": "not found"})
+
+    with pytest.raises(PaymentGatewayError):
+        await _gateway(handler).fetch_payment("pay_missing")
+
+    assert len(calls) == 1
+
+
+async def test_opening_an_invoice_and_refunding_are_never_retried() -> None:
+    """No idempotency key is sent, so a repeat could charge or refund twice."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(503, json={"message": "unavailable"})
+
+    gateway = _gateway(handler)
+    with pytest.raises(PaymentGatewayError):
+        await gateway.refund("pay_1", amount_minor=100)
+    with pytest.raises(PaymentGatewayError):
+        await gateway.create_invoice(
+            amount_minor=100,
+            currency="SAR",
+            description="x",
+            success_url="https://example.test/ok",
+            back_url="https://example.test/back",
+        )
+
+    assert len(calls) == 2

@@ -31,10 +31,12 @@ Written against Moyasar's API reference (https://docs.moyasar.com/api/):
   payment module does exactly that with `fetch_payment`/`fetch_invoice`.
 """
 
+import asyncio
 import hmac
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, NoReturn, Protocol
 
 import httpx
 
@@ -67,6 +69,169 @@ class PaymentGatewayError(DomainError):
 
 class PaymentGateway(Protocol):
     """Operations NOVA needs from Moyasar."""
+
+    async def create_invoice(
+        self,
+        *,
+        amount_minor: int,
+        currency: str,
+        description: str,
+        success_url: str,
+        back_url: str,
+        expired_at: datetime | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Opens a hosted checkout. Returns the invoice, with its `url`."""
+        ...
+
+    async def fetch_invoice(self, invoice_id: str) -> dict[str, Any]: ...
+
+    async def fetch_payment(self, payment_id: str) -> dict[str, Any]: ...
+
+    async def refund(
+        self, payment_id: str, *, amount_minor: int | None = None
+    ) -> dict[str, Any]: ...
+
+    def verify_webhook(self, *, secret_token: str | None) -> bool: ...
+
+
+class NotConfiguredPaymentGateway:
+    """Placeholder used until Moyasar credentials exist.
+
+    Kept so the app boots, `/docs` renders, and every other module is
+    developable without a live payment account. Any actual attempt to move
+    money fails loudly rather than silently succeeding.
+    """
+
+    async def create_invoice(
+        self,
+        *,
+        amount_minor: int,
+        currency: str,
+        description: str,
+        success_url: str,
+        back_url: str,
+        expired_at: datetime | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        raise IntegrationNotConfiguredError("Moyasar")
+
+    async def fetch_invoice(self, invoice_id: str) -> dict[str, Any]:
+        raise IntegrationNotConfiguredError("Moyasar")
+
+    async def fetch_payment(self, payment_id: str) -> dict[str, Any]:
+        raise IntegrationNotConfiguredError("Moyasar")
+
+    async def refund(self, payment_id: str, *, amount_minor: int | None = None) -> dict[str, Any]:
+        raise IntegrationNotConfiguredError("Moyasar")
+
+    def verify_webhook(self, *, secret_token: str | None) -> bool:
+        # Fails closed. An unconfigured gateway must never be able to confirm
+        # a booking by accepting an unverified webhook.
+        return False
+
+
+#: A read is tried this many times in all, waiting 0.25 s, then 0.5 s between.
+READ_ATTEMPTS = 3
+RETRY_BASE_DELAY_SECONDS = 0.25
+#: Rate-limited, or Moyasar or its edge briefly unavailable. Anything else, a
+#: 4xx above all, is an answer rather than an outage and is not repeated.
+RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
+
+
+class MoyasarGateway:
+    """Live adapter for `https://api.moyasar.com/v1`."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        webhook_secret: str | None = None,
+        base_url: str = "https://api.moyasar.com/v1",
+        timeout_seconds: float = 15.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.api_key = api_key
+        #: Replaced in tests so a retry does not wait.
+        self.sleep = sleep
+        self.webhook_secret = webhook_secret
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        #: For tests: an `httpx.MockTransport` in place of the network.
+        self.transport = transport
+
+    def _client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=self.base_url,
+            # Basic auth: the secret key as username, an empty password.
+            auth=(self.api_key, ""),
+            timeout=self.timeout_seconds,
+            headers={"Accept": "application/json"},
+            transport=self.transport,
+        )
+
+    async def _request(
+        self, method: str, path: str, *, json: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """One API call. A GET is retried with backoff; a POST never is.
+
+        Reads can be repeated safely, and they sit on the payer's return path
+        (`/sync`) and in webhook verification, where a brief blip should not
+        cost a capture. A POST (`create_invoice`, `refund`) is not repeated:
+        Moyasar was not shown to accept an idempotency key, so a retry after a
+        timeout could open a second invoice or refund twice. Those fail once,
+        retryably, and the caller decides.
+        """
+        attempts = READ_ATTEMPTS if method == "GET" else 1
+        for attempt in range(1, attempts + 1):
+            last = attempt == attempts
+            try:
+                async with self._client() as client:
+                    response = await client.request(method, path, json=json)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "moyasar_unreachable",
+                    extra={"path": path, "error": repr(exc), "attempt": attempt},
+                )
+                if last:
+                    raise PaymentGatewayError() from exc
+                await self._backoff(attempt)
+                continue
+
+            if response.is_success:
+                return response.json()
+            if response.status_code in RETRYABLE_STATUSES and not last:
+                logger.warning(
+                    "moyasar_retrying",
+                    extra={"path": path, "status": response.status_code, "attempt": attempt},
+                )
+                await self._backoff(attempt)
+                continue
+            self._raise_for(response, path)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _backoff(self, attempt: int) -> None:
+        await self.sleep(RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1))
+
+    @staticmethod
+    def _raise_for(response: httpx.Response, path: str) -> NoReturn:
+        # Moyasar's errors are `{type, message, errors}`. Logged for whoever
+        # operates the account; the caller gets the generic envelope.
+        try:
+            detail = response.json()
+        except ValueError:
+            detail = {"body": response.text[:500]}
+        logger.error(
+            "moyasar_error",
+            extra={"path": path, "status": response.status_code, "detail": detail},
+        )
+        if response.status_code == 401:
+            # A wrong or revoked key is a deployment problem, not a payer's.
+            raise PaymentGatewayError(
+                "The payment provider rejected this deployment's credentials."
+            )
+        raise PaymentGatewayError()
 
     async def create_invoice(
         self,
