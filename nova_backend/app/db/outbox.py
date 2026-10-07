@@ -75,6 +75,34 @@ class OutboxEvent(Base, UUIDPKMixin):
         return self.published_at is None and self.attempts >= MAX_ATTEMPTS
 
 
+async def outbox_stats(session: AsyncSession) -> tuple[int, int, float]:
+    """`(waiting, dead_lettered, oldest_waiting_age_seconds)`, for monitoring.
+
+    Waiting means unpublished with attempts left; dead-lettered means parked
+    after `MAX_ATTEMPTS`, which needs a human. Read across tenants, so the
+    caller opens the bypass.
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  count(*) FILTER (WHERE attempts < :max),
+                  count(*) FILTER (WHERE attempts >= :max),
+                  coalesce(
+                    extract(epoch FROM now() - min(occurred_at) FILTER (WHERE attempts < :max)),
+                    0
+                  )
+                FROM domain_events
+                WHERE published_at IS NULL
+                """
+            ),
+            {"max": MAX_ATTEMPTS},
+        )
+    ).one()
+    return int(row[0]), int(row[1]), float(row[2])
+
+
 async def claim_pending_events(session: AsyncSession, *, limit: int = 100) -> list[OutboxEvent]:
     """Claims a batch for this dispatcher instance.
 

@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.core import metrics
 from app.core.context import (
     CORRELATION_ID_HEADER,
     new_correlation_id,
@@ -14,6 +15,13 @@ from app.core.context import (
 )
 
 logger = logging.getLogger("nova.access")
+
+
+def _route_template(request: Request) -> str:
+    """`/tenants/{tenant_id}/bookings`, not the concrete path: a metric label per
+    UUID would grow without bound. A request that matched no route is one label."""
+    route = request.scope.get("route")
+    return getattr(route, "path", None) or "unmatched"
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
@@ -31,6 +39,12 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception:
+            metrics.record_request(
+                method=request.method,
+                route=_route_template(request),
+                status=500,
+                seconds=time.perf_counter() - started,
+            )
             # Log before re-raising: the exception handler will build the
             # response, but the timing and route belong in the access log.
             duration_ms = (time.perf_counter() - started) * 1000
@@ -46,6 +60,12 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
         duration_ms = (time.perf_counter() - started) * 1000
         response.headers[CORRELATION_ID_HEADER] = correlation_id
+        metrics.record_request(
+            method=request.method,
+            route=_route_template(request),
+            status=response.status_code,
+            seconds=duration_ms / 1000,
+        )
 
         logger.info(
             "request_completed",

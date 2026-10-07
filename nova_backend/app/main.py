@@ -1,19 +1,25 @@
+import hmac
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.core.config import get_settings
 from app.core.context import CORRELATION_ID_HEADER
 from app.core.deps import get_db_session
 from app.core.error_handlers import ERROR_RESPONSES, register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
-from app.db.session import enforce_rls_role, get_engine
+from app.db.outbox import outbox_stats
+from app.db.session import bypass_tenant_scope, enforce_rls_role, get_engine, get_session_factory
 from app.modules.registry import routers
+
+logger = logging.getLogger("nova.main")
 
 
 @asynccontextmanager
@@ -133,6 +139,40 @@ def create_app() -> FastAPI:
         """
         await session.execute(text("SELECT 1"))
         return {"status": "ok", "database": "ok"}
+
+    @app.get("/metrics", tags=["ops"], include_in_schema=False)
+    async def prometheus_metrics(request: Request) -> Response:
+        """Prometheus scrape: request counts and latency for this process, plus
+        the outbox backlog and dead letters. Needs `Authorization: Bearer
+        $METRICS_TOKEN`; with none configured it does not exist (404)."""
+        token = get_settings().metrics_token
+        if not token:
+            raise HTTPException(status_code=404)
+        supplied = request.headers.get("authorization", "")
+        if not hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode()):
+            raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Bearer"})
+
+        gauges: dict[str, tuple[str, float]] = {}
+        try:
+            async with get_session_factory()() as session:
+                await bypass_tenant_scope(session)
+                waiting, dead, oldest = await outbox_stats(session)
+            gauges["nova_outbox_waiting"] = ("Events awaiting delivery.", waiting)
+            gauges["nova_outbox_dead_lettered"] = (
+                "Events parked after their last attempt: replay or fix by hand.",
+                dead,
+            )
+            gauges["nova_outbox_oldest_waiting_seconds"] = (
+                "Age of the oldest event still waiting; a stuck worker shows here.",
+                oldest,
+            )
+            gauges["nova_outbox_scrape_ok"] = ("1 if the outbox could be read.", 1)
+        except Exception:
+            logger.exception("metrics_outbox_unreadable")
+            gauges["nova_outbox_scrape_ok"] = ("1 if the outbox could be read.", 0)
+        return Response(
+            metrics.render(gauges), media_type="text/plain; version=0.0.4; charset=utf-8"
+        )
 
     return app
 

@@ -172,6 +172,9 @@ class Settings(BaseSettings):
     #: local and test: published, the schema maps every route and parameter for
     #: whoever finds the host.
     api_docs_enabled: bool | None = None
+    #: Bearer token for GET /metrics. Unset, the endpoint answers 404 and the
+    #: process exposes nothing: request volumes and outbox backlog are not public.
+    metrics_token: str | None = None
 
     @property
     def serve_api_docs(self) -> bool:
