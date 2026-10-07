@@ -113,13 +113,15 @@ async def list_businesses(
     return Page(items=[BusinessOut.model_validate(row) for row in rows])
 
 
-@router.get("/businesses/{business_id}", response_model=BusinessOut)
+@router.get(
+    "/businesses/{business_id}", response_model=BusinessOut, dependencies=[Depends(require_staff)]
+)
 async def get_business(
     tenant_id: UUID,
     business_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> object:
-    """One business in this tenant, with its rating average and count.
+    """One business in this tenant, with its rating average and count. Staff only.
 
     The marketplace's public view of a business is
     `GET /discovery/businesses/{slug}`."""
@@ -234,13 +236,17 @@ async def delete_location(
     await session.commit()
 
 
-@router.get("/businesses/{business_id}/locations", response_model=Page[LocationOut])
+@router.get(
+    "/businesses/{business_id}/locations",
+    response_model=Page[LocationOut],
+    dependencies=[Depends(require_staff)],
+)
 async def list_locations(
     tenant_id: UUID,
     business_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> Page[LocationOut]:
-    """A business's branches."""
+    """A business's branches, listed or not. Staff only: the public view is `/discovery`."""
     rows = await service.list_locations(business_id)
     return Page(items=[LocationOut.model_validate(r) for r in rows])
 
@@ -305,13 +311,17 @@ async def delete_service(
     await session.commit()
 
 
-@router.get("/locations/{location_id}/services", response_model=Page[ServiceOut])
+@router.get(
+    "/locations/{location_id}/services",
+    response_model=Page[ServiceOut],
+    dependencies=[Depends(require_staff)],
+)
 async def list_services(
     tenant_id: UUID,
     location_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> Page[ServiceOut]:
-    """The services offered at a branch."""
+    """The services offered at a branch. Staff only: the public view is `/discovery`."""
     rows = await service.list_services(location_id)
     return Page(items=[ServiceOut.model_validate(r) for r in rows])
 
@@ -374,13 +384,17 @@ async def delete_provider(
     await session.commit()
 
 
-@router.get("/locations/{location_id}/providers", response_model=Page[ProviderOut])
+@router.get(
+    "/locations/{location_id}/providers",
+    response_model=Page[ProviderOut],
+    dependencies=[Depends(require_staff)],
+)
 async def list_providers(
     tenant_id: UUID,
     location_id: UUID,
     service: CatalogService = Depends(get_catalog_service),
 ) -> Page[ProviderOut]:
-    """The providers working at a branch."""
+    """The providers working at a branch. Staff only."""
     rows = await service.list_providers(location_id)
     return Page(items=[ProviderOut.model_validate(r) for r in rows])
 

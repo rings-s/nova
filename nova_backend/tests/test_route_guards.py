@@ -26,7 +26,7 @@ from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 
 from app.core.deps import get_authorized_tenant, get_db_session, get_tenant_context
-from app.core.security import get_principal
+from app.core.security import get_principal, require_staff
 from app.core.throttling import write_rate_limit
 from app.modules.identity.dependencies import RequirePermission
 from app.modules.identity.domain import StaffPermission
@@ -76,6 +76,7 @@ _MANAGE = frozenset({StaffPermission.MANAGE_SUBSCRIPTION})
 _FINANCIALS = frozenset({StaffPermission.VIEW_FINANCIALS})
 _INSIGHTS = frozenset({StaffPermission.VIEW_ANALYTICS})
 _CATALOG = "/tenants/{tenant_id}/catalog"
+_SCHEDULES = "/tenants/{tenant_id}/schedules"
 _MANAGE_CATALOG = frozenset({StaffPermission.MANAGE_CATALOG})
 _CUSTOMERS = "/tenants/{tenant_id}/customers"
 _VIEW_CUSTOMERS = frozenset({StaffPermission.VIEW_CUSTOMERS})
@@ -237,6 +238,24 @@ def test_catalog_writes_need_the_catalog_permission() -> None:
         if _permissions(route.dependant) != _MANAGE_CATALOG
     ]
     assert wrong == []
+
+
+def test_catalog_reads_are_staff_only() -> None:
+    """Any authenticated principal reaches any tenant (a marketplace), so an open
+    catalog read showed an unlisted business's prices and branches to every
+    customer. The public view is `/discovery`, which shows published rows only."""
+    reads = [
+        (method, path, route)
+        for method, path, route in _routes()
+        if (path.startswith(_CATALOG) or path.startswith(_SCHEDULES)) and method == "GET"
+    ]
+    assert reads, "no catalog reads found; did the prefix change?"
+    open_reads = [
+        f"{method} {path}"
+        for method, path, route in reads
+        if not _depends_on(route.dependant, require_staff)
+    ]
+    assert open_reads == []
 
 
 def test_reading_the_customer_book_needs_the_customers_permission() -> None:

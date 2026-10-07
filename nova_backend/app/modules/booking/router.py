@@ -201,13 +201,15 @@ async def set_provider_schedule(
     )
 
 
-@schedule_router.get("/providers/{provider_id}", response_model=ScheduleOut)
+@schedule_router.get(
+    "/providers/{provider_id}", response_model=ScheduleOut, dependencies=[Depends(require_staff)]
+)
 async def get_provider_schedule(
     tenant_id: UUID,
     provider_id: UUID,
     service: BookingService = Depends(get_booking_service),
 ) -> ScheduleOut:
-    """A provider's weekly working hours."""
+    """A provider's weekly working hours. Staff only: customers see free slots, not the rota."""
     windows = await service.get_provider_schedule(provider_id)
     return ScheduleOut(
         provider_id=provider_id,
