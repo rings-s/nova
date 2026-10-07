@@ -142,13 +142,13 @@ test.describe('on a phone', () => {
 		await stubApi(page);
 		await page.goto('/discover');
 
-		await expect(page.getByRole('region', { name: 'Map of salons and spas' })).toBeHidden();
+		await expect(page.getByRole('region', { name: 'Map of spas, salons and clinics' })).toBeHidden();
 		// The pins exist (hidden) only once the page's script runs; a toggle
 		// clicked before that lands on server-rendered HTML and does nothing.
 		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
 		await page.getByRole('button', { name: 'map', exact: true }).click();
 
-		const region = page.getByRole('region', { name: 'Map of salons and spas' });
+		const region = page.getByRole('region', { name: 'Map of spas, salons and clinics' });
 		await expect(region).toBeVisible();
 		const pins = page.locator('.leaflet-marker-icon');
 		await expect(pins).toHaveCount(LISTINGS.length);

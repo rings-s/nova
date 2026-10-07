@@ -161,7 +161,7 @@ POST /v1/payments
 	<meta
 		name="description"
 		content={t(
-			"Learn about NOVA's mission: replacing fragmented salon software with a unified, bilingual operating system engineered for Saudi Arabia and the GCC."
+			"Learn about NOVA's mission: replacing fragmented spa, salon and clinic software with a unified, bilingual operating system engineered for Saudi Arabia and the GCC."
 		)}
 	/>
 </svelte:head>
@@ -183,11 +183,11 @@ POST /v1/payments
 		<!-- Core Headline -->
 		<div class="mx-auto mt-6 max-w-4xl text-center">
 			<h1 class="text-display-2xl font-semibold tracking-tight text-fg">
-				{t('Built for the reality of GCC salons & spas')}
+				{t('Built for the reality of GCC salons, spas & clinics')}
 			</h1>
 			<p class="mx-auto mt-6 max-w-2xl text-body-lg text-fg-muted">
 				{t(
-					'Booking, walk-ins, WhatsApp and payments are usually four disconnected tools stitched together by hand. NOVA brings them into one platform, built around how a salon actually runs its day.'
+					'Booking, walk-ins, WhatsApp and payments are usually four disconnected tools stitched together by hand. NOVA brings them into one platform, built around how a spa, salon or clinic actually runs its day.'
 				)}
 			</p>
 			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -211,7 +211,7 @@ POST /v1/payments
 						{t('Under the hood')}
 					</p>
 					<p class="text-sm font-medium text-fg">
-						{t('How NOVA solves the problems salons actually have')}
+						{t('How NOVA solves the problems spas, salons and clinics actually have')}
 					</p>
 				</div>
 				<Tabs
@@ -267,7 +267,7 @@ POST /v1/payments
 			eyebrow={t('Why NOVA exists')}
 			title={t('A unified OS vs. a patchwork of foreign tools')}
 			subtitle={t(
-				"Most salons run on 4 disconnected systems that don't speak to each other. NOVA replaces the chaos with a single source of truth."
+				"Most spas, salons and clinics run on 4 disconnected systems that don't speak to each other. NOVA replaces the chaos with a single source of truth."
 			)}
 		/>
 
@@ -283,7 +283,7 @@ POST /v1/payments
 					<h3 class="text-lg font-semibold text-fg">{t('The patchwork way')}</h3>
 				</div>
 				<p class="mt-3 text-sm text-fg-muted">
-					{t('How salons traditionally manage their front desk operations:')}
+					{t('How venues traditionally manage their front desk operations:')}
 				</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
@@ -309,7 +309,7 @@ POST /v1/payments
 					</span>
 					<h3 class="text-lg font-semibold text-fg">{t('The NOVA way')}</h3>
 				</div>
-				<p class="mt-3 text-sm text-fg-muted">{t('How a salon operates with NOVA:')}</p>
+				<p class="mt-3 text-sm text-fg-muted">{t('How a venue operates with NOVA:')}</p>
 				<ul class="mt-6 space-y-3.5">
 					{#each comparisons as item (item.label)}
 						<li
@@ -460,7 +460,7 @@ POST /v1/payments
 	<GradientBlob variant="corner" />
 	<Container size="md" class="relative py-8 text-center sm:py-12">
 		<h2 class="text-display-lg font-semibold tracking-tight text-white">
-			{t('Bring your salon onto NOVA')}
+			{t('Bring your business onto NOVA')}
 		</h2>
 		<p class="mt-4 text-body-lg text-white/80">
 			{t('Set up your storefront, services and providers in minutes.')}
@@ -470,7 +470,7 @@ POST /v1/payments
 				{t('Start 14-day free trial')}
 			</Button>
 			<Button size="lg" variant="outline-inverse" href={resolve('/discover')}>
-				{t('Find a salon near you')}
+				{t('Find a spa, salon or clinic near you')}
 			</Button>
 		</div>
 	</Container>

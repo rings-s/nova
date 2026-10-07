@@ -117,7 +117,7 @@
 				class="mb-6 inline-flex items-center gap-1 text-sm font-medium text-fg-muted transition-colors hover:text-fg"
 			>
 				<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
-				{t('All salons')}
+				{t('All venues')}
 			</a>
 			{#if storefront.photos?.length}
 				<div class="mb-8">

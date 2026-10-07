@@ -237,7 +237,7 @@
 		class="absolute inset-0"
 		dir="ltr"
 		role="region"
-		aria-label={t('Map of salons and spas')}
+		aria-label={t('Map of spas, salons and clinics')}
 	></div>
 
 	{#if failed}

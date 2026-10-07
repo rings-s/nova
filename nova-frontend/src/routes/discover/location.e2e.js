@@ -103,7 +103,7 @@ test('a rough first guess is replaced by the precise fix', async ({ page }) => {
 	);
 
 	await expect(
-		page.getByText('Showing salons near you — located to within about 20 m.')
+		page.getByText('Showing venues near you — located to within about 20 m.')
 	).toBeVisible();
 	await expect
 		.poll(() => Number(lastLocated(searches)?.searchParams.get('latitude')))
@@ -172,7 +172,7 @@ test('the customer can drag the dot to correct a poor fix', async ({ page }) => 
 	await page.mouse.move(box.x + 120, box.y + 80, { steps: 8 });
 	await page.mouse.up();
 
-	await expect(page.getByText('Showing salons near the spot you placed on the map.')).toBeVisible();
+	await expect(page.getByText('Showing venues near the spot you placed on the map.')).toBeVisible();
 	const placed = lastLocated(searches);
 	expect(Number(placed?.searchParams.get('latitude'))).not.toBeCloseTo(IP_GUESS.lat, 3);
 
@@ -181,5 +181,5 @@ test('the customer can drag the dot to correct a poor fix', async ({ page }) => 
 		({ lat, lng }) => /** @type {any} */ (window).__geo.emit(lat, lng, 5_000),
 		IP_GUESS
 	);
-	await expect(page.getByText('Showing salons near the spot you placed on the map.')).toBeVisible();
+	await expect(page.getByText('Showing venues near the spot you placed on the map.')).toBeVisible();
 });

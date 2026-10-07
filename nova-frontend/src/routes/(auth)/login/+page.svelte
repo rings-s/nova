@@ -37,7 +37,7 @@
 	<div class="flex items-center justify-between gap-4">
 		<Logo />
 
-		<Badge tone="accent" size="sm">{t('GCC Salon OS')}</Badge>
+		<Badge tone="accent" size="sm">{t('GCC Beauty & Wellness OS')}</Badge>
 	</div>
 
 	<!-- Intro -->
@@ -49,7 +49,7 @@
 		</h1>
 
 		<p class="mt-2 max-w-sm text-sm leading-6 text-fg-muted">
-			{t('Access your salon workspace, front desk, and personal appointments.')}
+			{t('Access your business workspace, front desk, and personal appointments.')}
 		</p>
 	</div>
 

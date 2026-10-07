@@ -158,7 +158,7 @@
 		{
 			id: 'business_owner',
 			label: m('Business'),
-			hint: m('List a salon or spa'),
+			hint: m('List a salon, spa or clinic'),
 			icon: 'building'
 		}
 	];
@@ -207,7 +207,7 @@
 			type="tel"
 			label={t('Phone')}
 			required
-			hint={t('A GCC number — needed to book, so the salon can reach you.')}
+			hint={t('A GCC number — needed to book, so the business can reach you.')}
 			autocomplete="tel"
 			bind:value={phone}
 		/>

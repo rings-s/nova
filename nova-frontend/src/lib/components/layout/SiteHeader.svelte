@@ -35,7 +35,7 @@
 		{ href: '/about', label: m('About') },
 		{ href: '/features', label: m('Features') },
 		{ href: '/pricing', label: m('Pricing') },
-		{ href: '/discover', label: m('Find a salon') }
+		{ href: '/discover', label: m('Book a treatment') }
 	];
 
 	async function handleSignOut() {
@@ -251,7 +251,7 @@
 					href={resolve('/discover')}
 					class="hidden text-sm font-medium text-fg-secondary transition-colors hover:text-fg sm:block"
 				>
-					{t('Find a salon')}
+					{t('Book a treatment')}
 				</a>
 
 				{#if authStore.isAuthenticated && !authStore.isStaff}

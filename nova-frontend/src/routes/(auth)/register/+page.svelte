@@ -38,7 +38,7 @@
 		if (details.intent === 'business_owner') {
 			toastStore.success(
 				t('{name} is on NOVA.', {
-					name: (details.tenant && pickBilingual(details.tenant, 'name')) || t('Your salon')
+					name: (details.tenant && pickBilingual(details.tenant, 'name')) || t('Your business')
 				})
 			);
 			if (plan) {
@@ -79,7 +79,7 @@
 		</h1>
 
 		<p class="mt-2 max-w-sm text-sm leading-6 text-fg-muted">
-			{t('Book appointments as a customer, or set up your salon on NOVA.')}
+			{t('Book appointments as a customer, or set up your spa, salon or clinic on NOVA.')}
 		</p>
 	</div>
 

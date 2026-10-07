@@ -108,7 +108,7 @@
 		{
 			time: '12:00',
 			name: m('Huda S.'),
-			service: m('Classic manicure'),
+			service: m('Laser consultation'),
 			status: m('Deposit due'),
 			tone: 'warning'
 		}
@@ -125,7 +125,7 @@
 	/** @type {{ eyebrow: string, icon: IconName, title: string, points: string[], cta: string, href: '/register'|'/discover' }[]} */
 	const audiences = [
 		{
-			eyebrow: m('For salons & spas'),
+			eyebrow: m('For salons, spas & clinics'),
 			icon: 'building',
 			title: m('Run the whole day from one screen'),
 			points: [
@@ -145,14 +145,14 @@
 				m('Confirmation and reminders on WhatsApp'),
 				m('Pay a deposit with Mada or Apple Pay')
 			],
-			cta: m('Find a salon'),
+			cta: m('Book a treatment'),
 			href: '/discover'
 		}
 	];
 </script>
 
 <svelte:head>
-	<title>{t('NOVA — Bookings, queues and payments for GCC salons and spas')}</title>
+	<title>{t('NOVA — Bookings, queues and payments for GCC salons, spas, massage centres and beauty clinics')}</title>
 </svelte:head>
 
 <!-- Hero -->
@@ -167,10 +167,10 @@
 				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
 				<span class="size-1.5 rounded-full bg-brand-500"></span>
-				{t('Built for salons and spas in the GCC')}
+				{t('Built for salons, spas, massage and beauty clinics in the GCC')}
 			</p>
 			<h1 class="mt-6 text-display-2xl font-semibold tracking-tight text-fg">
-				{t('Everything your salon needs.')}
+				{t('Everything your spa, salon or clinic needs.')}
 				<span
 					class="text-transparent"
 					style="background-image: var(--gradient-hero); -webkit-background-clip: text; background-clip: text;"
@@ -197,7 +197,7 @@
 				{/if}
 				<Button size="lg" variant="outline" href={resolve('/discover')}>
 					<Icon name="search" class="size-4" />
-					{t('Find a salon')}
+					{t('Book a treatment')}
 				</Button>
 			</div>
 			<p class="mt-5 text-xs text-fg-muted">

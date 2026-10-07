@@ -255,12 +255,12 @@
 	<PageHeader
 		eyebrow={t('Your account')}
 		title={t('My bookings')}
-		subtitle={t("Every appointment you've made across NOVA salons and spas.")}
+		subtitle={t("Every appointment you've made across NOVA spas, salons and clinics.")}
 	>
 		{#snippet actions()}
 			<Button href={resolve('/discover')} variant="outline">
 				<Icon name="search" class="size-4" />
-				{t('Find a salon')}
+				{t('Book a treatment')}
 			</Button>
 		{/snippet}
 	</PageHeader>
@@ -276,13 +276,13 @@
 	{:else if returning === 'declined'}
 		<Alert tone="error" class="mb-6" dismissible ondismiss={() => (returning = null)}>
 			{t(
-				"Your card wasn't charged: the payment was declined or not verified. You can try again from the salon's page."
+				"Your card wasn't charged: the payment was declined or not verified. You can try again from the venue's page."
 			)}
 		</Alert>
 	{:else if returning === 'failed'}
 		<Alert tone="error" class="mb-6" dismissible ondismiss={() => (returning = null)}>
 			{t(
-				"The payment didn't go through and nothing was charged. You can try again from the salon's page."
+				"The payment didn't go through and nothing was charged. You can try again from the venue's page."
 			)}
 		</Alert>
 	{/if}
@@ -292,11 +292,11 @@
 	{:else if rows.length === 0}
 		<EmptyState
 			title={t('No bookings yet')}
-			description={t('Find a salon on the marketplace and book your first visit.')}
+			description={t('Find a spa, salon or clinic on the marketplace and book your first visit.')}
 		>
 			{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
 			{#snippet action()}
-				<Button href={resolve('/discover')}>{t('Browse salons')}</Button>
+				<Button href={resolve('/discover')}>{t('Browse venues')}</Button>
 			{/snippet}
 		</EmptyState>
 	{:else}
@@ -396,7 +396,7 @@
 		<Textarea
 			label={t('Anything to add?')}
 			hint={t(
-				"Optional. Only the salon's staff see your comment; your stars count toward its public rating."
+				"Optional. Only the venue's staff see your comment; your stars count toward its public rating."
 			)}
 			rows={3}
 			maxlength={1000}

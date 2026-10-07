@@ -121,14 +121,14 @@
 
 	let originNote = $derived.by(() => {
 		if (!origin) return null;
-		if (origin.source === 'map') return t('Showing salons near the spot you placed on the map.');
+		if (origin.source === 'map') return t('Showing venues near the spot you placed on the map.');
 		const within = describeAccuracy(origin.accuracy, t);
 		return origin.accuracy > ROUGH_FIX_M
 			? t(
 					'Your device could only place you within about {within}, so "near you" may be off. Drag the blue dot on the map to where you are.',
 					{ within }
 				)
-			: t('Showing salons near you — located to within about {within}.', { within });
+			: t('Showing venues near you — located to within about {within}.', { within });
 	});
 
 	/** How far "near you" reaches, in km. The API allows up to 100. */
@@ -167,7 +167,7 @@
 			locateMessage =
 				kind === 'denied'
 					? t(
-							'Location is blocked for this site. Allow it from the address bar to see salons near you.'
+							'Location is blocked for this site. Allow it from the address bar to see venues near you.'
 						)
 					: kind === 'insecure'
 						? t('Your browser only shares location on secure (https) pages.')
@@ -328,11 +328,11 @@
 </script>
 
 <svelte:head>
-	<title>{t('Discover salons & spas')} — NOVA</title>
+	<title>{t('Discover salons, spas & clinics')} — NOVA</title>
 	<meta
 		name="description"
 		content={t(
-			'Search beauty salons, spas, and hammams in Riyadh, Jeddah, and Al Khobar, and book directly with live availability.'
+			'Search salons, spas, massage centres, hammams and beauty clinics in Riyadh, Jeddah, and Al Khobar, and book directly with live availability.'
 		)}
 	/>
 </svelte:head>
@@ -350,7 +350,7 @@
 				{t('Live availability in Riyadh, Jeddah & Khobar')}
 			</p>
 			<h1 class="mt-5 text-display-xl font-semibold tracking-tight text-fg">
-				{t('Find your next salon or spa')}
+				{t('Find your next treatment')}
 			</h1>
 			<p class="mt-3 text-body-lg text-fg-muted">
 				{t('Book a real, held slot in seconds — confirmed instantly on WhatsApp.')}
@@ -369,8 +369,8 @@
 				/>
 				<input
 					type="text"
-					aria-label={t('Search salons or services')}
-					placeholder={t('Salon or service — e.g. HydraFacial, balayage')}
+					aria-label={t('Search venues or services')}
+					placeholder={t('Venue or treatment — e.g. Thai massage, HydraFacial, balayage')}
 					bind:value={q}
 					class="h-12 w-full rounded-card border-0 bg-transparent ps-11 pe-3 text-[15px] text-fg placeholder:text-fg-subtle focus:ring-0 focus:outline-none"
 				/>
@@ -547,7 +547,7 @@
 						</span>
 						<p class="flex-1 text-sm text-fg-muted">
 							{t(
-								"Share your location to see the closest salons and spas. It's only used for this search."
+								"Share your location to see the closest spas, salons and clinics. It's only used for this search."
 							)}
 						</p>
 						<Button size="sm" loading={locating} onclick={useMyLocation}
@@ -560,7 +560,7 @@
 					</div>
 				{:else if nearby.length === 0}
 					<p class="rounded-card border border-line bg-surface p-5 text-sm text-fg-muted">
-						{t('No salons within {km} km of you yet.', { km: NEAR_RADIUS_KM })}
+						{t('No venues within {km} km of you yet.', { km: NEAR_RADIUS_KM })}
 					</p>
 				{:else}
 					<div class="grid grid-cols-2 gap-3">
@@ -609,7 +609,7 @@
 				{#if loading}
 					{t('Searching…')}
 				{:else}
-					{tp(listings.length, '{count} salon', '{count} salons')}
+					{tp(listings.length, '{count} venue', '{count} venues')}
 					{#if selectedCity}{t('in {city}', {
 							city: t(cities.find((c) => c.id === selectedCity)?.name ?? selectedCity)
 						})}{/if}
@@ -679,7 +679,7 @@
 				</div>
 			{:else if listings.length === 0}
 				<EmptyState
-					title={t('No salons match')}
+					title={t('No venues match')}
 					description={t('Try a different search term, category or city.')}
 				>
 					{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
@@ -869,13 +869,13 @@
 <AssistantLauncher
 	marketplace
 	title={t('NOVA assistant')}
-	subtitle={t('Find a salon or spa and book it')}
+	subtitle={t('Find a spa, salon or clinic and book it')}
 	intro={t(
 		'Tell me what you need, where and when. I search every business on NOVA, find a free time, and book it once you say yes.'
 	)}
 	starters={[
 		t('Find me a spa in Riyadh this weekend'),
-		t('I need a haircut tomorrow afternoon'),
-		t('Which salons do nails near Jeddah?')
+		t('I need a massage tomorrow afternoon'),
+		t('Which clinics do laser hair removal near Jeddah?')
 	]}
 />

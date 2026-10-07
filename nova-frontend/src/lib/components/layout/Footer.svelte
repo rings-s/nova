@@ -12,7 +12,7 @@
 	const productLinks = [
 		{ label: m('Features'), href: '/features' },
 		{ label: m('Pricing'), href: '/pricing' },
-		{ label: m('Find a salon'), href: '/discover' },
+		{ label: m('Book a treatment'), href: '/discover' },
 		{ label: m('About'), href: '/about' }
 	];
 
@@ -41,7 +41,7 @@
 			<div class="max-w-xs">
 				<Logo />
 				<p class="mt-4 text-sm leading-6 text-fg-muted">
-					{t('Bookings, walk-ins and payments for salons and spas in the GCC.')}
+					{t('Bookings, walk-ins and payments for salons, spas, massage centres and beauty clinics in the GCC.')}
 				</p>
 			</div>
 

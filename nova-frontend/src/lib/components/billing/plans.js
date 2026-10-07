@@ -12,7 +12,7 @@ export const TIER_ORDER = ['solo', 'studio', 'chain'];
 /** @type {Record<string, { name: string, tagline: string, recommended?: boolean }>} */
 export const PLAN_COPY = {
 	solo: { name: m('Solo'), tagline: m('For independent stylists and therapists.') },
-	studio: { name: m('Studio'), tagline: m('For salons and spas with a team.'), recommended: true },
+	studio: { name: m('Studio'), tagline: m('For salons, spas and clinics with a team.'), recommended: true },
 	chain: { name: m('Chain'), tagline: m('For groups running several branches.') }
 };
 

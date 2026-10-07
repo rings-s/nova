@@ -266,7 +266,7 @@
 				<Icon name="search" class="size-4" />
 				{t('Hammam in Riyadh')}
 			</div>
-			{#each [[t('Lumière Spa'), t( 'Olaya · {km} km', { km: 1.2 } ), t( 'SAR {amount}', { amount: 180 } )], [t('Rose Hammam'), t( 'Al Malqa · {km} km', { km: 3.4 } ), t( 'SAR {amount}', { amount: 220 } )]] as row (row[0])}
+			{#each [[t('Lumière Spa'), t( 'Olaya · {km} km', { km: 1.2 } ), t( 'SAR {amount}', { amount: 180 } )], [t('Rose Hammam'), t( 'Al Malqa · {km} km', { km: 3.4 } ), t( 'SAR {amount}', { amount: 220 } )], [t('Glow Skin Clinic'), t( 'Al Nakheel · {km} km', { km: 4.1 } ), t( 'SAR {amount}', { amount: 350 } )]] as row (row[0])}
 				<div
 					class="flex items-center justify-between rounded-control border border-line bg-surface px-3 py-2.5"
 				>
