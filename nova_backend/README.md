@@ -354,6 +354,32 @@ lms load qwen/qwen3-1.7b --parallel 1 -c 8192
 When the model is unreachable or times out, the turn hands off to a human. It
 never fails the request, and the rest of the app is unaffected.
 
+**Capacity, measurement and what is kept**
+
+- **Turn limit.** `AI_MAX_CONCURRENT_TURNS` (default 2) turns run at once per API
+  process and each caller gets one at a time; a further turn waits
+  `AI_QUEUE_WAIT_SECONDS` (default 15), then gets `429 ai_busy`. Set the first to
+  the server's slots: LM Studio loaded with `--parallel N` serves N turns at a
+  time. With several API replicas, divide the slots among them.
+- **Metrics.** `/metrics` (with `METRICS_TOKEN` set) carries
+  `nova_ai_turns_total{agent,outcome}` (ok, handoff, degraded, busy),
+  `nova_ai_turn_duration_seconds`, `nova_ai_tool_calls_total{tool,outcome}` and
+  `nova_ai_injection_total`. A rising degraded or handoff rate means the model
+  is down or struggling; a rising busy rate means more slots are needed.
+- **Evaluation.** `make ai-eval` sends 12 fixed Arabic and English messages
+  (injection, "refund me", "book me", a phone number, the price) to the
+  configured model and prints a pass/fail table; `AI_EVAL_MIN_PASS` (default
+  0.8) is the gate. It needs the model server and is skipped otherwise. Run it
+  before and after changing a model, a prompt or a guardrail. It checks what
+  happened, not the wording.
+- **Retention.** A conversation's recent turns are kept in Redis for
+  `AI_HISTORY_TTL_SECONDS` (default 24 hours), at most `AI_HISTORY_MAX_TURNS`
+  (10), keyed by tenant, caller, business and a hash of `session_id`. Phone
+  numbers, emails and card numbers are masked before the model sees a message,
+  but names and free text are kept as written. There is no erase-on-request
+  route: to forget a conversation now, delete its `ai:conversation:*` keys in Redis,
+  or wait for the TTL. State this retention in the privacy notice.
+
 ## Commands
 
 ```bash
