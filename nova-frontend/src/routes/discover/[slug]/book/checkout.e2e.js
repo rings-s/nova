@@ -50,7 +50,8 @@ async function stubApi(page, intent) {
 		ends_at: endsAt.toISOString(),
 		price: '150.00',
 		currency: 'SAR',
-		status: 'pending_payment'
+		// What the API returns for a self-service booking: payment must be offered from here.
+		status: 'draft'
 	};
 
 	/** @type {object[]} */ const intents = [];
