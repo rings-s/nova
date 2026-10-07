@@ -9,7 +9,6 @@ export const CUSTOMER = {
 	"Email": "البريد الإلكتروني",
 	"Password": "كلمة المرور",
 	"{name} is on NOVA.": "{name} أصبح على NOVA.",
-	"Your business": "نشاطك",
 	"Account created successfully.": "تم إنشاء الحساب بنجاح.",
 	"Create account": "إنشاء حساب",
 	"14-Day Free Trial": "تجربة مجانية لمدة 14 يومًا",
