@@ -168,7 +168,7 @@ async def test_my_access_is_per_salon_not_the_flattened_token(
 
     assert at_owned["role"] == "owner"
     assert at_staffed["role"] == "receptionist"
-    assert at_staffed["permissions"] == []
+    assert at_staffed["permissions"] == ["view_customers"]
     assert at_staffed["manageable_roles"] == []
 
 

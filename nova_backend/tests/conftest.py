@@ -81,6 +81,22 @@ def _fresh_rate_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rate_limit, "_limiter", rate_limit.RateLimiter())
 
 
+@pytest.fixture(autouse=True)
+def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test inherits Moyasar keys from the machine it runs on.
+
+    The `tools` container reads `infra/.env`, so a developer who set test keys
+    there for manual checkout changed what the suite asserted: production
+    refused the test key, and an intent grew an embedded-form payload. Tests
+    that need a key set it themselves.
+    """
+    for name in ("MOYASAR_API_KEY", "MOYASAR_PUBLISHABLE_KEY", "MOYASAR_WEBHOOK_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+
 @pytest.fixture(scope="session")
 def _apply_migrations() -> None:
     """Applies migrations once per session.
