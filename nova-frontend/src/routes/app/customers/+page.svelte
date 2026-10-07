@@ -10,6 +10,7 @@
 	import { formatApiError } from '$lib/utils/errors.js';
 	import { createCustomer, listCustomers } from '$lib/api/identity.js';
 	import { resolve } from '$app/paths';
+	import { accessStore } from '$lib/stores/access.svelte.js';
 
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
@@ -20,6 +21,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
+	import NoAccess from '$lib/components/ui/NoAccess.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Pagination from '$lib/components/ui/Pagination.svelte';
 
@@ -28,6 +30,9 @@
 	let q = $state('');
 	let offset = $state(0);
 	const limit = 20;
+
+	/** Reading the customer book needs `view_customers`; the server enforces it too. */
+	let allowed = $derived(accessStore.can('view_customers'));
 
 	let loading = $state(true);
 	let customers = $state(/** @type {import('$lib/api/identity.js').Customer[]} */ ([]));
@@ -46,7 +51,7 @@
 
 	$effect(() => {
 		offset;
-		search();
+		if (allowed) search();
 	});
 
 	/** @param {SubmitEvent} event */
@@ -101,7 +106,12 @@
 	{/snippet}
 </PageHeader>
 
-<form class="relative mb-6 max-w-md" onsubmit={handleSearchSubmit} role="search">
+<form
+	class="relative mb-6 max-w-md"
+	onsubmit={handleSearchSubmit}
+	role="search"
+	hidden={!allowed}
+>
 	<Icon
 		name="search"
 		class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle"
@@ -114,7 +124,9 @@
 	/>
 </form>
 
-{#if loading}
+{#if !allowed}
+	<NoAccess what={t('the customer book')} />
+{:else if loading}
 	<Card padding="none">
 		<div class="divide-y divide-line-subtle">
 			{#each [0, 1, 2, 3, 4] as n (n)}

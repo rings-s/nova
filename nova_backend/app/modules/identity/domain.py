@@ -41,7 +41,7 @@ _ROLE_GRANTS: dict[MembershipRole, frozenset[MembershipRole]] = {
     # A manager runs the salon day to day but cannot appoint a peer or an
     # owner — otherwise "manager" is just "owner" with one extra step.
     MembershipRole.MANAGER: frozenset({MembershipRole.RECEPTIONIST, MembershipRole.PROVIDER}),
-    MembershipRole.RECEPTIONIST: frozenset(),
+    MembershipRole.RECEPTIONIST: frozenset({StaffPermission.VIEW_CUSTOMERS}),
     MembershipRole.PROVIDER: frozenset(),
 }
 
@@ -118,6 +118,10 @@ class StaffPermission(StrEnum):
     #: the business is listed on the marketplace at all. Providers' working
     #: hours are deliberately not here — keeping the rota is front-desk work.
     MANAGE_CATALOG = "manage_catalog"
+    #: The customer book: names, phone numbers, emails and consent. The front
+    #: desk needs it to check people in; a provider sees only the bookings and
+    #: queue entries that name them, not everyone who ever visited.
+    VIEW_CUSTOMERS = "view_customers"
 
 
 #: Which role holds which permission, in one table so a salon's policy can be
@@ -133,6 +137,7 @@ _ROLE_PERMISSIONS: dict[MembershipRole, frozenset[StaffPermission]] = {
             StaffPermission.VIEW_FINANCIALS,
             StaffPermission.VIEW_ANALYTICS,
             StaffPermission.MANAGE_CATALOG,
+            StaffPermission.VIEW_CUSTOMERS,
         }
     ),
     # The front desk and the chair: the calendar and the queue, and nothing that

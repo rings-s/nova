@@ -620,6 +620,8 @@ Never from the request body — otherwise a caller could simply ask for someone 
 > (ADR-0003). A customer principal can reach every tenant, because NOVA is a marketplace, so
 > operational routes add `require_staff`. Routes that move money or read what a business earns
 > add a role permission instead, read from this tenant's `memberships` (`RequirePermission`).
+> So does reading the customer book (`view_customers`: owner, manager and receptionist; a
+> provider sees customers only through the bookings and queue entries that name them).
 >
 > `get_tenant_context` now builds on `get_authorized_tenant`, which does steps 1 and 3 without
 > touching the database. The AI chat depends on that alone, because a turn holds no request

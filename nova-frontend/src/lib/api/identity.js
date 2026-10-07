@@ -168,7 +168,7 @@ export function updateCustomerConsent(
 // --- Memberships (staff only) ------------------------------------------------
 
 /**
- * @typedef {'manage_subscription'|'refund_payments'|'view_financials'|'view_analytics'|'manage_catalog'} StaffPermission
+ * @typedef {'manage_subscription'|'refund_payments'|'view_financials'|'view_analytics'|'manage_catalog'|'view_customers'} StaffPermission
  * @typedef {Object} MyAccess
  * @property {MembershipRole|null} role Null for a service principal.
  * @property {StaffPermission[]} permissions What the role unlocks here.

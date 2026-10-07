@@ -134,10 +134,18 @@ class TestRoleAllows:
     def test_a_manager_keeps_the_menu_and_prices_current(self) -> None:
         assert role_allows(MembershipRole.MANAGER, StaffPermission.MANAGE_CATALOG)
 
-    def test_receptionists_and_providers_hold_none(self) -> None:
-        for role in (MembershipRole.RECEPTIONIST, MembershipRole.PROVIDER):
-            for permission in StaffPermission:
-                assert not role_allows(role, permission)
+    def test_the_front_desk_reads_the_customer_book_and_nothing_else(self) -> None:
+        for permission in StaffPermission:
+            assert role_allows(MembershipRole.RECEPTIONIST, permission) == (
+                permission is StaffPermission.VIEW_CUSTOMERS
+            )
+
+    def test_a_provider_holds_none(self) -> None:
+        for permission in StaffPermission:
+            assert not role_allows(MembershipRole.PROVIDER, permission)
+
+    def test_a_manager_reads_the_customer_book(self) -> None:
+        assert role_allows(MembershipRole.MANAGER, StaffPermission.VIEW_CUSTOMERS)
 
     def test_a_non_member_holds_none_and_a_service_principal_holds_all(self) -> None:
         for permission in StaffPermission:

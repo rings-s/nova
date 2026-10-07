@@ -17,12 +17,13 @@ from app.core.schemas import Page
 from app.core.security import Principal, PrincipalKind, get_principal, require_staff
 from app.core.throttling import write_rate_limit
 from app.modules.identity.dependencies import (
+    RequirePermission,
     get_customer_service,
     get_membership_service,
     get_membership_service_unauthorized,
     get_tenant_service,
 )
-from app.modules.identity.domain import ConsentSource
+from app.modules.identity.domain import ConsentSource, StaffPermission
 from app.modules.identity.models import Customer, Membership, MembershipInvite, Tenant
 from app.modules.identity.schemas import (
     AcceptInviteRequest,
@@ -125,14 +126,18 @@ async def create_customer(
     return customer
 
 
-@customers_router.get("", response_model=Page[CustomerOut], dependencies=[Depends(require_staff)])
+@customers_router.get(
+    "",
+    response_model=Page[CustomerOut],
+    dependencies=[Depends(RequirePermission(StaffPermission.VIEW_CUSTOMERS))],
+)
 async def list_customers(
     tenant_id: UUID,
     q: str | None = Query(default=None, description="Partial name or phone."),
     params: PageParams = Depends(),
     service: CustomerService = Depends(get_customer_service),
 ) -> Page[CustomerOut]:
-    """This business's customers. Staff only. `q` matches part of a name or phone number."""
+    """This business's customers. Needs `view_customers` (owner, manager, receptionist). `q` matches part of a name or phone number."""
     rows = (
         await service.search(q, limit=params.limit, offset=params.offset)
         if q
@@ -142,14 +147,16 @@ async def list_customers(
 
 
 @customers_router.get(
-    "/{customer_id}", response_model=CustomerOut, dependencies=[Depends(require_staff)]
+    "/{customer_id}",
+    response_model=CustomerOut,
+    dependencies=[Depends(RequirePermission(StaffPermission.VIEW_CUSTOMERS))],
 )
 async def get_customer(
     tenant_id: UUID,
     customer_id: UUID,
     service: CustomerService = Depends(get_customer_service),
 ) -> Customer:
-    """One customer, with their consent flags and who last changed each. Staff only."""
+    """One customer, with their consent flags and who last changed each. Needs `view_customers`."""
     return await service.get(customer_id)
 
 

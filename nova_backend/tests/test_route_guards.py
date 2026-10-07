@@ -77,6 +77,8 @@ _FINANCIALS = frozenset({StaffPermission.VIEW_FINANCIALS})
 _INSIGHTS = frozenset({StaffPermission.VIEW_ANALYTICS})
 _CATALOG = "/tenants/{tenant_id}/catalog"
 _MANAGE_CATALOG = frozenset({StaffPermission.MANAGE_CATALOG})
+_CUSTOMERS = "/tenants/{tenant_id}/customers"
+_VIEW_CUSTOMERS = frozenset({StaffPermission.VIEW_CUSTOMERS})
 
 #: Every billing route but the price list, the refund, and the analytics routes
 #: that need more than the router's `view_analytics`, with what each demands.
@@ -233,6 +235,23 @@ def test_catalog_writes_need_the_catalog_permission() -> None:
         f"{method} {path}: demands {sorted(_permissions(route.dependant))}"
         for method, path, route in writes
         if _permissions(route.dependant) != _MANAGE_CATALOG
+    ]
+    assert wrong == []
+
+
+def test_reading_the_customer_book_needs_the_customers_permission() -> None:
+    """Names, phone numbers and emails: a provider has no business paging through
+    everyone who ever visited. The `/me` routes are the customer's own."""
+    reads = [
+        (method, path, route)
+        for method, path, route in _routes()
+        if path.startswith(_CUSTOMERS) and method == "GET" and "/me" not in path
+    ]
+    assert reads, "no customer reads found; did the prefix change?"
+    wrong = [
+        f"{method} {path}: demands {sorted(_permissions(route.dependant))}"
+        for method, path, route in reads
+        if _permissions(route.dependant) != _VIEW_CUSTOMERS
     ]
     assert wrong == []
 

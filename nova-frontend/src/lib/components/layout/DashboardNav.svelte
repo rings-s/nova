@@ -25,7 +25,7 @@
 				{ href: '/app/bookings', label: m('Bookings'), icon: 'calendar' },
 				{ href: '/app/check-in', label: m('Check-in'), icon: 'shield-check' },
 				{ href: '/app/queue', label: m('Walk-in queue'), icon: 'users' },
-				{ href: '/app/customers', label: m('Customers'), icon: 'user' }
+				{ href: '/app/customers', label: m('Customers'), icon: 'user', needs: 'view_customers' }
 			]
 		},
 		{

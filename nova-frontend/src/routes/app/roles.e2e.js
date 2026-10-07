@@ -20,11 +20,13 @@ const ACCESS = {
 			'manage_subscription',
 			'refund_payments',
 			'view_analytics',
+			'view_customers',
 			'view_financials'
 		],
 		manageable_roles: ['manager', 'owner', 'provider', 'receptionist']
 	},
-	receptionist: { role: 'receptionist', permissions: [], manageable_roles: [] }
+	receptionist: { role: 'receptionist', permissions: ['view_customers'], manageable_roles: [] },
+	provider: { role: 'provider', permissions: [], manageable_roles: [] }
 };
 
 /**
@@ -116,6 +118,13 @@ test('an owner sees every section and can edit the catalog', async ({ page }) =>
 	await expect(nav(page).getByRole('link', { name: 'Billing' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Add location' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Move pin' })).toBeVisible();
+});
+
+test('a provider does not see the customer book', async ({ page }) => {
+	await signInAs(page, 'provider');
+	await page.goto('/app');
+
+	await expect(nav(page).getByRole('link', { name: 'Customers' })).toHaveCount(0);
 });
 
 test.describe('a receptionist', () => {

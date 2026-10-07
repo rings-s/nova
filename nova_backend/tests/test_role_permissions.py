@@ -25,6 +25,7 @@ _REFUND = {StaffPermission.REFUND_PAYMENTS}
 _FINANCIALS = {StaffPermission.VIEW_FINANCIALS}
 _INSIGHTS = {StaffPermission.VIEW_ANALYTICS}
 _CATALOG = {StaffPermission.MANAGE_CATALOG}
+_CUSTOMERS = {StaffPermission.VIEW_CUSTOMERS}
 
 #: A request that reaches each gate, and the permissions it needs. Bodies are
 #: minimal: a caller let through may still get a 404 or a 422, and only an
@@ -49,6 +50,8 @@ GATED = [
     ("POST", "catalog/services", _CATALOG),
     ("POST", "catalog/providers", _CATALOG),
     ("POST", "catalog/providers/{stranger}/services", _CATALOG),
+    ("GET", "customers", _CUSTOMERS),
+    ("GET", "customers/{stranger}", _CUSTOMERS),
 ]
 
 
