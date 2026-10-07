@@ -4,7 +4,7 @@ BACKEND = cd nova_backend && uv run
 # one-off `tools` container. `backend` and `worker` never hold those credentials.
 TOOLS = $(COMPOSE) run --rm tools
 
-.PHONY: help dev down logs tunnel migrate migrate-check revision db-app-role backup restore-check superuser test test-local lint fmt typecheck check worker image
+.PHONY: help dev down logs tunnel migrate migrate-check host-env revision db-app-role backup restore-check superuser test test-local lint fmt typecheck check worker image
 
 help:
 	@echo "Docker (full stack):"
@@ -15,6 +15,7 @@ help:
 	@echo "  make tunnel     start with the Cloudflare tunnel profile"
 	@echo "  make migrate    re-apply migrations in a one-off tools container"
 	@echo "  make migrate-check  fail if the models changed without a migration (alembic check)"
+	@echo "  make host-env   write nova_backend/.env so uv/alembic run on the host (app role only)"
 	@echo "  make db-app-role  give nova_app its login on a volume older than that role"
 	@echo "  make backup     dump the database now into the backup volume"
 	@echo "  make restore-check  restore the newest dump into a scratch database and look at it"
@@ -61,6 +62,25 @@ migrate:
 # CI runs this after `alembic upgrade head`: models and migrations must agree.
 migrate-check:
 	$(TOOLS) uv run alembic check
+
+# Lets `uv run alembic check`, `uv run pytest tests/test_architecture.py` and the
+# like run on the host. It writes only what the *app* needs: the `nova_app` login
+# (never the schema owner's password), the Redis password, and the stack's
+# SECRET_KEY, against the published loopback ports. `alembic check` only reads the
+# schema, so that role is enough; `alembic upgrade` and `make test` still need the
+# owner and stay in the tools container (`make migrate`, `make test`).
+# ENV=local keeps the strict deployed-only settings checks out of the way. The file
+# is git-ignored (`nova_backend/.env`) and mode 0600.
+host-env: infra/.env
+	@set -e; umask 077; \
+	get() { sed -n "s/^$$1=//p" infra/.env | tail -n 1; }; \
+	printf '%s\n' \
+		'ENV=local' \
+		"DATABASE_URL=postgresql+asyncpg://nova_app:$$(get POSTGRES_APP_PASSWORD)@localhost:$$(get POSTGRES_PORT)/$$(get POSTGRES_DB)" \
+		"REDIS_URL=redis://:$$(get REDIS_PASSWORD)@localhost:$$(get REDIS_PORT)/0" \
+		"SECRET_KEY=$$(get SECRET_KEY)" \
+		> nova_backend/.env; \
+	echo "wrote nova_backend/.env (app role only, git-ignored)"
 
 revision:
 	@test -n "$(m)" || (echo "usage: make revision m=\"add_something\"" && exit 1)
