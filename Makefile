@@ -4,7 +4,7 @@ BACKEND = cd nova_backend && uv run
 # one-off `tools` container. `backend` and `worker` never hold those credentials.
 TOOLS = $(COMPOSE) run --rm tools
 
-.PHONY: help dev down logs tunnel migrate revision db-app-role superuser test test-local lint fmt typecheck check worker image
+.PHONY: help dev down logs tunnel migrate revision db-app-role backup restore-check superuser test test-local lint fmt typecheck check worker image
 
 help:
 	@echo "Docker (full stack):"
@@ -15,6 +15,8 @@ help:
 	@echo "  make tunnel     start with the Cloudflare tunnel profile"
 	@echo "  make migrate    re-apply migrations in a one-off tools container"
 	@echo "  make db-app-role  give nova_app its login on a volume older than that role"
+	@echo "  make backup     dump the database now into the backup volume"
+	@echo "  make restore-check  restore the newest dump into a scratch database and look at it"
 	@echo "  make superuser email=you@example.com  make an account a NOVA administrator"
 	@echo "                  (add revoke=1 to take it away); it edits service categories"
 	@echo "  make test       run the suite in a one-off tools container"
@@ -63,6 +65,14 @@ revision:
 # initialised before that script existed needs this once; it is safe to re-run.
 db-app-role:
 	$(COMPOSE) exec postgres /docker-entrypoint-initdb.d/20-create-app-role.sh
+
+# One dump now. The scheduled loop is the `backup` profile; see infra/backup/README.md.
+backup:
+	$(COMPOSE) --profile backup run --rm backup bash /opt/backup/backup.sh
+
+# The restore drill: newest dump into a scratch database, a few counts, dropped.
+restore-check:
+	$(COMPOSE) --profile backup run --rm backup bash /opt/backup/restore-check.sh
 
 # The only way to grant `users.is_superuser`: there is deliberately no API for
 # it. Run as the schema owner inside the postgres container; the email is
