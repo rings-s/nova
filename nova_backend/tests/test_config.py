@@ -122,3 +122,34 @@ class TestMoyasarKey:
 
     def test_no_key_at_all_is_fine(self):
         assert build(moyasar_api_key=None).moyasar_api_key is None
+
+
+class TestMoyasarPublishableKey:
+    """The browser's key: public, but it has to match the secret key's mode,
+    and it must never be the secret key itself."""
+
+    def test_the_secret_key_is_refused(self):
+        with pytest.raises(ValidationError, match="publishable key"):
+            build(env="local", moyasar_publishable_key="sk_test_abc")
+
+    def test_a_test_key_is_refused_in_production(self):
+        with pytest.raises(ValidationError, match="test key in production"):
+            build(moyasar_api_key="sk_live_a", moyasar_publishable_key="pk_test_abc")
+
+    @pytest.mark.parametrize(
+        ("secret", "publishable"), [("sk_test_a", "pk_live_a"), ("sk_live_a", "pk_test_a")]
+    )
+    def test_the_two_keys_must_share_a_mode(self, secret, publishable):
+        with pytest.raises(ValidationError, match="both be test keys"):
+            build(env="staging", moyasar_api_key=secret, moyasar_publishable_key=publishable)
+
+    @pytest.mark.parametrize(
+        ("env", "secret", "publishable"),
+        [("local", "sk_test_a", "pk_test_a"), ("production", "sk_live_a", "pk_live_a")],
+    )
+    def test_a_matching_pair_is_fine(self, env, secret, publishable):
+        settings = build(env=env, moyasar_api_key=secret, moyasar_publishable_key=publishable)
+        assert settings.moyasar_publishable_key == publishable
+
+    def test_no_key_at_all_is_fine(self):
+        assert build(moyasar_publishable_key=None).moyasar_publishable_key is None

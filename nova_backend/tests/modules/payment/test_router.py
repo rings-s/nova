@@ -233,6 +233,37 @@ class TestCheckout:
         record = await db_session.get(PaymentRecord, UUID(payment_id))
         assert record.gateway_invoice_id == "inv_1"
         assert record.gateway_payment_id is None
+        # No publishable key here, so no embedded form: the hosted page it is.
+        assert body["checkout"] is None
+
+    async def test_with_a_publishable_key_the_payer_gets_the_embedded_form(
+        self, client: AsyncClient, draft_booking: BookingRecord, checkout, monkeypatch
+    ) -> None:
+        get_settings.cache_clear()
+        monkeypatch.setenv("MOYASAR_PUBLISHABLE_KEY", "pk_test_form")
+        try:
+            response = await _open(client, draft_booking)
+        finally:
+            monkeypatch.delenv("MOYASAR_PUBLISHABLE_KEY")
+            get_settings.cache_clear()
+
+        assert response.status_code == 201
+        body = response.json()
+        (opened,) = checkout.opened
+        payment_id = body["payment"]["id"]
+        # Bound to the invoice the server opened, for the amount it decided: the
+        # form cannot pay anything else.
+        assert body["checkout"] == {
+            "publishable_api_key": "pk_test_form",
+            "invoice_id": "inv_1",
+            "amount": 15000,
+            "currency": "SAR",
+            "description": opened["description"],
+            "callback_url": opened["success_url"],
+        }
+        assert body["checkout"]["callback_url"].endswith(f"&payment={payment_id}")
+        # The hosted page stays available for the same invoice.
+        assert body["redirect_url"] == "https://checkout.moyasar.com/inv_1"
 
     async def test_returning_from_a_paid_checkout_captures_and_confirms(
         self, client: AsyncClient, db_session, draft_booking: BookingRecord, checkout

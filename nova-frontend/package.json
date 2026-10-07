@@ -48,6 +48,7 @@
 		"jsqr": "^1.4.0",
 		"layerchart": "^2.5.0",
 		"leaflet": "^1.9.4",
+		"moyasar-payment-form": "2.2.14",
 		"uqr": "^0.1.3"
 	}
 }

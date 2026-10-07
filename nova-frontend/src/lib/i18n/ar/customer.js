@@ -270,5 +270,10 @@ export const CUSTOMER = {
 	"No time chosen yet": "لم تختر وقتًا بعد",
 	"Sign in to book": "سجّل الدخول للحجز",
 	"Review and confirm": "راجع وأكّد",
-	"Free times that day": "الأوقات المتاحة في ذلك اليوم"
+	"Free times that day": "الأوقات المتاحة في ذلك اليوم",
+	"Deposit due now": "العربون المستحق الآن",
+	"The payment didn't go through and nothing was charged.": "لم تتم عملية الدفع ولم يُخصم أي مبلغ.",
+	"The payment form couldn't load. Check your connection and try again.": "تعذّر تحميل نموذج الدفع. تحقّق من اتصالك وحاول مرة أخرى.",
+	"Secured by Moyasar. Your card details never reach NOVA.": "دفع آمن عبر ميسّر. بيانات بطاقتك لا تصل إلى NOVA أبدًا.",
+	"Your card wasn't charged: the payment was declined or not verified. You can try again from the salon's page.": "لم يُخصم أي مبلغ من بطاقتك: رُفضت عملية الدفع أو لم يتم التحقق منها. يمكنك المحاولة مرة أخرى من صفحة الصالون."
 };

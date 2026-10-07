@@ -14,9 +14,10 @@ const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64
 /**
  * @param {import('@playwright/test').Page} page
  * @param {string} status what the sync reports
+ * @param {string} [extra] more query, as Moyasar's Payment Form appends it
  * @returns {Promise<string[]>} the API paths the page called
  */
-async function returnFromCheckout(page, status) {
+async function returnFromCheckout(page, status, extra = '') {
 	const now = Math.floor(Date.now() / 1000);
 	const token = [
 		base64url({ alg: 'HS256', typ: 'JWT' }),
@@ -64,7 +65,7 @@ async function returnFromCheckout(page, status) {
 		return route.fulfill({ headers: cors, json: { items: [], total: 0 } });
 	});
 
-	await page.goto(`/bookings?tenant=${TENANT}&payment=${PAYMENT}`);
+	await page.goto(`/bookings?tenant=${TENANT}&payment=${PAYMENT}${extra}`);
 	return calls;
 }
 
@@ -89,4 +90,25 @@ test('a failed checkout says nothing was charged', async ({ page }) => {
 	await returnFromCheckout(page, 'failed');
 
 	await expect(page.getByText('nothing was charged')).toBeVisible();
+});
+
+test("a card the form reports declined is worded as such, and Moyasar's message is not shown", async ({
+	page
+}) => {
+	// The invoice is still open after a declined card, so the server says pending.
+	const message = encodeURIComponent('Call +966 5x to finish your payment');
+	await returnFromCheckout(page, 'pending', `&id=pay_9&status=failed&message=${message}`);
+
+	await expect(page.getByText("Your card wasn't charged")).toBeVisible();
+	await expect(page.getByText("We haven't received your payment yet.")).toHaveCount(0);
+	// Anyone can write the message into a link, so it never reaches the page.
+	await expect(page.getByText('Call +966')).toHaveCount(0);
+	await expect(page).toHaveURL(/\/bookings$/);
+});
+
+test("the form's status never confirms a payment the server has not", async ({ page }) => {
+	await returnFromCheckout(page, 'pending', '&id=pay_9&status=paid&message=APPROVED');
+
+	await expect(page.getByText("We haven't received your payment yet.")).toBeVisible();
+	await expect(page.getByText('Payment received.')).toHaveCount(0);
 });

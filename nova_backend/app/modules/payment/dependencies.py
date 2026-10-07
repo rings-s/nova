@@ -52,6 +52,7 @@ def build_payment_service(
         public_app_url=settings.public_app_url,
         default_deposit_percent=settings.default_deposit_percent,
         checkout_ttl_minutes=settings.moyasar_checkout_ttl_minutes,
+        publishable_key=settings.moyasar_publishable_key,
     )
 
 

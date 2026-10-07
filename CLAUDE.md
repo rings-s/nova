@@ -150,7 +150,7 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
 - **Payments.**
   - Only staff may set a payment intent's `amount` or `currency` (`payment/dependencies.py::refuse_customer_amount`).
   - `return_url` must be on `PUBLIC_APP_URL`'s origin.
-  - Checkout is a Moyasar **invoice** (hosted page); `payments.gateway_invoice_id` links it, `gateway_payment_id` is learnt when paid. The payer's return calls `POST …/payments/{id}/sync`; both it and the webhook capture only after fetching Moyasar's own record.
+  - Checkout is a Moyasar **invoice**, which fixes the amount server-side, paid in Moyasar's embedded Payment Form (`moyasar-payment-form`, `Moyasar.init({invoice_id, …})`, `components/payment/MoyasarForm.svelte`) from the intent's `checkout`; with no `MOYASAR_PUBLISHABLE_KEY`, on the invoice's hosted page (`redirect_url`). The CSP allows `https://api.moyasar.com` for it. `payments.gateway_invoice_id` links it, `gateway_payment_id` is learnt when paid. The payer's return calls `POST …/payments/{id}/sync`; both it and the webhook capture only after fetching Moyasar's own record.
   - The webhook authenticates by the `secret_token` in its body (no signature header) and captures only when the reported amount, currency and invoice match the payment row. Otherwise it records the event, answers `amount_mismatch` or `checkout_mismatch`, and leaves the payment uncaptured.
   - Setup (keys, webhook URL, test cards) is in `nova_backend/README.md` "Payments".
 - **Idempotency.** Retryable create-style POSTs take `idempotency_guard("<op>")` from `core/idempotency.py` (see `queue/router.py::join_queue`). A key is scoped to its endpoint, tenant and principal.

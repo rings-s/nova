@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     #: The shared secret set on the webhook in the Moyasar dashboard (Settings >
     #: Webhooks). Moyasar sends it back as `secret_token` in every webhook body.
     moyasar_webhook_secret: str | None = None
+    #: The account's *publishable* key (`pk_test_…` or `pk_live_…`), from the
+    #: same dashboard page. It is public by design: the browser hands it to
+    #: Moyasar's Payment Form, which can pay an invoice with it but can neither
+    #: create one nor read a payment back. Unset, checkout falls back to
+    #: Moyasar's hosted invoice page.
+    moyasar_publishable_key: str | None = None
     moyasar_base_url: str = "https://api.moyasar.com/v1"
     #: How long a customer has to pay on Moyasar's checkout page before the
     #: invoice expires.
@@ -219,6 +225,28 @@ class Settings(BaseSettings):
             raise ValueError(
                 "MOYASAR_API_KEY is a test key in production: no payer would ever be charged."
             )
+        if self.moyasar_publishable_key:
+            if not self.moyasar_publishable_key.startswith(("pk_test_", "pk_live_")):
+                raise ValueError(
+                    "MOYASAR_PUBLISHABLE_KEY must be the account's publishable key "
+                    "(pk_test_… or pk_live_…). Never put the secret key in it: it is sent "
+                    "to every payer's browser."
+                )
+            if self.env == "production" and self.moyasar_publishable_key.startswith("pk_test_"):
+                raise ValueError(
+                    "MOYASAR_PUBLISHABLE_KEY is a test key in production: "
+                    "no payer would ever be charged."
+                )
+            if self.moyasar_api_key and (
+                self.moyasar_api_key.startswith("sk_test_")
+                != self.moyasar_publishable_key.startswith("pk_test_")
+            ):
+                # A test invoice cannot be paid with a live form, nor the other
+                # way round: every checkout would fail at Moyasar.
+                raise ValueError(
+                    "MOYASAR_API_KEY and MOYASAR_PUBLISHABLE_KEY must both be test keys "
+                    "or both be live keys."
+                )
         refusal = dev_bypass_refusal(self)
         if refusal is not None:
             raise ValueError(refusal)

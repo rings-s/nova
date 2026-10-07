@@ -34,6 +34,7 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import BookingStatusBadge from '$lib/components/booking/BookingStatusBadge.svelte';
+	import MoyasarForm from '$lib/components/payment/MoyasarForm.svelte';
 	import AvailabilityCalendar from '$lib/components/booking/AvailabilityCalendar.svelte';
 	import TimeSlotModal from '$lib/components/booking/TimeSlotModal.svelte';
 	import {
@@ -142,6 +143,12 @@
 	let bookingError = $state(/** @type {string|null} */ (null));
 	let confirming = $state(false);
 	let payLoading = $state(false);
+	/** The deposit payment and its Payment Form options, once opened. */
+	let checkout = $state(
+		/** @type {{ payment: import('$lib/api/payment.js').Payment, form: import('$lib/api/payment.js').PaymentFormConfig }|null} */ (
+			null
+		)
+	);
 
 	let signInHref = $derived(
 		`${resolve('/login')}?next=${encodeURIComponent(page.url.pathname + page.url.search)}`
@@ -184,7 +191,11 @@
 				// Moyasar sends the payer back here, with `payment=<id>` added.
 				returnUrl: `${page.url.origin}${resolve('/bookings')}?tenant=${encodeURIComponent(storefront.tenant_id)}`
 			});
-			if (intent.redirect_url) {
+			if (intent.checkout) {
+				// Paid right here, in Moyasar's form for the invoice the API opened.
+				checkout = { payment: intent.payment, form: intent.checkout };
+			} else if (intent.redirect_url) {
+				// No publishable key on this deployment: Moyasar's hosted page.
 				window.location.href = intent.redirect_url;
 			} else {
 				toastStore.info(t('Payment is not configured for this business yet.'));
@@ -340,7 +351,17 @@
 								"A confirmation with your time and the salon's location is on its way to WhatsApp. If a deposit is due, pay it below to secure your slot."
 							)}
 						</p>
-						{#if booking.status === 'pending_payment'}
+						{#if checkout}
+							<div class="space-y-3 border-t border-line pt-4">
+								<div class="flex items-center justify-between text-sm">
+									<span class="font-medium text-fg">{t('Deposit due now')}</span>
+									<span class="font-semibold text-fg tabular-nums">
+										{formatMoney(checkout.payment.amount, checkout.payment.currency)}
+									</span>
+								</div>
+								<MoyasarForm config={checkout.form} />
+							</div>
+						{:else if booking.status === 'pending_payment'}
 							<Button fullWidth loading={payLoading} onclick={payNow}>{t('Pay deposit')}</Button>
 						{/if}
 						<Button fullWidth variant="outline" href={resolve('/bookings')}>

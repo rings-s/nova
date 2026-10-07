@@ -44,7 +44,8 @@ export default defineConfig(({ mode }) => {
 						// https image; business photos come from the API.
 						'img-src': ['self', 'data:', 'blob:', 'https:', ...api],
 						'media-src': ['self', 'blob:'],
-						'connect-src': ['self', ...api],
+						// Moyasar's Payment Form posts card details straight to its API.
+						'connect-src': ['self', 'https://api.moyasar.com', ...api],
 						'object-src': ['none'],
 						'base-uri': ['self'],
 						'form-action': ['self'],

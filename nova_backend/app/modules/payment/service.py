@@ -67,11 +67,35 @@ _FINAL_STATUSES = frozenset({PaymentStatus.FAILED, PaymentStatus.REFUNDED} | SET
 
 
 @dataclass(frozen=True)
+class PaymentFormConfig:
+    """What the browser hands Moyasar's Payment Form (`Moyasar.init`).
+
+    Bound to the invoice this server opened: Moyasar refuses a form payment
+    whose amount differs from the invoice's, so the browser cannot choose what
+    it pays, and the payment lands on that invoice, where `reconcile` and the
+    webhook already look for it. Nothing here is secret; the publishable key
+    can pay an invoice but neither create one nor read a payment back.
+    """
+
+    publishable_api_key: str
+    invoice_id: str
+    #: Integer minor units (halalas), as Moyasar takes them.
+    amount: int
+    currency: str
+    description: str
+    #: Where Moyasar sends the payer after paying or 3-D Secure, with its own
+    #: `id`, `status` and `message` added to the query.
+    callback_url: str
+
+
+@dataclass(frozen=True)
 class PaymentIntent:
-    """A payment plus wherever the customer has to go to complete it."""
+    """A payment plus how the customer completes it: the embedded form when a
+    publishable key is configured, else Moyasar's hosted page."""
 
     payment: Payment
     redirect_url: str | None
+    checkout: PaymentFormConfig | None = None
 
 
 class PaymentService:
@@ -85,6 +109,7 @@ class PaymentService:
         public_app_url: str,
         default_deposit_percent: int = 0,
         checkout_ttl_minutes: int = 30,
+        publishable_key: str | None = None,
     ) -> None:
         self.repository = repository
         self.gateway = gateway
@@ -94,6 +119,9 @@ class PaymentService:
         self.public_app_url = public_app_url
         self.default_deposit_percent = default_deposit_percent
         self.checkout_ttl_minutes = checkout_ttl_minutes
+        #: Moyasar's publishable key, for the embedded Payment Form. None means
+        #: payers use the invoice's hosted page instead.
+        self.publishable_key = publishable_key
 
     @property
     def session(self):
@@ -146,12 +174,13 @@ class PaymentService:
         # Moyasar sends the payer back to exactly this URL, so it carries the
         # payment's id: the page they land on asks `reconcile` what happened.
         landing = with_query(return_url, payment=str(payment.id))
+        # Shown to the payer on Moyasar's checkout page or form.
+        description = f"NOVA booking {booking_id.hex[:8].upper()}"
         try:
             invoice = await self.gateway.create_invoice(
                 amount_minor=amount_minor,
                 currency=due.currency,
-                # Shown to the payer on Moyasar's checkout page.
-                description=f"NOVA booking {booking_id.hex[:8].upper()}",
+                description=description,
                 success_url=landing,
                 back_url=landing,
                 expired_at=datetime.now(UTC) + timedelta(minutes=self.checkout_ttl_minutes),
@@ -173,9 +202,20 @@ class PaymentService:
             raise
 
         redirect_url = invoice.get("url")
+        checkout: PaymentFormConfig | None = None
         if invoice.get("id"):
-            payment.gateway_invoice_id = str(invoice["id"])
+            invoice_id = str(invoice["id"])
+            payment.gateway_invoice_id = invoice_id
             payment = await self.repository.save(payment)
+            if self.publishable_key:
+                checkout = PaymentFormConfig(
+                    publishable_api_key=self.publishable_key,
+                    invoice_id=invoice_id,
+                    amount=amount_minor,
+                    currency=due.currency,
+                    description=description,
+                    callback_url=landing,
+                )
 
         # The booking now waits on money. Deliberately not CONFIRMED: docs/06
         # section 7 keeps the two state machines separate.
@@ -197,7 +237,7 @@ class PaymentService:
                 currency=due.currency,
             ),
         )
-        return PaymentIntent(payment=payment, redirect_url=redirect_url)
+        return PaymentIntent(payment=payment, redirect_url=redirect_url, checkout=checkout)
 
     async def get(self, payment_id: UUID) -> Payment:
         payment = await self.repository.get_payment(payment_id)

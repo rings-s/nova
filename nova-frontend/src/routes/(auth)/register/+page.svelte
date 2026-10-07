@@ -12,12 +12,21 @@
 	import Logo from '$lib/components/layout/Logo.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 
+	// `?plan=<tier>` from a pricing-page plan: once the salon exists, open
+	// billing with that plan picked, which leads on to checkout.
+	const requested = page.url.searchParams.get('plan');
+	const plan = requested && ['solo', 'studio', 'chain'].includes(requested) ? requested : null;
+
 	// Only for someone who arrives already signed in. Registering signs the new
 	// account in *before* a business owner's salon is created, so reacting to
 	// that sign-in would pull them off this page mid-registration.
 	$effect(() => {
 		untrack(() => {
-			if (authStore.isAuthenticated) goto(resolve(landingPath(authStore)));
+			if (!authStore.isAuthenticated) return;
+			if (authStore.isStaff && plan) {
+				// eslint-disable-next-line svelte/no-navigation-without-resolve
+				goto(`${resolve('/app/billing')}?plan=${plan}`);
+			} else goto(resolve(landingPath(authStore)));
 		});
 	});
 
@@ -32,7 +41,10 @@
 					name: (details.tenant && pickBilingual(details.tenant, 'name')) || t('Your salon')
 				})
 			);
-			goto(resolve('/app'));
+			if (plan) {
+				// eslint-disable-next-line svelte/no-navigation-without-resolve
+				goto(`${resolve('/app/billing')}?plan=${plan}`);
+			} else goto(resolve('/app'));
 		} else {
 			toastStore.success(t('Account created successfully.'));
 			goto(resolve('/'));

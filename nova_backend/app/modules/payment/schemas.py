@@ -44,10 +44,31 @@ class PaymentOut(ApiSchema):
     created_at: datetime
 
 
+class PaymentFormConfigOut(ApiSchema):
+    """The options the browser passes to Moyasar's Payment Form, `Moyasar.init`.
+
+    Every value is the server's: the form pays exactly this invoice, for
+    exactly this amount, and Moyasar refuses it otherwise.
+    """
+
+    publishable_api_key: str
+    invoice_id: str
+    #: Integer minor units (halalas for SAR), as the form takes them.
+    amount: int
+    currency: str
+    description: str
+    #: Where Moyasar sends the payer afterwards, with `id`, `status` and
+    #: `message` added. None of those are trusted: the page calls `/sync`.
+    callback_url: str
+
+
 class PaymentIntentOut(ApiSchema):
     payment: PaymentOut
-    #: Where to send the customer to actually pay. Null when the gateway is
-    #: not configured or returned no hosted page.
+    #: Options for the embedded Payment Form, the way to pay when set. Null
+    #: when no publishable key is configured.
+    checkout: PaymentFormConfigOut | None = None
+    #: Moyasar's hosted page for the same invoice: the fallback when there is
+    #: no `checkout`. Null when the gateway returned no hosted page.
     redirect_url: str | None
 
 

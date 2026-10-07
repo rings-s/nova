@@ -28,9 +28,24 @@ import { newIdempotencyKey } from '../utils/idempotency.js';
  */
 
 /**
+ * Options for Moyasar's Payment Form (`Moyasar.init`), all decided by the
+ * server: the form pays exactly this invoice, for exactly this amount.
+ * @typedef {Object} PaymentFormConfig
+ * @property {string} publishable_api_key Public by design (`pk_…`).
+ * @property {string} invoice_id
+ * @property {number} amount Integer minor units (halalas for SAR).
+ * @property {string} currency
+ * @property {string} description
+ * @property {string} callback_url Where Moyasar sends the payer afterwards.
+ */
+
+/**
  * @typedef {Object} PaymentIntent
  * @property {Payment} payment
- * @property {string|null} redirect_url Where to send the customer to pay.
+ * @property {PaymentFormConfig|null} checkout The embedded form, when the
+ *   deployment has a publishable key: the way to pay when set.
+ * @property {string|null} redirect_url Moyasar's hosted page for the same
+ *   invoice: the fallback when `checkout` is null.
  */
 
 /**

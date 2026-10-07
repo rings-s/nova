@@ -12,6 +12,7 @@
 	 * with what will change spelled out, and a refusal (a downgrade the
 	 * business has outgrown, 409) is shown in that same dialog.
 	 */
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -180,6 +181,23 @@
 	let isUpgrade = $derived(
 		!!target && !!subscription && tierRank(target.tier) > tierRank(subscription.tier)
 	);
+
+	// `?plan=<tier>` from the pricing page (directly, or after registering):
+	// open that plan's confirmation once plans are loaded, which goes on to
+	// Moyasar for a paid plan. Dropped from the URL so a reload does not ask again.
+	let requestedPlan = $derived(page.url.searchParams.get('plan'));
+	$effect(() => {
+		const tier = requestedPlan;
+		if (!tier || loading || !plans.length) return;
+		untrack(() => {
+			const plan = plans.find((p) => p.tier === tier);
+			if (plan && canManagePlan) {
+				if (subscription?.tier !== tier) askToChange(plan);
+				else if (subscription.status === 'pending_payment') payNow();
+			}
+			goto(resolve('/app/billing'), { replaceState: true, noScroll: true, keepFocus: true });
+		});
+	});
 
 	// --- Paying for a plan -------------------------------------------------------------
 

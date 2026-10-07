@@ -45,6 +45,7 @@ from app.modules.payment.domain import (
 from app.modules.payment.exceptions import UnknownWebhookPaymentError
 from app.modules.payment.schemas import (
     CreatePaymentIntentRequest,
+    PaymentFormConfigOut,
     PaymentIntentOut,
     PaymentOut,
     RefundPaymentRequest,
@@ -91,6 +92,13 @@ async def create_payment_intent(
     """Starts a payment. Send an `Idempotency-Key` — a retried intent that
     creates a second gateway payment is a customer charged twice.
 
+    Opens a Moyasar invoice for the amount this server decides. When a
+    publishable key is configured, `checkout` holds the options for Moyasar's
+    embedded Payment Form, bound to that invoice (`invoice_id`); otherwise the
+    payer goes to `redirect_url`, the invoice's hosted page. Either way the
+    payer returns to `return_url` with `payment=<id>` added, and the page
+    calls `/sync`.
+
     Guarded on the booking: the request names a `booking_id`, and without a
     check any authenticated caller could open a real gateway payment against a
     stranger's appointment and read its price back in the response.
@@ -106,7 +114,13 @@ async def create_payment_intent(
         return replay
 
     intent = await service.create_intent(**payload.model_dump())
-    out = PaymentIntentOut(payment=_payment_out(intent.payment), redirect_url=intent.redirect_url)
+    out = PaymentIntentOut(
+        payment=_payment_out(intent.payment),
+        checkout=(
+            PaymentFormConfigOut.model_validate(intent.checkout) if intent.checkout else None
+        ),
+        redirect_url=intent.redirect_url,
+    )
     await guard.complete(status_code=status.HTTP_201_CREATED, body=out.model_dump(mode="json"))
     await session.commit()
     return out

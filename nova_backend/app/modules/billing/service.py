@@ -48,6 +48,7 @@ from app.modules.billing.domain import (
     build_reversal,
     checkout_for,
     percentage_of,
+    plan_for,
     requires_payment,
     to_fils,
 )
@@ -187,9 +188,13 @@ class BillingService:
         """The business's plan, provided it includes `feature` (docs/11 section 2).
 
         A business that never subscribed is on Solo, so a paid feature is
-        refused to it rather than assumed.
+        refused to it rather than assumed. So is one whose cancelled plan has
+        run past the period it paid for: it is back on Solo's terms.
         """
-        plan = (await self.subscription_or_default(business_id)).plan
+        subscription = await self.subscription_or_default(business_id)
+        plan = subscription.plan
+        if not subscription.has_access_on(datetime.now(UTC).date()):
+            plan = plan_for(PlanTier.SOLO)
         if feature not in plan.included_features:
             raise PlanFeatureRequiredError(feature, plan.tier)
         return plan

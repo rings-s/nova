@@ -611,5 +611,9 @@ export const DASHBOARD = {
 	"{plan} starts once it is paid for. Until then your business is on Solo terms.": "تبدأ باقة {plan} بعد الدفع. حتى ذلك الحين يبقى نشاطك على شروط باقة Solo.",
 	"Pay now": "ادفع الآن",
 	"Next, you pay on Moyasar's secure page (price plus 15% VAT). The plan starts as soon as the payment is confirmed.": "بعد ذلك تدفع عبر صفحة ميسّر الآمنة (السعر مع ضريبة القيمة المضافة 15%). تبدأ الباقة فور تأكيد الدفع.",
-	"Continue to payment": "متابعة إلى الدفع"
+	"Continue to payment": "متابعة إلى الدفع",
+	"{agent} comes with {plan}": "{agent} متاح ضمن باقة {plan}",
+	"Your current plan doesn't include this agent.": "باقتك الحالية لا تشمل هذا المساعد.",
+	"Upgrade to use it with your own numbers.": "قم بالترقية لاستخدامه مع أرقام نشاطك.",
+	"Ask the business owner to upgrade.": "اطلب من مالك النشاط الترقية."
 };

@@ -7,12 +7,15 @@ not touching that module.
 
 Written against Moyasar's API reference (https://docs.moyasar.com/api/):
 
-- **Checkout is an invoice** (`POST /v1/invoices`). The server sets the
-  amount and gets back `url`, Moyasar's hosted checkout page, where the payer
-  chooses mada, a card, Apple Pay or STC Pay (whichever the account enables).
-  Card data never reaches NOVA. `POST /v1/payments` is not used to start a
-  payment: it requires a `source` (raw card details or a token made in the
-  browser), which is the Payment Form's job, not a server's.
+- **Checkout is an invoice** (`POST /v1/invoices`), which fixes the amount
+  server-side. The payer pays it in the browser with Moyasar's Payment Form
+  (the `moyasar-payment-form` library, `Moyasar.init({invoice_id, …})`), which
+  posts card details straight to Moyasar with the *publishable* key; Moyasar
+  refuses a form payment whose amount differs from the invoice's. The
+  invoice's `url`, its hosted checkout page, is the fallback when no
+  publishable key is configured. Card data never reaches NOVA either way, and
+  this adapter never calls `POST /v1/payments`: that needs a `source`, which
+  is the form's job, not a server's.
 - **Amounts are integers in the smallest unit** (halalas for SAR); an invoice
   must be at least 100.
 - **Auth is HTTP Basic**, the secret key (`sk_test_…`/`sk_live_…`) as the

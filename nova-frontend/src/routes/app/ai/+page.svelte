@@ -6,8 +6,10 @@
 	 *
 	 * - Which agents appear depends on this role's permissions in this
 	 *   business (`accessStore`); the turn still checks for itself.
-	 * - A plan-gated agent (`required_feature`) is shown with its plan; the
-	 *   backend refuses the turn if the business's plan lacks it.
+	 * - A plan-gated agent (`required_feature`) is shown with the plan that
+	 *   unlocks it. When the business's plan lacks it (read from billing, which
+	 *   every role with such an agent may read), it is shown locked with the way
+	 *   to upgrade instead of a chat the backend would refuse.
 	 * - Every figure in an answer came from a tool (the grounding guardrail),
 	 *   and the business manager only proposes — nothing here changes data.
 	 * - With the local model server offline the page says so, rather than
@@ -17,6 +19,10 @@
 	import { businessStore } from '$lib/stores/business.svelte.js';
 	import { accessStore } from '$lib/stores/access.svelte.js';
 	import { listAgents } from '$lib/api/ai.js';
+	import { listPlans, getSubscription } from '$lib/api/billing.js';
+	import { ApiError } from '$lib/api/client.js';
+	import { planName, tierRank } from '$lib/components/billing/plans.js';
+	import { resolve } from '$app/paths';
 	import { errorMessage } from '$lib/utils/errors.js';
 
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -92,6 +98,52 @@
 		load();
 	});
 
+	// --- What the business's plan unlocks ------------------------------------------
+
+	let plans = $state(/** @type {import('$lib/api/billing.js').Plan[]} */ ([]));
+	/** The tier whose terms are in force; null until known (nothing is locked then). */
+	let tierInForce = $state(/** @type {string|null} */ (null));
+
+	$effect(() => {
+		const tenant = tenantId;
+		const business = businessId;
+		if (!tenant || !business || !accessStore.can('view_financials')) return;
+		let cancelled = false;
+		Promise.all([
+			listPlans(tenant),
+			getSubscription(tenant, business).catch((err) => {
+				// Never subscribed: on Solo.
+				if (err instanceof ApiError && err.status === 404) return null;
+				throw err;
+			})
+		])
+			.then(([page, subscription]) => {
+				if (cancelled) return;
+				plans = [...page.items].sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
+				// A paid plan waiting on its first payment runs on Solo's terms.
+				tierInForce =
+					!subscription || subscription.status === 'pending_payment' ? 'solo' : subscription.tier;
+			})
+			// Unknown is not locked: the backend still refuses a turn the plan lacks.
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	/** @param {import('$lib/api/ai.js').AgentInfo} agent */
+	function locked(agent) {
+		if (!agent.required_feature || !tierInForce) return false;
+		const plan = plans.find((p) => p.tier === tierInForce);
+		return !!plan && !plan.included_features.includes(agent.required_feature);
+	}
+
+	/** The cheapest plan that unlocks the agent. @param {import('$lib/api/ai.js').AgentInfo} agent */
+	function unlockingTier(agent) {
+		const feature = agent.required_feature;
+		return plans.find((p) => feature && p.included_features.includes(feature))?.tier ?? 'studio';
+	}
+
 	let agents = $derived(
 		(catalog?.agents ?? []).filter(
 			(agent) =>
@@ -134,7 +186,7 @@
 	)}
 >
 	{#snippet actions()}
-		{#if current && catalog?.inference_available}
+		{#if current && !locked(current) && catalog?.inference_available}
 			<Button variant="outline" size="sm" onclick={() => (conversation += 1)}>
 				<Icon name="plus" class="size-4" />
 				{t('New conversation')}
@@ -207,7 +259,10 @@
 							<span class="flex flex-wrap items-center gap-1.5">
 								<span class="text-sm font-semibold text-fg">{label(agent)}</span>
 								{#if agent.required_feature}
-									<Badge tone="accent" size="sm">{t('Studio')}</Badge>
+									<Badge tone="accent" size="sm">
+										{#if locked(agent)}<Icon name="lock" class="size-3" />{/if}
+										{planName(unlockingTier(agent))}
+									</Badge>
 								{/if}
 							</span>
 							<span class="mt-0.5 block text-[13px] text-fg-muted">
@@ -222,7 +277,34 @@
 			</li>
 		</ul>
 
-		{#if current && tenantId}
+		{#if current && locked(current)}
+			{@const tier = unlockingTier(current)}
+			<div class="rounded-card border border-line bg-surface p-6 shadow-card">
+				<div class="flex items-start gap-4">
+					<span
+						class="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-muted text-fg-muted"
+					>
+						<Icon name="lock" class="size-5" />
+					</span>
+					<div class="min-w-0">
+						<p class="font-semibold text-fg">
+							{t('{agent} comes with {plan}', { agent: label(current), plan: planName(tier) })}
+						</p>
+						<p class="mt-1 max-w-2xl text-sm text-fg-secondary">
+							{t("Your current plan doesn't include this agent.")}
+							{accessStore.can('manage_subscription')
+								? t('Upgrade to use it with your own numbers.')
+								: t('Ask the business owner to upgrade.')}
+						</p>
+						{#if accessStore.can('manage_subscription')}
+							<Button class="mt-4" size="sm" href={`${resolve('/app/billing')}?plan=${tier}`}>
+								{t('Upgrade to {plan}', { plan: planName(tier) })}
+							</Button>
+						{/if}
+					</div>
+				</div>
+			</div>
+		{:else if current && tenantId}
 			{#key `${current.name}:${conversation}`}
 				<ChatWidget
 					{tenantId}

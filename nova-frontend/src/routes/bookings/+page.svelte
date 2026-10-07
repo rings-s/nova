@@ -155,11 +155,18 @@
 	});
 
 	/**
-	 * Back from Moyasar's checkout: `?tenant=…&payment=…`. The server checks
-	 * Moyasar's own record of the payment before anything is confirmed, so
-	 * this page only reports what it found, then reloads the list.
+	 * Back from Moyasar's checkout: `?tenant=…&payment=…`, plus the Payment
+	 * Form's own `id`, `status` and `message`. The server checks Moyasar's
+	 * record of the payment before anything is confirmed, so this page only
+	 * reports what it found, then reloads the list.
+	 *
+	 * Moyasar's `status=failed` only picks the wording while the server still
+	 * says pending (a declined card leaves the invoice open for another try).
+	 * Its `message` is never shown: anyone can write it into a link.
 	 */
-	let returning = $state(/** @type {'checking'|'paid'|'pending'|'failed'|null} */ (null));
+	let returning = $state(
+		/** @type {'checking'|'paid'|'pending'|'declined'|'failed'|null} */ (null)
+	);
 	/** Which return was handled, so a re-run of the effect does not check it twice. */
 	let handledPayment = '';
 
@@ -169,6 +176,7 @@
 		if (!authStore.isAuthenticated || !tenantId || !paymentId) return;
 		if (handledPayment === paymentId) return;
 		handledPayment = paymentId;
+		const declined = page.url.searchParams.get('status') === 'failed';
 		returning = 'checking';
 		syncPayment(tenantId, paymentId)
 			.then((payment) => {
@@ -178,7 +186,7 @@
 				} else if (payment.status === 'failed') {
 					returning = 'failed';
 				} else {
-					returning = 'pending';
+					returning = declined ? 'declined' : 'pending';
 				}
 				return loadAll();
 			})
@@ -191,8 +199,9 @@
 				// router has started, which it has by the time the check returns.
 				// A refresh before then only checks again, which is harmless.
 				const clean = new URL(page.url);
-				clean.searchParams.delete('tenant');
-				clean.searchParams.delete('payment');
+				for (const key of ['tenant', 'payment', 'id', 'status', 'message']) {
+					clean.searchParams.delete(key);
+				}
 				// eslint-disable-next-line svelte/no-navigation-without-resolve
 				replaceState(clean.pathname + clean.search, {});
 			});
@@ -262,6 +271,12 @@
 		<Alert tone="warning" class="mb-6" dismissible ondismiss={() => (returning = null)}>
 			{t(
 				"We haven't received your payment yet. If you completed it, it will show here within a minute; your booking is held until then."
+			)}
+		</Alert>
+	{:else if returning === 'declined'}
+		<Alert tone="error" class="mb-6" dismissible ondismiss={() => (returning = null)}>
+			{t(
+				"Your card wasn't charged: the payment was declined or not verified. You can try again from the salon's page."
 			)}
 		</Alert>
 	{:else if returning === 'failed'}

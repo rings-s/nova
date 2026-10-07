@@ -210,16 +210,26 @@ are in `modules/payment`.
 **The flow**
 
 1. `POST /tenants/{id}/payments/intents` opens a Moyasar **invoice**
-   (`POST /v1/invoices`) for the booking's price, in halalas. The response's
-   `redirect_url` is Moyasar's hosted checkout. The payer pays there with mada,
-   a card, Apple Pay or STC Pay (whichever the account enables), so card data
-   never reaches NOVA.
-2. Moyasar sends the payer back to the `return_url` the client gave, with
-   `payment=<id>` added. The page calls `POST …/payments/{id}/sync`, which
+   (`POST /v1/invoices`) for the booking's price, in halalas, so the server
+   decides the amount.
+2. With `MOYASAR_PUBLISHABLE_KEY` set, the response's `checkout` holds the
+   options for Moyasar's
+   [Payment Form](https://docs.moyasar.com/guides/card-payments/basic-integration)
+   (`moyasar-payment-form`, `Moyasar.init`), bound to that invoice by
+   `invoice_id`. The booking page renders it (`MoyasarForm.svelte`), offering
+   mada, Visa, Mastercard and STC Pay. Card details go from the browser straight
+   to Moyasar, and Moyasar refuses a form payment whose amount differs from the
+   invoice's. Without the key, `redirect_url`, the invoice's hosted page, is
+   the fallback. Apple Pay is not enabled in the form: it needs the domain
+   verified with Moyasar and Apple's script allowed by the CSP.
+3. After 3-D Secure, Moyasar sends the payer to the `return_url` the client
+   gave, with `payment=<id>` added (and, from the form, Moyasar's own `id`,
+   `status` and `message`, none of them trusted). The page calls
+   `POST …/payments/{id}/sync`, which
    fetches the invoice and its payment from Moyasar and captures only if the
    status is `paid` and the amount, currency and invoice all match. The redirect
    itself proves nothing.
-3. Moyasar also sends a `payment_paid` webhook to `POST /api/v1/webhooks/moyasar`.
+4. Moyasar also sends a `payment_paid` webhook to `POST /api/v1/webhooks/moyasar`.
    It is authenticated by the `secret_token` in its body, deduplicated by event
    id, and checked against Moyasar's record of the payment just like a sync.
    Either path confirms the booking; whichever arrives second changes nothing.
@@ -231,17 +241,20 @@ expires (`MOYASAR_CHECKOUT_TTL_MINUTES`, default 30) or is cancelled.
 **Setting it up**
 
 1. In the [Moyasar dashboard](https://dashboard.moyasar.com), under Settings >
-   API Keys, copy the **secret** key. Use `sk_test_…` until go-live. The
-   publishable `pk_…` key cannot create invoices, so the app refuses to start
-   with it, and it refuses `sk_test_…` when `ENV=production`.
+   API Keys, copy the **secret** key and the **publishable** key. Use the test
+   pair (`sk_test_…`, `pk_test_…`) until go-live. The app refuses to start with
+   a `pk_…` key as `MOYASAR_API_KEY` or an `sk_…` key as
+   `MOYASAR_PUBLISHABLE_KEY`, with a test and a live key mixed, and with any
+   test key when `ENV=production`.
 2. Under Settings > Webhooks, add
    `https://<your public host>/api/v1/webhooks/moyasar` with a shared secret of
    your choosing (`openssl rand -hex 32`). Subscribe to at least
    `payment_paid` and `payment_failed`.
-3. Set both in `infra/.env` and restart the stack (`make dev`):
+3. Set them in `infra/.env` and restart the stack (`make dev`):
 
    ```dotenv
    MOYASAR_API_KEY=sk_test_...
+   MOYASAR_PUBLISHABLE_KEY=pk_test_...
    MOYASAR_WEBHOOK_SECRET=<the webhook's shared secret>
    ```
 

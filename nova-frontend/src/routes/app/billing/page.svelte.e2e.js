@@ -86,7 +86,7 @@ const INVOICE = {
 
 /**
  * @param {import('@playwright/test').Page} page
- * @param {{ permissions?: string[], changePlan?: (body: any) => { status: number, json: object } }} [options]
+ * @param {{ permissions?: string[], path?: string, changePlan?: (body: any) => { status: number, json: object } }} [options]
  * @returns {Promise<{ method: string, path: string, body: any }[]>} the API calls the page made
  */
 async function openBilling(page, options = {}) {
@@ -178,7 +178,7 @@ async function openBilling(page, options = {}) {
 		return json({ items: [], total: 0 });
 	});
 
-	await page.goto('/app/billing');
+	await page.goto(options.path ?? '/app/billing');
 	await expect(page.getByRole('heading', { name: 'Studio', exact: true }).first()).toBeVisible();
 	return calls;
 }
@@ -216,6 +216,14 @@ test('an upgrade is confirmed first, showing what changes', async ({ page }) => 
 		annual: false
 	});
 	await expect(page.getByText('Your current plan')).toBeVisible();
+});
+
+test('a plan picked on the pricing page opens its confirmation', async ({ page }) => {
+	await openBilling(page, { path: '/app/billing?plan=chain' });
+
+	await expect(page.getByRole('dialog', { name: 'Upgrade to Chain?' })).toBeVisible();
+	// Dropped from the URL, so a reload does not ask again.
+	await expect(page).toHaveURL(/\/app\/billing$/);
 });
 
 test('a refused downgrade is explained in the dialog, not lost in a toast', async ({ page }) => {

@@ -1,6 +1,7 @@
 <script>
 	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
+	import { authStore } from '$lib/stores/auth.svelte.js';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -9,10 +10,11 @@
 	import SectionHeading from '$lib/components/marketing/SectionHeading.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
 
-	// Illustrative pricing only — not wired to the billing API.
-	// These names match the real PlanTier values.
+	// Illustrative prices only; the billing page shows the API's. `tier` is the
+	// real PlanTier, carried to the billing page so the choice opens checkout.
 	const tiers = [
 		{
+			tier: 'solo',
 			name: m('Solo'),
 			priceMonthly: 149,
 			description: m('One location, one provider.'),
@@ -25,6 +27,7 @@
 			]
 		},
 		{
+			tier: 'studio',
 			name: m('Studio'),
 			priceMonthly: 349,
 			description: m('A small team, multiple providers.'),
@@ -38,6 +41,7 @@
 			featured: true
 		},
 		{
+			tier: 'chain',
 			name: m('Chain'),
 			priceMonthly: 799,
 			description: m('Multiple locations under one account.'),
@@ -50,6 +54,16 @@
 			]
 		}
 	];
+
+	/**
+	 * A staff member already signed in goes straight to billing with the plan
+	 * picked; anyone else registers a business first and lands there after.
+	 * @param {string} tier
+	 */
+	const planHref = (tier) =>
+		authStore.isStaff
+			? `${resolve('/app/billing')}?plan=${tier}`
+			: `${resolve('/register')}?as=business&plan=${tier}`;
 
 	const faqs = [
 		{
@@ -251,7 +265,7 @@
 						<Button
 							size="lg"
 							variant={tier.featured ? 'primary' : 'outline'}
-							href={`${resolve('/register')}?as=business`}
+							href={planHref(tier.tier)}
 							class="w-full"
 						>
 							{t('Start with {plan}', { plan: t(tier.name) })}

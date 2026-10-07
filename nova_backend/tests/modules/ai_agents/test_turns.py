@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
+import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
@@ -23,13 +24,16 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Principal, PrincipalKind, get_principal
 from app.db.session import set_tenant_scope
+from app.modules.ai_agents.agents import AGENTS
 from app.modules.ai_agents.dependencies import get_inference_engine
 from app.modules.ai_agents.runtime import InferenceEngine
+from app.modules.billing.domain import PlanTier, plan_for, requires_payment
+from app.modules.billing.models import SubscriptionRecord
 from app.modules.booking.domain import BookingSource, BookingStatus
 from app.modules.booking.models import BookingRecord
 from app.modules.catalog.service import CatalogService
@@ -557,3 +561,80 @@ async def test_a_figure_a_tool_returned_in_an_earlier_turn_is_still_grounded(
     assert again.status_code == 200, again.text
     assert again.json()["requires_human_handoff"] is False
     assert again.json()["reply"] == "As I said, 300.00 SAR."
+
+
+# --- plans -----------------------------------------------------------------
+
+#: Every agent a tenant's chat route serves, which business it is told about,
+#: and whether each plan unlocks it — read from the roster and the price list,
+#: so a plan or agent added later is covered without editing this file.
+TENANT_AGENTS = sorted(name for name, spec in AGENTS.items() if not spec.marketplace)
+
+
+async def subscribe(client: AsyncClient, salon: dict, tier: PlanTier, **extra: Any) -> None:
+    body = {"business_id": str(salon["business"].id), "tier": str(tier), **extra}
+    response = await client.post(
+        f"/api/v1/tenants/{salon['tenant'].id}/billing/subscriptions", json=body
+    )
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.parametrize("tier", list(PlanTier))
+@pytest.mark.parametrize("agent", TENANT_AGENTS)
+async def test_every_plan_runs_the_agents_it_includes_and_only_those(
+    app: FastAPI, client: AsyncClient, salon, tier: PlanTier, agent: str
+):
+    # Paid plans on a trial: they apply at once, as a paid-up plan would.
+    await subscribe(client, salon, tier, trial_days=14 if requires_payment(tier) else 0)
+    spec = AGENTS[agent]
+    use_model(app, Recorder())
+
+    response = await chat(client, salon, agent, with_business=spec.needs_business)
+
+    included = spec.required_feature is None or (
+        spec.required_feature in plan_for(tier).included_features
+    )
+    if included:
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Answer 1."
+        assert response.json()["requires_human_handoff"] is False
+    else:
+        assert response.status_code == 403, response.text
+        assert response.json()["error"]["code"] == "plan_feature_required"
+
+
+async def test_an_unpaid_plan_runs_only_solo_agents(app: FastAPI, client: AsyncClient, salon):
+    # No trial: Studio waits on its first payment and is gated as Solo until then.
+    await subscribe(client, salon, PlanTier.STUDIO)
+    use_model(app, Recorder())
+
+    assert (await chat(client, salon, "accountant_agent")).status_code == 200
+    refused = await chat(client, salon, "analyst_agent")
+    assert refused.status_code == 403
+    assert refused.json()["error"]["code"] == "plan_feature_required"
+
+
+async def test_a_cancelled_plan_stops_unlocking_agents_after_its_paid_period(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
+):
+    await subscribe(client, salon, PlanTier.STUDIO, trial_days=14)
+    cancelled = await client.post(
+        f"/api/v1/tenants/{salon['tenant'].id}/billing/subscriptions/{salon['business'].id}/cancel",
+        json={"at_period_end": False},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    use_model(app, Recorder())
+    # Still inside the period it paid for: still Studio (docs/11 section 5).
+    assert (await chat(client, salon, "analyst_agent")).status_code == 200
+
+    await set_tenant_scope(db_session, salon["tenant"].id)
+    await db_session.execute(
+        update(SubscriptionRecord)
+        .where(SubscriptionRecord.business_id == salon["business"].id)
+        .values(current_period_end=datetime.now(UTC).date())
+    )
+    await db_session.flush()
+
+    refused = await chat(client, salon, "analyst_agent")
+    assert refused.status_code == 403
+    assert refused.json()["error"]["code"] == "plan_feature_required"
