@@ -12,7 +12,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Numeric,
@@ -27,6 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPKMixin
+from app.db.types import EnumValue
 from app.modules.payment.domain import PaymentStatus
 
 
@@ -82,7 +82,7 @@ class PaymentRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     )
 
     status: Mapped[PaymentStatus] = mapped_column(
-        Enum(PaymentStatus, name="payment_status", native_enum=False, length=32),
+        EnumValue(PaymentStatus, length=32),
         nullable=False,
         default=PaymentStatus.PENDING,
     )

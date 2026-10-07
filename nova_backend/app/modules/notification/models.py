@@ -7,12 +7,13 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPKMixin
+from app.db.types import EnumValue
 from app.modules.notification.domain import (
     MessageTemplate,
     NotificationChannel,
@@ -37,16 +38,16 @@ class NotificationRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     channel: Mapped[NotificationChannel] = mapped_column(
-        Enum(NotificationChannel, name="notification_channel", native_enum=False, length=32),
+        EnumValue(NotificationChannel, length=32),
         nullable=False,
         default=NotificationChannel.WHATSAPP,
     )
     template: Mapped[MessageTemplate] = mapped_column(
-        Enum(MessageTemplate, name="notification_template", native_enum=False, length=64),
+        EnumValue(MessageTemplate, length=64),
         nullable=False,
     )
     status: Mapped[NotificationStatus] = mapped_column(
-        Enum(NotificationStatus, name="notification_status", native_enum=False, length=32),
+        EnumValue(NotificationStatus, length=32),
         nullable=False,
         default=NotificationStatus.PENDING,
     )

@@ -17,7 +17,6 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    Enum,
     Index,
     Integer,
     Numeric,
@@ -30,6 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPKMixin
+from app.db.types import EnumValue
 from app.modules.booking.domain import BookingSource, BookingStatus
 
 
@@ -60,7 +60,7 @@ class BookingRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="SAR")
 
     status: Mapped[BookingStatus] = mapped_column(
-        Enum(BookingStatus, name="booking_status", native_enum=False, length=32),
+        EnumValue(BookingStatus, length=32),
         nullable=False,
         default=BookingStatus.DRAFT,
         index=True,
@@ -70,7 +70,7 @@ class BookingRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     #: be a monthly billing rollup that does not exist yet, and docs/08 section
     #: 18 warns against indexing ahead of a real query plan.
     source: Mapped[BookingSource] = mapped_column(
-        Enum(BookingSource, name="booking_source", native_enum=False, length=32),
+        EnumValue(BookingSource, length=32),
         nullable=False,
         default=BookingSource.DIRECT_LINK,
     )

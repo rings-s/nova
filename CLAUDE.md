@@ -179,6 +179,7 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
 - **Mixins** live in `app/db/mixins.py`.
   - `TimestampMixin` sets `__mapper_args__ = {"eager_defaults": True}`. A model that declares its own `__mapper_args__` must keep that key, or endpoints returning an updated row raise `MissingGreenlet`.
   - `SoftDeleteMixin` is **not** auto-filtered.
+- **Enum columns** use `app/db/types.py::EnumValue` (a `StrEnum` stored as its *value* in a VARCHAR, never `sqlalchemy.Enum`, which stores member names). Raw SQL and constraints can then say `status = 'confirmed'`. It still reads a legacy member name. A new enum column needs no migration check constraint.
 - **Bilingual text** is stored as `name_en`/`name_ar` column pairs, both required (`core/validators.py::require_bilingual_text`, ADR-0004).
 - **Money** uses `core/values.Money`. The defaults are SAR and Asia/Riyadh.
 - **Business photos** (ADR-0013) belong to `catalog`. Uploads go to the API as the raw request body; `integrations/images.py` re-encodes them to WebP, and they are stored through the `ImageStore` protocol (`integrations/storage`, `LocalImageStore` under `MEDIA_ROOT`). Only `business_photos` rows live in Postgres. They are served by `GET /discovery/photos/{id}/{variant}`: publicly for a listed business, or through an HMAC-signed, expiring link for the owner's preview.

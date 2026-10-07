@@ -13,7 +13,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -25,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.mixins import SoftDeleteMixin, TenantOwnedMixin, TimestampMixin, UUIDPKMixin
+from app.db.types import EnumValue
 from app.modules.queue.domain import QueueEntrySource, QueueEntryStatus, TicketStatus
 
 
@@ -80,13 +80,13 @@ class QueueEntryRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     status: Mapped[QueueEntryStatus] = mapped_column(
-        Enum(QueueEntryStatus, name="queue_entry_status", native_enum=False, length=32),
+        EnumValue(QueueEntryStatus, length=32),
         nullable=False,
         default=QueueEntryStatus.WAITING,
         index=True,
     )
     source: Mapped[QueueEntrySource] = mapped_column(
-        Enum(QueueEntrySource, name="queue_entry_source", native_enum=False, length=32),
+        EnumValue(QueueEntrySource, length=32),
         nullable=False,
         default=QueueEntrySource.WALK_IN,
     )
@@ -130,7 +130,7 @@ class TicketRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     qr_token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
     status: Mapped[TicketStatus] = mapped_column(
-        Enum(TicketStatus, name="ticket_status", native_enum=False, length=32),
+        EnumValue(TicketStatus, length=32),
         nullable=False,
         default=TicketStatus.ACTIVE,
     )

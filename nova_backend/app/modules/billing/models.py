@@ -16,7 +16,6 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -30,6 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.mixins import TenantOwnedMixin, TimestampMixin, UUIDPKMixin
+from app.db.types import EnumValue
 from app.modules.billing.domain import (
     CheckoutStatus,
     CommissionClass,
@@ -60,10 +60,10 @@ class SubscriptionRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     tier: Mapped[PlanTier] = mapped_column(
-        Enum(PlanTier, name="plan_tier", native_enum=False, length=32), nullable=False
+        EnumValue(PlanTier, length=32), nullable=False
     )
     status: Mapped[SubscriptionStatus] = mapped_column(
-        Enum(SubscriptionStatus, name="subscription_status", native_enum=False, length=32),
+        EnumValue(SubscriptionStatus, length=32),
         nullable=False,
         default=SubscriptionStatus.TRIALING,
     )
@@ -144,7 +144,7 @@ class CommissionLineRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     #: this row must stay readable when the booking is long archived.
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     commission_class: Mapped[CommissionClass] = mapped_column(
-        Enum(CommissionClass, name="commission_class", native_enum=False, length=32),
+        EnumValue(CommissionClass, length=32),
         nullable=False,
     )
 
@@ -154,7 +154,7 @@ class CommissionLineRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="SAR")
 
     status: Mapped[CommissionLineStatus] = mapped_column(
-        Enum(CommissionLineStatus, name="commission_line_status", native_enum=False, length=32),
+        EnumValue(CommissionLineStatus, length=32),
         nullable=False,
         default=CommissionLineStatus.DRAFT,
     )
@@ -191,7 +191,7 @@ class InvoiceRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
 
     status: Mapped[InvoiceStatus] = mapped_column(
-        Enum(InvoiceStatus, name="invoice_status", native_enum=False, length=32),
+        EnumValue(InvoiceStatus, length=32),
         nullable=False,
         default=InvoiceStatus.DRAFT,
     )
@@ -247,7 +247,7 @@ class SubscriptionCheckoutRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedM
         UUID(as_uuid=True), ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False
     )
     tier: Mapped[PlanTier] = mapped_column(
-        Enum(PlanTier, name="plan_tier", native_enum=False, length=32), nullable=False
+        EnumValue(PlanTier, length=32), nullable=False
     )
     annual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
@@ -256,7 +256,7 @@ class SubscriptionCheckoutRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedM
     covers_from: Mapped[date] = mapped_column(Date, nullable=False)
     covers_until: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[CheckoutStatus] = mapped_column(
-        Enum(CheckoutStatus, name="checkout_status", native_enum=False, length=32),
+        EnumValue(CheckoutStatus, length=32),
         nullable=False,
         default=CheckoutStatus.PENDING,
     )
