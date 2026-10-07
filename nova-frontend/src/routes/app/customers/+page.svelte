@@ -106,12 +106,7 @@
 	{/snippet}
 </PageHeader>
 
-<form
-	class="relative mb-6 max-w-md"
-	onsubmit={handleSearchSubmit}
-	role="search"
-	hidden={!allowed}
->
+<form class="relative mb-6 max-w-md" onsubmit={handleSearchSubmit} role="search" hidden={!allowed}>
 	<Icon
 		name="search"
 		class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle"

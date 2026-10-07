@@ -41,7 +41,9 @@
 			<div class="max-w-xs">
 				<Logo />
 				<p class="mt-4 text-sm leading-6 text-fg-muted">
-					{t('Bookings, walk-ins and payments for salons, spas, massage centres and beauty clinics in the GCC.')}
+					{t(
+						'Bookings, walk-ins and payments for salons, spas, massage centres and beauty clinics in the GCC.'
+					)}
 				</p>
 			</div>
 

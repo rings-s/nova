@@ -152,7 +152,11 @@
 </script>
 
 <svelte:head>
-	<title>{t('NOVA — Bookings, queues and payments for GCC salons, spas, massage centres and beauty clinics')}</title>
+	<title
+		>{t(
+			'NOVA — Bookings, queues and payments for GCC salons, spas, massage centres and beauty clinics'
+		)}</title
+	>
 </svelte:head>
 
 <!-- Hero -->

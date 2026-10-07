@@ -172,7 +172,7 @@
 			toastStore.success(
 				booking.status === 'confirmed'
 					? t('Booking confirmed.')
-					: t('Booking received. The salon will confirm it.')
+					: t('Booking received. The venue will confirm it.')
 			);
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} catch (err) {
@@ -281,7 +281,7 @@
 	<Container size="md" class="py-20">
 		<EmptyState
 			title={t('Choose a service first')}
-			description={t('Pick a treatment on the salon page, then choose when.')}
+			description={t('Pick a treatment on the venue page, then choose when.')}
 		>
 			{#snippet icon()}<Icon name="calendar" class="size-6" />{/snippet}
 		</EmptyState>
@@ -348,7 +348,7 @@
 						</div>
 						<p class="rounded-control bg-surface-sunken p-3 text-xs text-fg-secondary">
 							{t(
-								"A confirmation with your time and the salon's location is on its way to WhatsApp. If a deposit is due, pay it below to secure your slot."
+								"A confirmation with your time and the venue's location is on its way to WhatsApp. If a deposit is due, pay it below to secure your slot."
 							)}
 						</p>
 						{#if checkout}
@@ -361,7 +361,7 @@
 								</div>
 								<MoyasarForm config={checkout.form} />
 							</div>
-						{:else if booking.status === 'pending_payment'}
+						{:else if booking.status === 'draft' || booking.status === 'pending_payment'}
 							<Button fullWidth loading={payLoading} onclick={payNow}>{t('Pay deposit')}</Button>
 						{/if}
 						<Button fullWidth variant="outline" href={resolve('/bookings')}>
@@ -431,7 +431,7 @@
 						/>
 						<p class="mt-6 flex items-center gap-2 text-xs text-fg-muted">
 							<Icon name="info" class="size-3.5" />
-							{t('Pick a day to see its times. Times are in the salon’s local time.')}
+							{t('Pick a day to see its times. Times are in the venue’s local time.')}
 						</p>
 					{/if}
 				</Card>
