@@ -296,6 +296,23 @@ class TestOwnerOnlyAgents:
         assert exc.value.violation is GuardrailViolation.OWNER_ONLY
 
 
+    async def test_an_owner_agent_without_a_scope_refuses_instead_of_skipping_the_role_check(self):
+        # With no service scope there is no membership to read. The check must
+        # fail closed, not be skipped and let the turn reach the model.
+        service = AiChatService(engine=None, services=None, tenant_id=uuid4())
+        staff = Principal(subject_id=uuid4(), kind=PrincipalKind.STAFF)
+        with pytest.raises(GuardrailError):
+            await service.chat(
+                message="How much is this month's invoice?",
+                session_id="s1",
+                principal=staff,
+                customer_id=None,
+                self_service=False,
+                business_id=uuid4(),
+                agent_name="accountant_agent",
+            )
+
+
 class TestNumericGrounding:
     """docs/13 section 5.2: every figure in an owner-facing reply came from a tool."""
 

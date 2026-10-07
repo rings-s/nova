@@ -269,6 +269,10 @@ class AiChatService:
         if spec.needs_business and business_id is None:
             raise ValidationDomainError(f"'{spec.name}' works on one business: send business_id.")
         context_business = spec.needs_business or (spec.accepts_business and business_id)
+        if self.services is None and spec.required_permission is not None:
+            # No scope to read this tenant's membership through: refuse rather
+            # than skip the check and answer an owner agent's question.
+            raise AgentUnavailableError(agent_name)
         if self.services is not None and (spec.required_permission is not None or context_business):
             # One short unit of work for every check before the model runs.
             async with self.services() as services:
