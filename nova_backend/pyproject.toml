@@ -75,6 +75,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "ai_eval: scores the real model on a fixed set; needs AI_EVAL=1 and a model server (make ai-eval)",
+]
 
 [tool.ruff]
 line-length = 100

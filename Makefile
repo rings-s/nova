@@ -4,7 +4,7 @@ BACKEND = cd nova_backend && uv run
 # one-off `tools` container. `backend` and `worker` never hold those credentials.
 TOOLS = $(COMPOSE) run --rm tools
 
-.PHONY: help dev down logs tunnel migrate migrate-check host-env revision db-app-role backup restore-check superuser test test-local lint fmt typecheck check worker image
+.PHONY: help dev down logs tunnel migrate migrate-check host-env ai-eval revision db-app-role backup restore-check superuser test test-local lint fmt typecheck check worker image
 
 help:
 	@echo "Docker (full stack):"
@@ -16,6 +16,7 @@ help:
 	@echo "  make migrate    re-apply migrations in a one-off tools container"
 	@echo "  make migrate-check  fail if the models changed without a migration (alembic check)"
 	@echo "  make host-env   write nova_backend/.env so uv/alembic run on the host (app role only)"
+	@echo "  make ai-eval    score the configured model on a fixed Arabic/English set (needs the model server)"
 	@echo "  make db-app-role  give nova_app its login on a volume older than that role"
 	@echo "  make backup     dump the database now into the backup volume"
 	@echo "  make restore-check  restore the newest dump into a scratch database and look at it"
@@ -81,6 +82,12 @@ host-env: infra/.env
 		"SECRET_KEY=$$(get SECRET_KEY)" \
 		> nova_backend/.env; \
 	echo "wrote nova_backend/.env (app role only, git-ignored)"
+
+# Opt-in: it needs the model server from AI_BASE_URL (LM Studio or Ollama on the
+# host) and takes minutes on a CPU. Prints a pass/fail table; AI_EVAL_MIN_PASS
+# (default 0.8) is the gate. Run it before and after changing a model or prompt.
+ai-eval:
+	$(COMPOSE) run --rm -e AI_EVAL=1 tools uv run pytest tests/ai_eval -s -q
 
 revision:
 	@test -n "$(m)" || (echo "usage: make revision m=\"add_something\"" && exit 1)
