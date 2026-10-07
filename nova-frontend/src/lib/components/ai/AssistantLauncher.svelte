@@ -98,7 +98,7 @@
 	<div class="fixed end-4 bottom-4 z-40 flex flex-col items-end gap-3 sm:end-6 sm:bottom-6">
 		{#if open}
 			<div class="w-[min(26rem,calc(100vw-2rem))] shadow-overlay" role="dialog" aria-label={title}>
-				{#if authStore.isAuthenticated && authStore.principal?.kind === 'customer'}
+				{#if authStore.isAuthenticated && authStore.isCustomerAt(marketplace ? null : tenantId)}
 					<ChatWidget
 						{tenantId}
 						{agent}

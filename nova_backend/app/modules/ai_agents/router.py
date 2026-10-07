@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import get_authorized_tenant
-from app.core.security import Principal, get_principal
+from app.core.security import Principal, get_customer_principal, get_principal
 from app.core.throttling import write_rate_limit
 from app.modules.ai_agents.agents import AGENT_ALIASES, AGENTS
 from app.modules.ai_agents.dependencies import (
@@ -230,7 +230,7 @@ marketplace_router = APIRouter(prefix="/discovery/ai", tags=["ai"])
 async def marketplace_chat(
     payload: MarketplaceChatRequest,
     service: AiChatService = Depends(get_marketplace_chat_service),
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(get_customer_principal),
 ) -> AiChatResponse:
     """One turn with `marketplace_agent`: search any listed business, hold a time
     there, and book it once the customer confirms it (`confirm_hold_token`),

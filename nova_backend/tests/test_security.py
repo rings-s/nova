@@ -9,7 +9,7 @@ import hmac
 import json
 import time
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import Request
@@ -30,6 +30,7 @@ from app.core.security import (
     get_principal,
     issue_purpose_token,
     issue_token,
+    principal_at_tenant,
     purpose_key,
     require_tenant_access,
 )
@@ -465,3 +466,55 @@ class TestServiceKindRefusal:
     @pytest.mark.parametrize("env", ["staging", "production"])
     def test_refused_when_deployed(self, env):
         assert _service_kind_refusal(env) is not None
+
+
+class TestStaffElsewhere:
+    """ADR-0016: staff authority is per business; elsewhere the account is a customer."""
+
+    def _staff(self, *tenants: UUID) -> Principal:
+        return Principal(
+            subject_id=uuid4(),
+            kind=PrincipalKind.STAFF,
+            tenant_ids=frozenset(tenants),
+            roles=frozenset({"owner"}),
+        )
+
+    def test_staff_stay_staff_at_their_own_business(self):
+        own = uuid4()
+        staff = self._staff(own)
+        assert principal_at_tenant(staff, own) is staff
+
+    def test_staff_are_customers_at_a_business_they_do_not_work_for(self):
+        staff = self._staff(uuid4())
+        elsewhere = principal_at_tenant(staff, uuid4())
+        assert elsewhere.kind is PrincipalKind.CUSTOMER
+        assert not elsewhere.is_staff
+        assert elsewhere.tenant_ids == frozenset() and elsewhere.roles == frozenset()
+        assert elsewhere.subject_id == staff.subject_id
+
+    def test_without_a_tenant_nothing_changes(self):
+        staff = self._staff(uuid4())
+        assert principal_at_tenant(staff, None) is staff
+
+    @pytest.mark.parametrize("kind", [PrincipalKind.CUSTOMER, PrincipalKind.SERVICE])
+    def test_other_kinds_are_untouched(self, kind):
+        principal = Principal(subject_id=uuid4(), kind=kind)
+        assert principal_at_tenant(principal, uuid4()) is principal
+
+    async def test_get_principal_reads_the_tenant_from_the_path(self):
+        subject, own, other = uuid4(), uuid4(), uuid4()
+        token = issue_token(
+            subject_id=subject,
+            kind=PrincipalKind.STAFF,
+            secret=get_settings().secret_key,
+            tenant_ids={own},
+        )
+        accounts = _accounts(TokenState(token_version=0, is_active=True))
+
+        def at(tenant_id) -> Request:
+            request = _request(token)
+            request.scope["path_params"] = {"tenant_id": str(tenant_id)}
+            return request
+
+        assert (await get_principal(at(own), token_state=accounts)).is_staff
+        assert not (await get_principal(at(other), token_state=accounts)).is_staff

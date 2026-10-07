@@ -111,6 +111,17 @@ export const authStore = {
 	get isStaff() {
 		return principal?.kind === 'staff' || principal?.kind === 'service';
 	},
+	/**
+	 * Whether the API treats this account as a customer at a business: always
+	 * for a customer, and for staff anywhere but where they work (ADR-0016).
+	 * With no tenant (the marketplace), any customer or staff account.
+	 * @param {string|null} [tenantId]
+	 */
+	isCustomerAt(tenantId = null) {
+		if (principal?.kind === 'customer') return true;
+		if (principal?.kind !== 'staff') return false;
+		return !tenantId || !this.tenantIds.includes(tenantId);
+	},
 	/** Tenant ids baked into the current access token at login. */
 	get tenantIds() {
 		return /** @type {string[]} */ (principal?.tenants ?? []);

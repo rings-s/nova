@@ -19,7 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_authorized_tenant
-from app.core.security import AuthorizationError, Principal, PrincipalKind, get_principal
+from app.core.security import (
+    AuthorizationError,
+    Principal,
+    PrincipalKind,
+    get_customer_principal,
+)
 from app.db.errors import translate_integrity_error
 from app.db.session import get_session_factory, set_discovery_scope, set_tenant_scope
 from app.integrations.payments.moyasar import PaymentGateway
@@ -171,7 +176,7 @@ def get_ai_chat_service(
 
 
 def get_marketplace_chat_service(
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(get_customer_principal),
     engine: InferenceEngine = Depends(get_inference_engine),
     transaction: Transaction = Depends(get_agent_transaction),
     gateway: PaymentGateway = Depends(get_payment_gateway),
@@ -180,8 +185,9 @@ def get_marketplace_chat_service(
     """The marketplace assistant: no tenant until a customer picks a listing.
 
     Customers only. It books in the caller's own name at whichever business
-    they choose, which is what a customer may do over HTTP at any tenant; staff
-    book on someone's behalf through their own dashboard instead.
+    they choose, which is what a customer may do over HTTP at any tenant. A
+    staff account is a customer here (ADR-0016); staff book on someone's behalf
+    through their own dashboard instead.
     """
     if principal.kind is not PrincipalKind.CUSTOMER:
         raise AuthorizationError("The marketplace assistant is for customers.")

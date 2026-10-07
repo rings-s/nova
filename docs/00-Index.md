@@ -34,11 +34,12 @@ aliases: [Home, Map of Content]
 - [[12-Backend-Code-Walkthrough]] · **current** - 🎓 **Start here if you are new** — FastAPI basics, every file explained, worked example
 - [[02-Backend-FastAPI-DDD-Structure]] · _design_ - Domain-Driven Design folder structure and rules
 - `nova_backend/README.md` - **Live code map**: dependency rules, module anatomy, traced request
-- `docs/decisions/` - ADRs 0001-0015 (monorepo, vertical slices, tenant isolation, bilingual,
+- `docs/decisions/` - ADRs 0001-0016 (monorepo, vertical slices, tenant isolation, bilingual,
   tests, API security baseline, completing the remaining contexts, booking-source attribution,
   billing money decisions, public discovery and marketplace attribution, business agents and
   analytics, maps with Leaflet and OpenStreetMap, business photos replacing Nextcloud media,
-  verified reviews and rating ranking, agents that book with QR tickets)
+  verified reviews and rating ranking, agents that book with QR tickets, staff as customers
+  elsewhere)
 - `nova-frontend/README.md` - The SvelteKit app: running it, checks, the API client, stores,
   English/Arabic i18n and design tokens
 

@@ -40,7 +40,7 @@ import math
 import secrets
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from hashlib import sha256
 from uuid import UUID
@@ -109,6 +109,43 @@ class Principal:
             return True
 
         return tenant_id in self.tenant_ids
+
+
+def as_customer(principal: Principal) -> Principal:
+    """The same account, acting as a customer: no memberships, no roles."""
+    return replace(
+        principal, kind=PrincipalKind.CUSTOMER, tenant_ids=frozenset(), roles=frozenset()
+    )
+
+
+def principal_at_tenant(principal: Principal, tenant_id: UUID | None) -> Principal:
+    """Who this caller is at one business (ADR-0016).
+
+    `kind` in a token is account-wide: any membership makes it STAFF. Staff
+    authority is per business, though, and a stylist may book a treatment at
+    another salon like anyone else. So at a tenant the account is not a member
+    of, a STAFF principal is a CUSTOMER, and every `is_staff` check and
+    `require_staff` there sees a customer. With no tenant, nothing changes.
+    """
+    if (
+        principal.kind is PrincipalKind.STAFF
+        and tenant_id is not None
+        and tenant_id not in principal.tenant_ids
+    ):
+        return as_customer(principal)
+    return principal
+
+
+def _path_tenant_id(request: Request) -> UUID | None:
+    """The path's tenant, the only place one may come from. None when absent or
+    malformed; a malformed one is the route's 422 to give, not ours."""
+    raw = request.path_params.get("tenant_id")
+    if raw is None:
+        return None
+    try:
+        return UUID(str(raw))
+    except ValueError:
+        return None
 
 
 ACCESS_TOKEN_TTL_SECONDS = 15 * 60
@@ -452,6 +489,14 @@ async def get_principal(
             raise AuthenticationError(refusal)
     else:
         await _assert_token_is_current(principal, claims, token_state)
+    return principal_at_tenant(principal, _path_tenant_id(request))
+
+
+async def get_customer_principal(principal: Principal = Depends(get_principal)) -> Principal:
+    """For routes that act only as a customer, with no tenant in the path (the
+    marketplace assistant): a staff account is a customer there (ADR-0016)."""
+    if principal.kind is PrincipalKind.STAFF:
+        return as_customer(principal)
     return principal
 
 
