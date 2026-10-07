@@ -165,6 +165,7 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
   - `worker/outbox.py` runs the handlers registered with `@subscribe("EventName")` in `app/worker/handlers.py`.
   - Add reactions there, not in the module that raises the event.
 - **Delivery is at-least-once.** Handlers must be idempotent: use dedupe keys or check state first.
+- **Each handler runs in its own savepoint** (`worker/outbox.py`). A failing handler rolls back only its own work, the others' commits, and the whole event is retried, so the handlers that succeeded run again.
 - **The worker is load-bearing.** Without it, no notification is sent and no commission accrues.
 - **Cross-tenant cron jobs follow one pattern:**
   1. Read the candidates with `bypass_tenant_scope`.

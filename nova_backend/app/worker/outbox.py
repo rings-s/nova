@@ -13,6 +13,11 @@ marking an event published before running its handlers, is at-most-once and
 silently drops notifications when a worker dies mid-handler. Handlers are
 therefore required to be idempotent (see `handlers.py`).
 
+Each handler runs in its own SAVEPOINT. A failing notification handler rolls
+back only its own work: commission accrued by another handler for the same
+event still commits. The event is then retried as a whole, and the handlers
+that already succeeded run again, which their idempotency makes a no-op.
+
 Concurrency: claiming uses `FOR UPDATE SKIP LOCKED` plus a lease. Several
 dispatcher processes can run against one database — each claims a disjoint
 batch, and a process that dies mid-batch releases its rows when the lease
@@ -70,7 +75,7 @@ async def _process_one(
     tenant_id,
     payload: dict,
 ) -> bool:
-    """Runs every handler for one event, in one transaction. Returns success."""
+    """Runs every handler for one event, each in its own savepoint. Returns success."""
     handlers = handlers_for(event_name)
 
     async with session_factory() as session:
@@ -94,8 +99,30 @@ async def _process_one(
                 # connection is scoped the same way a request would be.
                 await set_tenant_scope(session, tenant_id)
 
+            failures: list[str] = []
             for handler in handlers:
-                await handler(session, tenant_id, payload)
+                try:
+                    async with session.begin_nested():
+                        await handler(session, tenant_id, payload)
+                except Exception as exc:
+                    logger.exception(
+                        "outbox_handler_failed",
+                        extra={
+                            "event_name": event_name,
+                            "event_id": str(event_id),
+                            "handler": handler.__name__,
+                        },
+                    )
+                    failures.append(f"{handler.__name__}: {exc}")
+
+            # A rolled-back savepoint may have expired the row; load it again
+            # before touching it rather than lazy-loading in async code.
+            await session.refresh(event)
+            if failures:
+                # Keep what the other handlers did, and retry the event.
+                _schedule_retry(event, "; ".join(failures), event_name=event_name)
+                await session.commit()
+                return False
 
             event.mark_published()
             await session.commit()
@@ -113,18 +140,18 @@ async def _process_one(
                 await bypass_tenant_scope(retry_session)
                 failed = await retry_session.get(OutboxEvent, event_id)
                 if failed is not None:
-                    failed.schedule_retry(str(exc))
-                    if failed.is_dead_lettered:
-                        logger.error(
-                            "outbox_event_dead_lettered",
-                            extra={
-                                "event_name": event_name,
-                                "event_id": str(event_id),
-                                "attempts": failed.attempts,
-                            },
-                        )
+                    _schedule_retry(failed, str(exc), event_name=event_name)
                 await retry_session.commit()
             return False
+
+
+def _schedule_retry(event: OutboxEvent, error: str, *, event_name: str) -> None:
+    event.schedule_retry(error)
+    if event.is_dead_lettered:
+        logger.error(
+            "outbox_event_dead_lettered",
+            extra={"event_name": event_name, "event_id": str(event.id), "attempts": event.attempts},
+        )
 
 
 async def dispatch_pending_events(

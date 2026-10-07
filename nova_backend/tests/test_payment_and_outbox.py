@@ -553,6 +553,101 @@ class TestOutboxDelivery:
         json.dumps(event.payload)
         assert isinstance(event.payload["booking_id"], str)
 
+    async def test_a_failing_handler_does_not_undo_another_handlers_work(
+        self, db_session, tenant_factory, monkeypatch
+    ):
+        """Commission must not roll back because a WhatsApp message failed."""
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.worker import outbox
+
+        tenant = await tenant_factory()
+        probe = OutboxEvent(
+            event_name="OutboxProbe", tenant_id=tenant.id, payload={}, occurred_at=datetime.now(UTC)
+        )
+        db_session.add(probe)
+        await db_session.flush()
+
+        async def accrues(session, tenant_id, payload):
+            session.add(
+                OutboxEvent(
+                    event_name="OutboxProbeAccrued",
+                    tenant_id=tenant_id,
+                    payload={},
+                    occurred_at=datetime.now(UTC),
+                )
+            )
+            await session.flush()
+
+        async def notifies(session, tenant_id, payload):
+            session.add(
+                OutboxEvent(
+                    event_name="OutboxProbeNotified",
+                    tenant_id=tenant_id,
+                    payload={},
+                    occurred_at=datetime.now(UTC),
+                )
+            )
+            await session.flush()
+            raise RuntimeError("whatsapp down")
+
+        monkeypatch.setattr(outbox, "handlers_for", lambda name: [accrues, notifies])
+        factory = async_sessionmaker(
+            bind=db_session.bind, join_transaction_mode="create_savepoint", expire_on_commit=False
+        )
+
+        ok = await outbox._process_one(
+            factory, event_id=probe.id, event_name="OutboxProbe", tenant_id=tenant.id, payload={}
+        )
+
+        assert ok is False
+        names = set(
+            (
+                await db_session.execute(
+                    select(OutboxEvent.event_name).where(OutboxEvent.tenant_id == tenant.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # The first handler's write survived; the failing one's did not.
+        assert "OutboxProbeAccrued" in names
+        assert "OutboxProbeNotified" not in names
+        await db_session.refresh(probe)
+        assert probe.published_at is None
+        assert probe.attempts == 1
+        assert probe.last_error == "notifies: whatsapp down"
+
+    async def test_an_event_whose_handlers_all_succeed_is_published(
+        self, db_session, tenant_factory, monkeypatch
+    ):
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.worker import outbox
+
+        tenant = await tenant_factory()
+        probe = OutboxEvent(
+            event_name="OutboxProbe", tenant_id=tenant.id, payload={}, occurred_at=datetime.now(UTC)
+        )
+        db_session.add(probe)
+        await db_session.flush()
+
+        async def quiet(session, tenant_id, payload):
+            return None
+
+        monkeypatch.setattr(outbox, "handlers_for", lambda name: [quiet, quiet])
+        factory = async_sessionmaker(
+            bind=db_session.bind, join_transaction_mode="create_savepoint", expire_on_commit=False
+        )
+
+        ok = await outbox._process_one(
+            factory, event_id=probe.id, event_name="OutboxProbe", tenant_id=tenant.id, payload={}
+        )
+
+        assert ok is True
+        await db_session.refresh(probe)
+        assert probe.published_at is not None
+
     def test_retries_back_off_and_eventually_dead_letter(self):
         event = OutboxEvent(
             event_name="BookingConfirmed",
