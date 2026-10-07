@@ -130,7 +130,9 @@
 		try {
 			return (await getSubscription(tenant, business)).tier;
 		} catch (err) {
-			if (err instanceof ApiError && err.status === 404) return 'solo';
+			// 404: no subscription yet. 403: the role reads analytics but not the
+			// plan (`view_financials`), so show the base tier rather than fail.
+			if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return 'solo';
 			throw err;
 		}
 	}
