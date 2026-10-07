@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.modules.ai_agents.agents import WRITE_TOOLS, AgentSpec
 from app.modules.ai_agents.guardrails import (
@@ -72,7 +73,7 @@ _MAX_TIMES = 6
 #: Offered times start at least this far ahead. A turn can take minutes on a
 #: small local model, and a time that starts before the customer's "yes"
 #: arrives cannot be booked.
-_MIN_LEAD = timedelta(minutes=30)
+_MIN_LEAD_MINUTES = 30
 
 
 @dataclass(frozen=True)
@@ -534,39 +535,36 @@ class AgentToolkit:
         days_ahead: int,
         limit: int | None = _MAX_TIMES,
     ) -> Result:
-        """The booking domain's slots, merged across qualified providers."""
+        """The booking service's free times for a service, across its providers."""
         service = await services.catalog.get_service(service_id)
         location = await services.catalog.get_location(service.location_id)
         now = datetime.now(UTC)
-        earliest = now + _MIN_LEAD
-        date_to = now + timedelta(days=max(1, min(days_ahead, 14)))
-        offered: list[tuple[datetime, Any]] = []
-        for provider in await services.catalog.list_providers(service.location_id):
-            if not provider.is_active or not await services.catalog.is_provider_qualified(
-                provider.id, service_id
-            ):
-                continue
-            for slot in await services.booking.availability(
-                provider_id=provider.id, service_id=service_id, date_from=now, date_to=date_to
-            ):
-                if slot.starts_at >= earliest:
-                    offered.append((slot.starts_at, provider))
-        offered.sort(key=lambda pair: (pair[0], str(pair[1].id)))
+        slots = await services.booking.availability_for_service(
+            service_id=service_id,
+            date_from=now,
+            date_to=now + timedelta(days=max(1, min(days_ahead, 14))),
+            now=now,
+            lead_time_minutes=_MIN_LEAD_MINUTES,
+        )
+        providers = {
+            provider.id: provider
+            for provider in await services.catalog.list_providers(service.location_id)
+        }
         return {
             "service": self._name(service),
             "price": str(service.price),
             "currency": service.currency,
             "duration_minutes": service.duration_minutes,
-            "available": len(offered),
+            "available": len(slots),
             "timezone": location.timezone,
             "times": [
                 {
-                    "starts_at": starts_at.isoformat(),
-                    "local_time": _local(starts_at, location.timezone),
-                    "provider_id": str(provider.id),
-                    "provider": self._name(provider),
+                    "starts_at": slot.starts_at.isoformat(),
+                    "local_time": _local(slot.starts_at, location.timezone),
+                    "provider_id": str(slot.provider_id),
+                    "provider": self._name(providers[slot.provider_id]),
                 }
-                for starts_at, provider in offered[:limit]
+                for slot in slots[:limit]
             ],
         }
 
@@ -1398,7 +1396,7 @@ def _local(moment: datetime, timezone: str) -> str:
     try:
         zone = ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError):
-        zone = ZoneInfo("Asia/Riyadh")
+        zone = ZoneInfo(get_settings().default_timezone)
     return f"{moment.astimezone(zone):%a %d %b %Y, %H:%M} ({zone.key})"
 
 

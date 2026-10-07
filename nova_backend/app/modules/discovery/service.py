@@ -384,20 +384,20 @@ class DiscoveryService:
         providers = await self.list_bookable_providers(service_id, service.location_id)
 
         bookings = await availability_reader(business.tenant_id)
+        by_id = {provider.id: provider for provider in providers}
 
-        offered: list[OfferedSlot] = []
-        for provider in providers:
-            for slot in await bookings.availability(
-                provider_id=provider.id,
+        # Chronological across providers (booking sorts them): the customer is
+        # choosing a time, and a list grouped by stylist makes them scan it
+        # several times over.
+        offered = [
+            OfferedSlot(provider=by_id[slot.provider_id], slot=slot)
+            for slot in await bookings.availability_for_service(
                 service_id=service_id,
                 date_from=date_from,
                 date_to=date_to,
-            ):
-                offered.append(OfferedSlot(provider=provider, slot=slot))
-
-        # Chronological across providers: the customer is choosing a time, and
-        # a list grouped by stylist makes them scan it several times over.
-        offered.sort(key=lambda o: (o.slot.starts_at, str(o.provider.id)))
+                provider_ids=list(by_id),
+            )
+        ]
 
         return PublicAvailability(
             business=business, service=service, slots=offered[: self.max_public_slots]

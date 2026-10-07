@@ -172,8 +172,11 @@ class BookingService:
         date_from: datetime,
         date_to: datetime,
         now: datetime | None = None,
+        lead_time_minutes: int = 0,
     ) -> list[AvailabilitySlot]:
         """Bookable slots for one provider and service.
+
+        `lead_time_minutes` drops slots starting sooner than that after `now`.
 
         Generated, never stored. The domain function is pure and the inputs are
         loaded here, which is what makes availability deterministic (docs/09 #4)
@@ -225,6 +228,7 @@ class BookingService:
             duration_minutes=service.duration_minutes,
             granularity_minutes=self.slot_granularity_minutes,
             now=now,
+            lead_time_minutes=lead_time_minutes,
         )
 
         return [
@@ -244,6 +248,43 @@ class BookingService:
             )
             for slot in slots
         ]
+
+    async def availability_for_service(
+        self,
+        *,
+        service_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        provider_ids: Sequence[UUID] | None = None,
+        now: datetime | None = None,
+        lead_time_minutes: int = 0,
+    ) -> list[AvailabilitySlot]:
+        """Bookable slots for a service across every provider who may perform it.
+
+        A customer picks a treatment and a time, and only sometimes a stylist.
+        The providers are the service's branch's active ones that are qualified
+        for it, narrowed to `provider_ids` when the caller has its own list (the
+        marketplace's published providers). Sorted by start, then provider, so
+        a list reads as "the next free times".
+        """
+        service = await self.catalog.get_service(service_id)
+        allowed = None if provider_ids is None else set(provider_ids)
+        slots: list[AvailabilitySlot] = []
+        for provider in await self.catalog.list_providers(service.location_id):
+            if not provider.is_active or (allowed is not None and provider.id not in allowed):
+                continue
+            if not await self.catalog.is_provider_qualified(provider.id, service_id):
+                continue
+            slots += await self.availability(
+                provider_id=provider.id,
+                service_id=service_id,
+                date_from=date_from,
+                date_to=date_to,
+                now=now,
+                lead_time_minutes=lead_time_minutes,
+            )
+        slots.sort(key=lambda slot: (slot.starts_at, str(slot.provider_id)))
+        return slots
 
     def _assert_slot_was_offered(
         self, *, slot_id: str, provider_id: UUID, service_id: UUID, starts_at: datetime
