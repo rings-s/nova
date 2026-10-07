@@ -5,8 +5,7 @@ service, router, or fastapi.
 """
 
 from datetime import datetime
-from decimal import Decimal
-from typing import Any, NamedTuple
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select
@@ -16,6 +15,7 @@ from app.core.values import Money, TimeRange, to_minor_units
 from app.db.repository import BaseRepository, TenantScopedRepository
 from app.modules.payment.domain import (
     SETTLED_STATUSES,
+    CapturedPayment,
     Payment,
     PaymentFact,
     PaymentStatus,
@@ -191,20 +191,6 @@ class PaymentRepository(TenantScopedRepository[PaymentRecord]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-
-
-class CapturedPayment(NamedTuple):
-    """One prepayment the daily payout has to settle.
-
-    A projection, not a `Payment`: the payout job needs four columns from a
-    day's worth of rows across every tenant, and hydrating full domain objects
-    to read four fields would be wasteful.
-    """
-
-    tenant_id: UUID
-    booking_id: UUID
-    collected: Decimal
-    currency: str
 
 
 class SettlementRepository:

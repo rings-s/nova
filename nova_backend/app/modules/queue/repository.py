@@ -12,6 +12,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.values import TimeRange
 from app.db.repository import TenantScopedRepository
@@ -328,9 +329,32 @@ class TicketRepository(TenantScopedRepository[TicketRecord]):
         return [_ticket_to_domain(r) for r in result.scalars().all()]
 
 
+class UnscopedTicketRepository:
+    """Cross-tenant writes for the ticket expiry sweep.
+
+    Callers must have set `app.bypass_rls` (`db.session.bypass_tenant_scope`).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def expire_stale(self, *, now: datetime, limit: int) -> int:
+        stmt = (
+            select(TicketRecord)
+            .where(TicketRecord.status == TicketStatus.ACTIVE, TicketRecord.expires_at <= now)
+            .limit(limit)
+        )
+        stale = list((await self.session.execute(stmt)).scalars().all())
+        for ticket in stale:
+            ticket.status = TicketStatus.EXPIRED
+        await self.session.flush()
+        return len(stale)
+
+
 __all__ = [
     "QueueEntryRepository",
     "QueueEntrySource",
     "QueueRepository",
     "TicketRepository",
+    "UnscopedTicketRepository",
 ]

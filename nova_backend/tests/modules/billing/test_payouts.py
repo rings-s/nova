@@ -21,7 +21,7 @@ from app.modules.billing.domain import (
     plan_for,
 )
 from app.modules.booking.domain import BookingSource
-from app.modules.payment.repository import CapturedPayment
+from app.modules.payment.domain import CapturedPayment
 from app.worker.arq_worker import _group_takings
 
 PAYOUT_DATE = date(2026, 8, 15)

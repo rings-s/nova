@@ -7,6 +7,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repository import TenantScopedRepository
 from app.modules.notification.domain import NotificationStatus
@@ -78,3 +79,28 @@ class NotificationRepository(TenantScopedRepository[NotificationRecord]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+class UnscopedNotificationRepository:
+    """Cross-tenant reads for the delivery sweep (`deliver_pending_notifications`).
+
+    Mirrors `NotificationRepository.list_due`'s predicate across every tenant;
+    change one and change the other. Callers must have set `app.bypass_rls`
+    (`db.session.bypass_tenant_scope`), or RLS correctly returns nothing.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def list_due(self, *, now: datetime, limit: int) -> list[tuple[UUID, UUID]]:
+        """`(notification_id, tenant_id)`, oldest first."""
+        stmt = (
+            select(NotificationRecord.id, NotificationRecord.tenant_id)
+            .where(
+                NotificationRecord.status == NotificationStatus.PENDING,
+                NotificationRecord.scheduled_for <= now,
+            )
+            .order_by(NotificationRecord.created_at)
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in (await self.session.execute(stmt)).all()]

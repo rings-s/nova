@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import NamedTuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -376,3 +377,17 @@ class PaymentFact:
     currency: str
     captured_at: datetime | None
     refunded_at: datetime | None
+
+
+class CapturedPayment(NamedTuple):
+    """One prepayment the daily payout has to settle.
+
+    A projection, not a `Payment`: the payout job needs four columns from a
+    day's worth of rows across every tenant, and hydrating full domain objects
+    to read four fields would be wasteful.
+    """
+
+    tenant_id: UUID
+    booking_id: UUID
+    collected: Decimal
+    currency: str

@@ -77,6 +77,7 @@ from app.modules.billing.repository import (
     PayoutRepository,
     SubscriptionCheckoutRepository,
     SubscriptionRepository,
+    UnscopedInvoiceRepository,
 )
 from app.modules.payment.domain import (
     CheckoutAmountTooSmallError,
@@ -898,3 +899,27 @@ class BillingService:
 
 
 __all__ = ["DUNNING_RETRY_DAYS", "LISTING_HIDDEN_AFTER_DAYS", "BillingService"]
+
+
+class BillingSweeper:
+    """What the billing cron jobs ask across every tenant.
+
+    Only questions: each answer is then acted on per tenant, through
+    `BillingService`, in that tenant's own scoped session.
+    """
+
+    def __init__(self, invoices: UnscopedInvoiceRepository) -> None:
+        self.invoices = invoices
+
+    async def list_billable_subscriptions(self) -> list[tuple[UUID, UUID]]:
+        """`(tenant_id, business_id)` for every subscription the monthly close bills."""
+        return await self.invoices.list_active_subscription_ids()
+
+    async def list_payable_before(self, moment: datetime) -> list[tuple[UUID, UUID]]:
+        """`(invoice_id, tenant_id)` for every unpaid invoice due by `moment`."""
+        found: list[tuple[UUID, UUID]] = []
+        for invoice_id in await self.invoices.list_payable_before(moment):
+            tenant_id = await self.invoices.tenant_of(invoice_id)
+            if tenant_id is not None:
+                found.append((invoice_id, tenant_id))
+        return found

@@ -62,6 +62,7 @@ from app.modules.booking.repository import (
     BookingRepository,
     ScheduleRepository,
     SlotHoldRepository,
+    UnscopedSlotHoldRepository,
 )
 from app.modules.catalog.service import CatalogService
 from app.modules.discovery.service import AttributionService
@@ -842,3 +843,18 @@ class BookingService:
 
 
 __all__ = ["BookingService", "BookingStatus"]
+
+
+class SlotHoldSweeper:
+    """The worker's cross-tenant slot-hold housekeeping."""
+
+    def __init__(self, holds: UnscopedSlotHoldRepository) -> None:
+        self.holds = holds
+
+    async def purge_expired_before(self, cutoff: datetime, *, limit: int = 1000) -> int:
+        """Deletes holds that expired before `cutoff`. Returns how many.
+
+        Expiry is by timestamp, so an expired hold already stopped blocking
+        availability when it lapsed; this only stops the table growing.
+        """
+        return await self.holds.purge_expired_before(cutoff, limit=limit)

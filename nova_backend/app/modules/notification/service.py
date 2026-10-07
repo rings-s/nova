@@ -37,7 +37,10 @@ from app.modules.notification.domain import (
 from app.modules.notification.events import NotificationSent, NotificationSuppressed
 from app.modules.notification.exceptions import NotificationNotFoundError
 from app.modules.notification.models import NotificationRecord
-from app.modules.notification.repository import NotificationRepository
+from app.modules.notification.repository import (
+    NotificationRepository,
+    UnscopedNotificationRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -247,3 +250,21 @@ class NotificationService:
 
 
 __all__ = ["NotificationService"]
+
+
+class NotificationSweeper:
+    """What the worker asks across every tenant: which messages are due.
+
+    Delivery itself stays per tenant, through `NotificationService.deliver`.
+    """
+
+    def __init__(self, notifications: UnscopedNotificationRepository) -> None:
+        self.notifications = notifications
+
+    async def list_due(self, *, now: datetime, limit: int = 200) -> list[tuple[UUID, UUID]]:
+        """`(notification_id, tenant_id)` for every message whose time has come.
+
+        Oldest first: after an outage, the customer who has waited longest
+        hears back first.
+        """
+        return await self.notifications.list_due(now=now, limit=limit)

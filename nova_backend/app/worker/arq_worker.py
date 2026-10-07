@@ -37,10 +37,12 @@ from app.db.session import (
     get_session_factory,
     set_tenant_scope,
 )
-from app.modules.notification.dependencies import build_notification_service
-from app.modules.notification.domain import NotificationStatus
-from app.modules.notification.models import NotificationRecord
-from app.modules.payment.repository import CapturedPayment, SettlementRepository
+from app.modules.notification.dependencies import (
+    build_notification_service,
+    build_notification_sweeper,
+)
+from app.modules.payment.dependencies import build_settlement_reader
+from app.modules.payment.domain import CapturedPayment
 from app.worker.outbox import dispatch_pending_events
 
 logger = logging.getLogger(__name__)
@@ -76,9 +78,8 @@ async def deliver_pending_notifications(ctx: dict) -> int:
     covers all three populations: send-now, held by quiet hours, and waiting
     out a retry backoff.
 
-    The claim query is cross-tenant and therefore cannot use the tenant-scoped
-    `NotificationRepository.list_due`; it mirrors that predicate deliberately.
-    Change one and change the other.
+    The claim query is cross-tenant (`NotificationSweeper.list_due`); each
+    message is then delivered in its own tenant's scoped session.
     """
     now = datetime.now(UTC)
     session_factory = get_session_factory()
@@ -86,21 +87,9 @@ async def deliver_pending_notifications(ctx: dict) -> int:
 
     async with session_factory() as session:
         await bypass_tenant_scope(session)
-        stmt = (
-            select(NotificationRecord)
-            .where(
-                NotificationRecord.status == NotificationStatus.PENDING,
-                NotificationRecord.scheduled_for <= now,
-            )
-            # Oldest first: after an outage, the customer who has been waiting
-            # longest hears back first.
-            .order_by(NotificationRecord.created_at)
-            .limit(200)
-        )
-        result = await session.execute(stmt)
-        due = list(result.scalars().all())
+        due = await build_notification_sweeper(session).list_due(now=now)
 
-    for record in due:
+    for notification_id, tenant_id in due:
         try:
             async with session_factory() as session:
                 # Load-bearing. `notifications` and `customers` are both under
@@ -108,9 +97,9 @@ async def deliver_pending_notifications(ctx: dict) -> int:
                 # write session with no scope set matches zero rows, so
                 # `deliver` would raise NotificationNotFoundError on the first
                 # record and take the whole sweep down with it.
-                await set_tenant_scope(session, record.tenant_id)
-                service = build_notification_service(session, record.tenant_id)
-                await service.deliver(record.id, now=now)
+                await set_tenant_scope(session, tenant_id)
+                service = build_notification_service(session, tenant_id)
+                await service.deliver(notification_id, now=now)
                 await session.commit()
                 sent += 1
         except Exception:
@@ -119,8 +108,8 @@ async def deliver_pending_notifications(ctx: dict) -> int:
             logger.exception(
                 "notification_delivery_failed",
                 extra={
-                    "notification_id": str(record.id),
-                    "tenant_id": str(record.tenant_id),
+                    "notification_id": str(notification_id),
+                    "tenant_id": str(tenant_id),
                 },
             )
 
@@ -136,32 +125,18 @@ async def expire_stale_tickets(ctx: dict) -> int:
     ticket at scan time — but it keeps reception's screen honest rather than
     showing a wall of tickets that look valid and are not.
     """
-    from app.modules.queue.domain import TicketStatus
-    from app.modules.queue.models import TicketRecord
+    from app.modules.queue.dependencies import build_ticket_sweeper
 
-    now = datetime.now(UTC)
     session_factory = get_session_factory()
 
     async with session_factory() as session:
         await bypass_tenant_scope(session)
-        stmt = (
-            select(TicketRecord)
-            .where(
-                TicketRecord.status == TicketStatus.ACTIVE,
-                TicketRecord.expires_at <= now,
-            )
-            .limit(500)
-        )
-        result = await session.execute(stmt)
-        stale = list(result.scalars().all())
-
-        for ticket in stale:
-            ticket.status = TicketStatus.EXPIRED
+        expired = await build_ticket_sweeper(session).expire_stale(now=datetime.now(UTC))
         await session.commit()
 
-    if stale:
-        logger.info("tickets_expired", extra={"count": len(stale)})
-    return len(stale)
+    if expired:
+        logger.info("tickets_expired", extra={"count": expired})
+    return expired
 
 
 async def purge_expired_slot_holds(ctx: dict) -> int:
@@ -171,22 +146,17 @@ async def purge_expired_slot_holds(ctx: dict) -> int:
     availability the moment it lapses. This just stops the table growing
     forever, and keeps a day of history for "why did my slot disappear".
     """
-    from app.modules.booking.models import SlotHoldRecord
+    from app.modules.booking.dependencies import build_slot_hold_sweeper
 
     cutoff = datetime.now(UTC) - timedelta(days=1)
     session_factory = get_session_factory()
 
     async with session_factory() as session:
         await bypass_tenant_scope(session)
-        result = await session.execute(
-            select(SlotHoldRecord).where(SlotHoldRecord.expires_at < cutoff).limit(1000)
-        )
-        stale = list(result.scalars().all())
-        for hold in stale:
-            await session.delete(hold)
+        purged = await build_slot_hold_sweeper(session).purge_expired_before(cutoff)
         await session.commit()
 
-    return len(stale)
+    return purged
 
 
 async def purge_expired_idempotency_keys(ctx: dict) -> int:
@@ -221,9 +191,8 @@ async def close_monthly_invoices(ctx: dict) -> int:
     Each business commits in its own transaction: one salon with corrupt data
     must not stop every other salon on the platform being invoiced.
     """
-    from app.modules.billing.dependencies import build_billing_service
+    from app.modules.billing.dependencies import build_billing_service, build_billing_sweeper
     from app.modules.billing.domain import BillingPeriod
-    from app.modules.billing.repository import UnscopedInvoiceRepository
 
     now = datetime.now(UTC)
     period = BillingPeriod.previous_month(now.date())
@@ -231,7 +200,7 @@ async def close_monthly_invoices(ctx: dict) -> int:
 
     async with session_factory() as session:
         await bypass_tenant_scope(session)
-        targets = await UnscopedInvoiceRepository(session).list_active_subscription_ids()
+        targets = await build_billing_sweeper(session).list_billable_subscriptions()
 
     issued = 0
     for tenant_id, business_id in targets:
@@ -336,7 +305,7 @@ async def settle_daily_payouts(ctx: dict) -> int:
 
     async with session_factory() as session:
         await bypass_tenant_scope(session)
-        captured = await SettlementRepository(session).list_captured_between(
+        captured = await build_settlement_reader(session).list_captured_between(
             start=start, end=start + timedelta(days=1)
         )
 
@@ -380,22 +349,17 @@ async def advance_dunning(ctx: dict) -> int:
     booking — docs/11 is emphatic that non-payment removes NOVA's marketing and
     never the salon's operations.
     """
-    from app.modules.billing.dependencies import build_billing_service
-    from app.modules.billing.repository import UnscopedInvoiceRepository
+    from app.modules.billing.dependencies import build_billing_service, build_billing_sweeper
 
     now = datetime.now(UTC)
     session_factory = get_session_factory()
 
     async with session_factory() as session:
         await bypass_tenant_scope(session)
-        repo = UnscopedInvoiceRepository(session)
-        invoice_ids = await repo.list_payable_before(now)
-        tenants = {i: await repo.tenant_of(i) for i in invoice_ids}
+        payable = await build_billing_sweeper(session).list_payable_before(now)
 
     chased = 0
-    for invoice_id, tenant_id in tenants.items():
-        if tenant_id is None:
-            continue
+    for invoice_id, tenant_id in payable:
         try:
             async with session_factory() as session:
                 await set_tenant_scope(session, tenant_id)

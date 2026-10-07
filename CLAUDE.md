@@ -85,6 +85,7 @@ Each bounded context is a package under `app/modules/`: identity, catalog, disco
   - `domain.py` may not import fastapi, starlette, sqlalchemy or httpx.
   - `service.py` and `models.py` may not import fastapi or starlette.
   - No module, router included, may import another module's `models` or `repository`.
+  - Nothing under `app/worker` may import any module's `models` or `repository`.
   - Only `analytics/metrics.py` and `analytics/charts.py` may import numpy, pandas or plotly.
 - **Cross-module access goes through the other module's service.**
   - Outside request DI (worker, webhooks, other services), use the `build_*_service(session, tenant_id)` factory in that module's `dependencies.py` rather than wiring repositories by hand.
@@ -168,7 +169,7 @@ Staff access is granted through a redeemable invite (`MembershipService.invite` 
 - **Each handler runs in its own savepoint** (`worker/outbox.py`). A failing handler rolls back only its own work, the others' commits, and the whole event is retried, so the handlers that succeeded run again.
 - **The worker is load-bearing.** Without it, no notification is sent and no commission accrues.
 - **Cross-tenant cron jobs follow one pattern:**
-  1. Read the candidates with `bypass_tenant_scope`.
+  1. Read the candidates with `bypass_tenant_scope`, through the owning module's sweeper (`build_billing_sweeper`, `build_ticket_sweeper`, `build_settlement_reader`, …, in its `dependencies.py`).
   2. Process each tenant in its own session with `set_tenant_scope`.
   3. Commit per tenant, and catch exceptions per tenant.
 

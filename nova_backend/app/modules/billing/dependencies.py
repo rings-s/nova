@@ -16,8 +16,9 @@ from app.modules.billing.repository import (
     SubscriptionCheckoutRepository,
     SubscriptionRepository,
     UnscopedCheckoutRepository,
+    UnscopedInvoiceRepository,
 )
-from app.modules.billing.service import BillingService
+from app.modules.billing.service import BillingService, BillingSweeper
 from app.modules.payment.dependencies import get_payment_gateway
 
 
@@ -64,3 +65,8 @@ async def subscription_checkout_tenant(
     opened `bypass_tenant_scope`.
     """
     return await UnscopedCheckoutRepository(session).tenant_of_gateway_invoice(gateway_invoice_id)
+
+
+def build_billing_sweeper(session: AsyncSession) -> BillingSweeper:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return BillingSweeper(UnscopedInvoiceRepository(session))

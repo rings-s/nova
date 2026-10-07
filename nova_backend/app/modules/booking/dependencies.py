@@ -13,8 +13,9 @@ from app.modules.booking.repository import (
     BookingRepository,
     ScheduleRepository,
     SlotHoldRepository,
+    UnscopedSlotHoldRepository,
 )
-from app.modules.booking.service import BookingService
+from app.modules.booking.service import BookingService, SlotHoldSweeper
 from app.modules.catalog.dependencies import build_catalog_service, get_catalog_service
 from app.modules.catalog.service import CatalogService
 from app.modules.discovery.dependencies import build_attribution_service
@@ -152,3 +153,8 @@ def resolve_booking_source(
         raise AuthorizationError(f"A booking request may not declare source '{requested}'.")
 
     return requested
+
+
+def build_slot_hold_sweeper(session: AsyncSession) -> SlotHoldSweeper:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return SlotHoldSweeper(UnscopedSlotHoldRepository(session))

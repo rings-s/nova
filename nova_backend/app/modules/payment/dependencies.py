@@ -12,8 +12,16 @@ from app.core.security import AuthorizationError, Principal
 from app.integrations.payments.moyasar import PaymentGateway, build_payment_gateway
 from app.modules.booking.dependencies import build_booking_service, get_booking_service
 from app.modules.booking.service import BookingService
-from app.modules.payment.repository import PaymentRepository, WebhookEventRepository
-from app.modules.payment.service import PaymentService, PaymentWebhookProcessor
+from app.modules.payment.repository import (
+    PaymentRepository,
+    SettlementRepository,
+    WebhookEventRepository,
+)
+from app.modules.payment.service import (
+    PaymentService,
+    PaymentWebhookProcessor,
+    SettlementReader,
+)
 
 
 def get_payment_gateway() -> PaymentGateway:
@@ -92,3 +100,8 @@ def refuse_customer_amount(
     """
     if (amount is not None or currency is not None) and not principal.is_staff:
         raise AuthorizationError("Only staff may set a payment's amount or currency.")
+
+
+def build_settlement_reader(session: AsyncSession) -> SettlementReader:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return SettlementReader(SettlementRepository(session))

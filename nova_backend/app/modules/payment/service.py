@@ -26,6 +26,7 @@ from app.modules.booking.domain import BookingStatus
 from app.modules.booking.service import BookingService
 from app.modules.payment.domain import (
     SETTLED_STATUSES,
+    CapturedPayment,
     CheckoutAmountTooSmallError,
     Payment,
     PaymentAmountMismatchError,
@@ -51,7 +52,11 @@ from app.modules.payment.exceptions import (
     PaymentNotFoundError,
     UnknownWebhookPaymentError,
 )
-from app.modules.payment.repository import PaymentRepository, WebhookEventRepository
+from app.modules.payment.repository import (
+    PaymentRepository,
+    SettlementRepository,
+    WebhookEventRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -608,3 +613,19 @@ class PaymentWebhookProcessor:
 
 
 __all__ = ["PaymentIntent", "PaymentService", "PaymentWebhookProcessor"]
+
+
+class SettlementReader:
+    """What the daily payout asks across every tenant: what was captured when.
+
+    The payout itself is settled per tenant, through `BillingService`.
+    """
+
+    def __init__(self, settlements: SettlementRepository) -> None:
+        self.settlements = settlements
+
+    async def list_captured_between(
+        self, *, start: datetime, end: datetime
+    ) -> list[CapturedPayment]:
+        """Prepayments captured in `[start, end)`, net of refunds."""
+        return await self.settlements.list_captured_between(start=start, end=end)

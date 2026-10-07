@@ -17,8 +17,9 @@ from app.modules.queue.repository import (
     QueueEntryRepository,
     QueueRepository,
     TicketRepository,
+    UnscopedTicketRepository,
 )
-from app.modules.queue.service import QueueService
+from app.modules.queue.service import QueueService, TicketSweeper
 
 
 def build_queue_service(
@@ -70,3 +71,8 @@ def get_queue_service(
     return build_queue_service(
         session, tenant_id, catalog=catalog, customers=customers, bookings=bookings
     )
+
+
+def build_ticket_sweeper(session: AsyncSession) -> TicketSweeper:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return TicketSweeper(UnscopedTicketRepository(session))

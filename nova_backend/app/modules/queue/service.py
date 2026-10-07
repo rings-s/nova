@@ -56,6 +56,7 @@ from app.modules.queue.repository import (
     QueueEntryRepository,
     QueueRepository,
     TicketRepository,
+    UnscopedTicketRepository,
 )
 
 
@@ -557,3 +558,18 @@ class QueueService:
 
 
 __all__ = ["IssuedTicket", "QueuePosition", "QueueService"]
+
+
+class TicketSweeper:
+    """The worker's cross-tenant ticket housekeeping."""
+
+    def __init__(self, tickets: UnscopedTicketRepository) -> None:
+        self.tickets = tickets
+
+    async def expire_stale(self, *, now: datetime, limit: int = 500) -> int:
+        """Moves ACTIVE tickets past their expiry to EXPIRED. Returns how many.
+
+        Cosmetic for security (`Ticket.is_redeemable` already refuses an
+        expired ticket at scan time), but it keeps reception's screen honest.
+        """
+        return await self.tickets.expire_stale(now=now, limit=limit)

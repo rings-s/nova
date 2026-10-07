@@ -13,8 +13,11 @@ from app.modules.identity.dependencies import (
     get_customer_service,
 )
 from app.modules.identity.service import CustomerService
-from app.modules.notification.repository import NotificationRepository
-from app.modules.notification.service import NotificationService
+from app.modules.notification.repository import (
+    NotificationRepository,
+    UnscopedNotificationRepository,
+)
+from app.modules.notification.service import NotificationService, NotificationSweeper
 
 
 def get_whatsapp_client() -> WhatsAppClient:
@@ -57,3 +60,8 @@ def get_notification_service(
     customers: CustomerService = Depends(get_customer_service),
 ) -> NotificationService:
     return build_notification_service(session, tenant_id, whatsapp=whatsapp, customers=customers)
+
+
+def build_notification_sweeper(session: AsyncSession) -> NotificationSweeper:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return NotificationSweeper(UnscopedNotificationRepository(session))

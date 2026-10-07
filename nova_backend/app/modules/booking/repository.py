@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID
 
 from sqlalchemy import and_, case, delete, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.values import Money, TimeRange, to_minor_units
 from app.db.repository import TenantScopedRepository
@@ -579,10 +580,29 @@ class SlotHoldRepository(TenantScopedRepository[SlotHoldRecord]):
         return result.rowcount or 0  # type: ignore[attr-defined]
 
 
+class UnscopedSlotHoldRepository:
+    """Cross-tenant deletes for the slot-hold purge.
+
+    Callers must have set `app.bypass_rls` (`db.session.bypass_tenant_scope`).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def purge_expired_before(self, cutoff: datetime, *, limit: int) -> int:
+        stmt = select(SlotHoldRecord).where(SlotHoldRecord.expires_at < cutoff).limit(limit)
+        stale = list((await self.session.execute(stmt)).scalars().all())
+        for hold in stale:
+            await self.session.delete(hold)
+        await self.session.flush()
+        return len(stale)
+
+
 __all__ = [
     "BookingRepository",
     "BookingSource",
     "BookingStatus",
     "ScheduleRepository",
     "SlotHoldRepository",
+    "UnscopedSlotHoldRepository",
 ]

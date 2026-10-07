@@ -13,6 +13,7 @@ import pathlib
 import pytest
 
 MODULES_DIR = pathlib.Path(__file__).resolve().parent.parent / "app" / "modules"
+WORKER_DIR = MODULES_DIR.parent / "worker"
 
 
 def _imports(path: pathlib.Path) -> list[str]:
@@ -112,6 +113,25 @@ def test_modules_never_import_another_modules_repository() -> None:
                 violations.append(f"{own_module}/{path.name} -> {imported}")
 
     assert not violations, "cross-module persistence access: " + "; ".join(violations)
+
+
+def test_the_worker_reaches_modules_through_their_services() -> None:
+    """Cron jobs and event handlers obey the same rule as the modules.
+
+    Cross-tenant questions go through each module's sweeper (for example
+    `build_billing_sweeper`), built in its `dependencies.py`.
+    """
+    worker_files = sorted(WORKER_DIR.rglob("*.py"))
+    assert worker_files, "no worker files found; did app/worker move?"
+    violations = [
+        f"worker/{path.name} -> {imported}"
+        for path in worker_files
+        for imported in _imports(path)
+        if imported.startswith("app.modules.")
+        and len(imported.split(".")) >= 4
+        and imported.split(".")[3] in {"repository", "models"}
+    ]
+    assert not violations, "worker reaches past a service: " + "; ".join(violations)
 
 
 def test_every_module_documents_itself() -> None:
