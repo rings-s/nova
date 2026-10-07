@@ -175,9 +175,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
 # a deploy. infra/docker-compose.yml has a one-shot `migrate` service; a real
 # deployment wants the equivalent job.
 #
-# --proxy-headers because ingress terminates TLS upstream (Cloudflare tunnel,
-# docs/01), so without it every client IP logs as the tunnel's and the rate
-# limiter buckets the whole world into one.
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+# No --proxy-headers / --forwarded-allow-ips "*": with them uvicorn takes the
+# client address from the first X-Forwarded-For entry, which the client
+# writes, and IP rate limits stop limiting (docs/14 TM-02). The real address
+# comes from the header the proxy itself writes (CLIENT_IP_HEADER, or
+# CF-Connecting-IP behind the tunnel), and Settings refuses to start a
+# deployed process without one.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

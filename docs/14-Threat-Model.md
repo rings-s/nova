@@ -306,7 +306,7 @@ privilege escalation. Evidence is `live`, `code` or `design` (see the top of thi
 | ID    | Sev                                   | Finding                                                                                                            | Evidence              |
 | :---- | :------------------------------------ | :----------------------------------------------------------------------------------------------------------------- | :-------------------- |
 | TM-01 | **High** — fixed 2026-09-15           | An unverified phone number claims another person's customer record, at every tenant                                | live                  |
-| TM-02 | **High**                              | The production image makes `X-Forwarded-For` the client address, so every per-IP limit can be bypassed             | live (uvicorn 0.52.3) |
+| TM-02 | **High** — fixed 2026-10-07           | The production image makes `X-Forwarded-For` the client address, so every per-IP limit can be bypassed             | live (uvicorn 0.52.3) |
 | TM-03 | **High** — partially fixed 2026-09-15 | `SECRET_KEY` mints non-revocable, platform-wide service tokens, and the same key signs everything                  | code                  |
 | TM-04 | **High** — fixed 2026-09-15           | No email verification, and memberships are granted by email: a pre-registered account becomes staff                | code                  |
 | TM-05 | **High**                              | The media upload authorisation cannot be enforced by Nextcloud, and one service account holds every tenant's media | code, design          |
@@ -446,6 +446,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 if self.env not in DEVELOPMENT_ENVS and self.trusted_client_ip_header is None:
     raise ValueError("Set CLIENT_IP_HEADER (or CLOUDFLARE_TUNNEL_TOKEN): rate limits need the real client address.")
 ```
+
+- **Fixed, 2026-10-07**, as sketched above. The runtime `CMD` no longer passes `--proxy-headers` or `--forwarded-allow-ips`, and `Settings` refuses to load outside `local`/`test` without `CLIENT_IP_HEADER` or `CLOUDFLARE_TUNNEL_TOKEN`. `tests/test_config.py::TestClientIpHeader` proves both (SR-03). Not yet re-run live behind a forwarding proxy (§5 step 2).
 
 ### TM-03: `SECRET_KEY` is a platform-wide, non-revocable master credential
 

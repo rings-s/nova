@@ -209,6 +209,14 @@ class Settings(BaseSettings):
                 f"SECRET_KEY is too weak for ENV={self.env}: use at least "
                 f"{MIN_SECRET_KEY_LENGTH} random characters (openssl rand -hex 32)."
             )
+        if self.env not in DEVELOPMENT_ENVS and self.trusted_client_ip_header is None:
+            # Without one, every client is the proxy's address: IP rate limits
+            # either bucket the world together or (with a trusting proxy-headers
+            # setup) take the address the client wrote. docs/14 TM-02.
+            raise ValueError(
+                f"Set CLIENT_IP_HEADER (or CLOUDFLARE_TUNNEL_TOKEN) for ENV={self.env}: "
+                "rate limits need the real client address, from a header your proxy writes."
+            )
         if (self.client_ip_header or "").strip().lower() == "x-forwarded-for":
             raise ValueError(
                 "CLIENT_IP_HEADER cannot be X-Forwarded-For: its first entry is whatever the "

@@ -5,6 +5,8 @@ every field its answer depends on, so the environment the suite runs in (the
 compose stack sets ENV, SECRET_KEY and AUTH_DEV_BYPASS) cannot change it.
 """
 
+import pathlib
+
 import pytest
 from pydantic import ValidationError
 
@@ -26,6 +28,7 @@ def build(**overrides: object) -> Settings:
         "env": "production",
         "auth_dev_bypass": False,
         "cloudflare_tunnel_token": None,
+        "client_ip_header": "CF-Connecting-IP",
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -37,7 +40,9 @@ class TestEnvironmentDefault:
         for name in ("ENV", "AUTH_DEV_BYPASS", "CLOUDFLARE_TUNNEL_TOKEN"):
             monkeypatch.delenv(name, raising=False)
 
-        settings = Settings(_env_file=None, **REQUIRED, secret_key=GENERATED_KEY)
+        settings = Settings(
+            _env_file=None, **REQUIRED, secret_key=GENERATED_KEY, client_ip_header="X-Real-IP"
+        )
 
         assert settings.env == "production"
 
@@ -84,7 +89,19 @@ class TestDevBypass:
 
 class TestClientIpHeader:
     def test_no_header_is_trusted_by_default(self):
-        assert build(client_ip_header=None).trusted_client_ip_header is None
+        assert build(env="local", client_ip_header=None).trusted_client_ip_header is None
+
+    @pytest.mark.parametrize("env", ["staging", "production"])
+    def test_a_deployed_process_refuses_to_start_without_one(self, env):
+        """Else every client is the proxy's address, or one it forged (docs/14 TM-02)."""
+        with pytest.raises(ValidationError, match="Set CLIENT_IP_HEADER"):
+            build(env=env, client_ip_header=None)
+
+    def test_the_runtime_image_does_not_trust_forwarded_headers(self):
+        """`--forwarded-allow-ips "*"` makes X-Forwarded-For the client address."""
+        dockerfile = pathlib.Path(__file__).resolve().parents[1] / "Dockerfile"
+        code = [ln for ln in dockerfile.read_text().splitlines() if not ln.lstrip().startswith("#")]
+        assert not any("--forwarded-allow-ips" in ln or "--proxy-headers" in ln for ln in code)
 
     def test_cloudflares_header_is_trusted_behind_the_tunnel(self):
         settings = build(client_ip_header=None, cloudflare_tunnel_token="token")
