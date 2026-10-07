@@ -114,8 +114,7 @@ async def test_the_app_role_holds_dml_on_every_table_but_migration_state(
     )
     assert not await db_session.scalar(
         text(
-            "SELECT has_table_privilege("
-            "current_user, 'alembic_version', 'INSERT, UPDATE, DELETE')"
+            "SELECT has_table_privilege(current_user, 'alembic_version', 'INSERT, UPDATE, DELETE')"
         )
     )
 

@@ -50,3 +50,20 @@ def test_a_latency_lands_in_every_bucket_at_or_above_it() -> None:
     assert 'le="0.025"} 0' in text
     assert 'le="0.05"} 1' in text
     assert 'le="+Inf"} 1' in text
+
+
+def test_ai_counters_and_latency_are_rendered() -> None:
+    metrics.reset()
+    metrics.record_ai_turn(agent="receptionist_agent", outcome="ok", seconds=3.0)
+    metrics.record_ai_turn(agent="receptionist_agent", outcome="busy", seconds=0.1)
+    metrics.count("nova_ai_tool_calls_total", tool="hold_slot", outcome="refused")
+    metrics.count("nova_ai_injection_total")
+
+    text = metrics.render()
+
+    assert 'nova_ai_turns_total{agent="receptionist_agent",outcome="ok"} 1' in text
+    assert 'nova_ai_turns_total{agent="receptionist_agent",outcome="busy"} 1' in text
+    assert 'nova_ai_tool_calls_total{outcome="refused",tool="hold_slot"} 1' in text
+    assert "nova_ai_injection_total{} 1" in text or "nova_ai_injection_total 1" in text
+    assert 'nova_ai_turn_duration_seconds_bucket{agent="receptionist_agent",le="5.0"} 2' in text
+    assert 'nova_ai_turn_duration_seconds_count{agent="receptionist_agent"} 2' in text

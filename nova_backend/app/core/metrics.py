@@ -31,8 +31,42 @@ def record_request(*, method: str, route: str, status: int, seconds: float) -> N
     _duration_count[key] += 1
 
 
+#: name -> help text, for the labelled counters below.
+_COUNTER_HELP = {
+    "nova_ai_turns_total": "Assistant turns by agent and outcome (ok, handoff, degraded, busy).",
+    "nova_ai_tool_calls_total": "Assistant tool calls by tool and outcome (ok, refused).",
+    "nova_ai_injection_total": "Messages flagged as trying to instruct the model.",
+}
+_counters: dict[tuple[str, tuple[tuple[str, str], ...]], int] = defaultdict(int)
+_ai_turn_buckets: dict[str, list[int]] = {}
+_ai_turn_sum: dict[str, float] = defaultdict(float)
+_ai_turn_count: dict[str, int] = defaultdict(int)
+#: A turn runs a model, so seconds to minutes rather than milliseconds.
+AI_BUCKETS = (1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0, 300.0, 600.0)
+
+
+def count(name: str, **labels: str) -> None:
+    """Adds one to a labelled counter named in `_COUNTER_HELP`."""
+    _counters[(name, tuple(sorted(labels.items())))] += 1
+
+
+def record_ai_turn(*, agent: str, outcome: str, seconds: float) -> None:
+    """One finished assistant turn: counted by outcome and timed by agent."""
+    count("nova_ai_turns_total", agent=agent, outcome=outcome)
+    counts = _ai_turn_buckets.setdefault(agent, [0] * len(AI_BUCKETS))
+    for index, bound in enumerate(AI_BUCKETS):
+        if seconds <= bound:
+            counts[index] += 1
+    _ai_turn_sum[agent] += seconds
+    _ai_turn_count[agent] += 1
+
+
 def reset() -> None:
     """For tests."""
+    _counters.clear()
+    _ai_turn_buckets.clear()
+    _ai_turn_sum.clear()
+    _ai_turn_count.clear()
     _requests.clear()
     _duration_buckets.clear()
     _duration_sum.clear()
@@ -70,6 +104,24 @@ def render(extra_gauges: dict[str, tuple[str, float]] | None = None) -> str:
             f"nova_http_request_duration_seconds_sum{{{base}}} {_duration_sum[(method, route)]}"
         )
         lines.append(f"nova_http_request_duration_seconds_count{{{base}}} {total}")
+    for name, help_text in _COUNTER_HELP.items():
+        lines += [f"# HELP {name} {help_text}", f"# TYPE {name} counter"]
+        for (counter, labels), amount in sorted(_counters.items()):
+            if counter == name:
+                pairs = ",".join(f'{k}="{_label(v)}"' for k, v in labels)
+                lines.append(f"{name}{{{pairs}}} {amount}")
+    lines += [
+        "# HELP nova_ai_turn_duration_seconds Assistant turn latency by agent.",
+        "# TYPE nova_ai_turn_duration_seconds histogram",
+    ]
+    for agent, counts in sorted(_ai_turn_buckets.items()):
+        base = f'agent="{_label(agent)}"'
+        for bound, bucket in zip(AI_BUCKETS, counts, strict=True):
+            lines.append(f'nova_ai_turn_duration_seconds_bucket{{{base},le="{bound}"}} {bucket}')
+        total = _ai_turn_count[agent]
+        lines.append(f'nova_ai_turn_duration_seconds_bucket{{{base},le="+Inf"}} {total}')
+        lines.append(f"nova_ai_turn_duration_seconds_sum{{{base}}} {_ai_turn_sum[agent]}")
+        lines.append(f"nova_ai_turn_duration_seconds_count{{{base}}} {total}")
     for name, (help_text, value) in (extra_gauges or {}).items():
         lines += [f"# HELP {name} {help_text}", f"# TYPE {name} gauge", f"{name} {value}"]
     return "\n".join(lines) + "\n"

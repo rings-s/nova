@@ -213,6 +213,7 @@ These answer Moyasar's webhook calls, not app clients:
 | Code                     | HTTP | Meaning                                                         | What to do                                   |
 | ------------------------ | ---- | --------------------------------------------------------------- | -------------------------------------------- |
 | `rate_limit_exceeded`    | 429  | Too many requests from you in the window.                       | Wait `Retry-After` seconds.                  |
+| `ai_busy`                | 429  | The assistant is answering someone else, or you already have a message being answered. | Retry in a few seconds.                      |
 | `request_in_flight`      | 409  | A request with this `Idempotency-Key` is still being processed. | Wait a moment, then retry with the same key. |
 | `idempotency_key_reused` | 422  | This `Idempotency-Key` was used with a different request body.  | Use a new key for a new request.             |
 

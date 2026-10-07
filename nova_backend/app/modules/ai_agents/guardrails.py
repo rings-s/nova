@@ -81,7 +81,16 @@ _INJECTION_PATTERNS = (
     re.compile(r"reveal\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions)", re.I),
     # Direct tool invocation attempts written into message content.
     re.compile(r"\b(?:call|invoke|execute)\s+(?:the\s+)?tool\b", re.I),
-    re.compile(r"\bconfirm_booking\b|\bcapture_payment\b|\brefund\b", re.I),
+    # Tool names, not the word: "I want a refund" is an ordinary request.
+    re.compile(r"\bconfirm_booking\b|\bcapture_payment\b|\brefund_payment\b", re.I),
+    # The same attempts in Arabic. Letters are matched in their hamza and
+    # ya/alef-maqsura variants, since people type either. Detection only flags
+    # and counts: the text is framed as data whether or not it matches.
+    re.compile(r"[تي]جاهل\s+(?:كل\s+)?(?:ال)?تعليمات\s+(?:ال)?(?:سابقة|اعلاه|أعلاه)"),
+    re.compile(r"[اإأ]نس[ىي]?\s+(?:كل\s+)?(?:ال)?تعليمات"),
+    re.compile(r"[اأإ]نت\s+(?:ال[آا]ن|الان)\s+"),
+    re.compile(r"(?:[اأإ]كشف|[اأإ]عرض|[اأإ]ظهر)\s+(?:لي\s+)?(?:ال)?(?:تعليمات|موجه\s+النظام)"),
+    re.compile(r"وضع\s+(?:ال)?مطور"),
     # The frame this module puts around suspicious text, written into the text
     # to close it early and speak from outside it.
     re.compile(r"<\s*/?\s*untrusted_user_text", re.I),
@@ -167,9 +176,15 @@ def _redact(segment: str) -> str:
     return segment
 
 
+#: Arabic short-vowel marks and the tatweel stretch, which people add or drop
+#: freely ("انسَ", "تجــاهل") and the patterns above do not spell out.
+_ARABIC_MARKS = re.compile("[\u064b-\u0652\u0640]")
+
+
 def detect_injection(text: str) -> bool:
     """Whether untrusted text is trying to issue instructions."""
-    return any(pattern.search(text) for pattern in _INJECTION_PATTERNS)
+    plain = _ARABIC_MARKS.sub("", text)
+    return any(pattern.search(plain) for pattern in _INJECTION_PATTERNS)
 
 
 def sanitize_untrusted_text(text: str) -> SanitizedInput:

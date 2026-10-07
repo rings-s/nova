@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.core import metrics
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.modules.ai_agents.agents import WRITE_TOOLS, AgentSpec
@@ -321,6 +322,11 @@ class AgentToolkit:
                 self.deps.artifacts.committed_writes.append(tool_name)
 
         self.deps.artifacts.grounded_values |= grounded_values_in_result(result)
+        metrics.count(
+            "nova_ai_tool_calls_total",
+            tool=tool_name,
+            outcome="refused" if "error" in result else "ok",
+        )
         logger.info(
             "ai_tool_called",
             extra={

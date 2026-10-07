@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     ai_tool_timeout_seconds: float = 5.0
     ai_request_timeout_seconds: float = 30.0
     ai_enabled: bool = True
+    #: Turns allowed to run at once in this process, and how long a further one
+    #: waits for a slot before the caller is told to retry (`ai_busy`). Match the
+    #: model server: `lms load --parallel N` serves N turns at a time.
+    ai_max_concurrent_turns: int = 2
+    ai_queue_wait_seconds: float = 15.0
     #: How long a conversation's recent turns are remembered, and how many
     #: (`ai_agents/history.py`). Working memory for the model, not a record.
     ai_history_ttl_seconds: int = 86_400

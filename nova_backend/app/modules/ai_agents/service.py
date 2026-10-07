@@ -33,14 +33,16 @@ A turn, in order (docs/13 sections 3 and 5):
 """
 
 import logging
+import time
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
+from app.core import metrics
 from app.core.exceptions import ValidationDomainError
 from app.core.security import Principal
 from app.modules.ai_agents.agents import (
@@ -50,6 +52,8 @@ from app.modules.ai_agents.agents import (
     Audience,
     resolve_agent,
 )
+from app.modules.ai_agents.concurrency import InferenceGate
+from app.modules.ai_agents.exceptions import AiBusyError
 from app.modules.ai_agents.guardrails import (
     GuardrailError,
     GuardrailViolation,
@@ -226,6 +230,7 @@ class AiChatService:
         history: ConversationStore | None = None,
         discovery: DiscoveryScope | None = None,
         services_for: Callable[[UUID], ServiceScope] | None = None,
+        gate_factory: Callable[[], InferenceGate] | None = None,
     ) -> None:
         """A tenant's chat (`tenant_id` and `services`), or the marketplace's
         (no tenant; `discovery` and `services_for` instead)."""
@@ -236,6 +241,10 @@ class AiChatService:
         self.history = history
         self.discovery = discovery
         self.services_for = services_for
+        #: Builds the turn limiter inside the request's event loop (a semaphore
+        #: binds to its loop, and dependencies are built outside it). None: no
+        #: limit, as in tests that run one turn.
+        self.gate_factory = gate_factory
 
     async def chat(
         self,
@@ -289,6 +298,7 @@ class AiChatService:
 
         sanitized = sanitize_untrusted_text(message)
         if sanitized.injection_detected:
+            metrics.count("nova_ai_injection_total")
             logger.warning(
                 "ai_prompt_injection_detected", extra={"session_id": session_id, "agent": spec.name}
             )
@@ -334,20 +344,29 @@ class AiChatService:
                 f"{instructions}\n\n{self._offers_note(deps.offers, confirmed_hold_token)}"
             )
 
-        result = await self.engine.run_turn(
-            agent_name=spec.name,
-            system_prompt=instructions,
-            user_message=sanitized.text,
-            deps=deps,
-            tools=toolkit.for_agent(),
-            locale=locale,
-            prefer_reasoning_model=spec.prefer_reasoning_model,
-            output_type=spec.output_type,
-            grounded=spec.grounded_numbers,
-            history=earlier_turns,
-            before_attempt=artifacts.begin_attempt,
-            retry_is_safe=artifacts.nothing_committed,
-        )
+        gate = self.gate_factory() if self.gate_factory is not None else None
+        started = time.perf_counter()
+        try:
+            async with gate.slot(str(principal.subject_id)) if gate else nullcontext():
+                result = await self.engine.run_turn(
+                    agent_name=spec.name,
+                    system_prompt=instructions,
+                    user_message=sanitized.text,
+                    deps=deps,
+                    tools=toolkit.for_agent(),
+                    locale=locale,
+                    prefer_reasoning_model=spec.prefer_reasoning_model,
+                    output_type=spec.output_type,
+                    grounded=spec.grounded_numbers,
+                    history=earlier_turns,
+                    before_attempt=artifacts.begin_attempt,
+                    retry_is_safe=artifacts.nothing_committed,
+                )
+        except AiBusyError:
+            metrics.record_ai_turn(
+                agent=spec.name, outcome="busy", seconds=time.perf_counter() - started
+            )
+            raise
         if self.history and result.new_turn is not None:
             await self.history.append(conversation, result.new_turn)
         if self.history is not None and (artifacts.held_slots or artifacts.used_offers):
@@ -408,6 +427,15 @@ class AiChatService:
             queue_places=list(artifacts.queue_places),
             pending_cancellations=list(artifacts.pending_cancellations),
             tickets=list(artifacts.tickets),
+        )
+        metrics.record_ai_turn(
+            agent=spec.name,
+            outcome="handoff"
+            if result.requires_human_handoff
+            else "degraded"
+            if result.degraded
+            else "ok",
+            seconds=time.perf_counter() - started,
         )
         logger.info(
             "ai_turn_completed",

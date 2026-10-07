@@ -73,6 +73,7 @@ export const ERRORS = {
 	"error.queue_entry_not_found": "لم يتم العثور على هذا الدور في القائمة.",
 	"error.queue_not_found": "لم يتم العثور على قائمة الانتظار.",
 	"error.rate_limit_exceeded": "محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.",
+	"error.ai_busy": "المساعد مشغول بالرد الآن. حاول مرة أخرى بعد لحظات.",
 	"error.refund_exceeds_capture": "مبلغ الاسترداد أكبر من المبلغ المتبقي.",
 	"error.report_too_large": "التقرير كبير جدًا. اختر فترة أقصر.",
 	"error.report_window_invalid": "الفترة المختارة غير صالحة.",

@@ -59,9 +59,7 @@ class SubscriptionRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
 
     business_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
-    tier: Mapped[PlanTier] = mapped_column(
-        EnumValue(PlanTier, length=32), nullable=False
-    )
+    tier: Mapped[PlanTier] = mapped_column(EnumValue(PlanTier, length=32), nullable=False)
     status: Mapped[SubscriptionStatus] = mapped_column(
         EnumValue(SubscriptionStatus, length=32),
         nullable=False,
@@ -246,9 +244,7 @@ class SubscriptionCheckoutRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedM
     subscription_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False
     )
-    tier: Mapped[PlanTier] = mapped_column(
-        EnumValue(PlanTier, length=32), nullable=False
-    )
+    tier: Mapped[PlanTier] = mapped_column(EnumValue(PlanTier, length=32), nullable=False)
     annual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     net_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     vat_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)

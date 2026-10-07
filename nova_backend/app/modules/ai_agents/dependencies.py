@@ -28,6 +28,7 @@ from app.core.security import (
 from app.db.errors import translate_integrity_error
 from app.db.session import get_session_factory, set_discovery_scope, set_tenant_scope
 from app.integrations.payments.moyasar import PaymentGateway
+from app.modules.ai_agents.concurrency import InferenceGate, get_inference_gate
 from app.modules.ai_agents.history import ConversationStore, RedisConversationStore
 from app.modules.ai_agents.runtime import InferenceEngine, build_inference_engine
 from app.modules.ai_agents.service import AiChatService, TenantServices
@@ -153,6 +154,15 @@ def get_inference_engine() -> InferenceEngine:
     return build_inference_engine(get_settings())
 
 
+def _gate_factory() -> InferenceGate:
+    """The turn limiter for this process and event loop, from settings."""
+    settings = get_settings()
+    return get_inference_gate(
+        max_concurrent=settings.ai_max_concurrent_turns,
+        queue_wait_seconds=settings.ai_queue_wait_seconds,
+    )
+
+
 def get_ai_chat_service(
     tenant_id: UUID = Depends(get_authorized_tenant),
     engine: InferenceEngine = Depends(get_inference_engine),
@@ -172,6 +182,7 @@ def get_ai_chat_service(
         services=TenantServiceScope(tenant_id, transaction=transaction, gateway=gateway),
         tenant_id=tenant_id,
         history=history,
+        gate_factory=_gate_factory,
     )
 
 
@@ -200,4 +211,5 @@ def get_marketplace_chat_service(
         services_for=lambda tenant_id: TenantServiceScope(
             tenant_id, transaction=transaction, gateway=gateway
         ),
+        gate_factory=_gate_factory,
     )
