@@ -134,6 +134,95 @@ def test_the_worker_reaches_modules_through_their_services() -> None:
     assert not violations, "worker reaches past a service: " + "; ".join(violations)
 
 
+def _top_level_app_imports(path: pathlib.Path) -> set[str]:
+    """`app.*` modules a file imports when it is loaded, not inside a function."""
+    found: set[str] = set()
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("app."):
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names if alias.name.startswith("app."))
+    return found
+
+
+def _cycles(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Strongly connected components with more than one member (Tarjan)."""
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    found: list[list[str]] = []
+
+    def visit(node: str) -> None:
+        index[node] = low[node] = len(index)
+        stack.append(node)
+        on_stack.add(node)
+        for nxt in graph.get(node, ()):
+            if nxt not in index:
+                visit(nxt)
+                low[node] = min(low[node], low[nxt])
+            elif nxt in on_stack:
+                low[node] = min(low[node], index[nxt])
+        if low[node] == index[node]:
+            component = []
+            while True:
+                member = stack.pop()
+                on_stack.discard(member)
+                component.append(member)
+                if member == node:
+                    break
+            if len(component) > 1:
+                found.append(sorted(component))
+
+    for node in list(graph):
+        if node not in index:
+            visit(node)
+    return found
+
+
+def test_no_file_imports_itself_back_through_a_cycle() -> None:
+    """Import order must never be load-bearing.
+
+    A cycle between files works or fails depending on which one Python loads
+    first, so it breaks on an unrelated import change far from either file.
+    Imports inside functions are lazy and do not count.
+    """
+    app_dir = MODULES_DIR.parent
+    files = {
+        ".".join(("app", *path.relative_to(app_dir).with_suffix("").parts)).removesuffix(
+            ".__init__"
+        ): path
+        for path in app_dir.rglob("*.py")
+    }
+    graph = {
+        name: {imported for imported in _top_level_app_imports(path) if imported in files}
+        for name, path in files.items()
+    }
+    assert _cycles(graph) == []
+
+
+def test_modules_depend_on_each_other_one_way_below_the_router() -> None:
+    """Services and wiring form a one-way graph between modules.
+
+    A router may compose another module's wiring even when that module depends
+    back on its own (discovery's public availability builds a booking service;
+    booking asks discovery's attribution service about a referral). Below the
+    router, a two-way dependency would make the modules one module.
+    """
+    graph: dict[str, set[str]] = {}
+    for path in MODULES_DIR.rglob("*.py"):
+        if path.name == "router.py":
+            continue
+        own = path.relative_to(MODULES_DIR).parts[0]
+        graph.setdefault(own, set()).update(
+            imported.split(".")[2]
+            for imported in _top_level_app_imports(path)
+            if imported.startswith("app.modules.") and imported.split(".")[2] != own
+        )
+    assert _cycles(graph) == []
+
+
 def test_every_module_documents_itself() -> None:
     """Each module's __init__.py must carry the context summary.
 
