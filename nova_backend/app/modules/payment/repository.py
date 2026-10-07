@@ -206,7 +206,7 @@ class SettlementRepository:
         self.session = session
 
     async def list_captured_between(
-        self, *, start: datetime, end: datetime, limit: int = 5000
+        self, *, start: datetime, end: datetime, limit: int | None = None
     ) -> list[CapturedPayment]:
         """Prepayments captured in `[start, end)`.
 
@@ -216,6 +216,9 @@ class SettlementRepository:
 
         Only `SETTLED_STATUSES` — the module's own definition of "money has
         actually moved to us". An authorized-but-uncaptured payment has not.
+
+        Unbounded unless `limit` is given: this feeds the payout, and a cap
+        would silently leave captured money out of it.
         """
         collected = (PaymentRecord.amount - PaymentRecord.refunded_amount).label("collected")
         stmt = (

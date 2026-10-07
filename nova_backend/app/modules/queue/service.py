@@ -567,9 +567,15 @@ class TicketSweeper:
         self.tickets = tickets
 
     async def expire_stale(self, *, now: datetime, limit: int = 500) -> int:
-        """Moves ACTIVE tickets past their expiry to EXPIRED. Returns how many.
+        """Moves ACTIVE tickets past their expiry to EXPIRED, `limit` at a time until
+        none are left. Returns how many.
 
         Cosmetic for security (`Ticket.is_redeemable` already refuses an
         expired ticket at scan time), but it keeps reception's screen honest.
         """
-        return await self.tickets.expire_stale(now=now, limit=limit)
+        total = 0
+        while True:
+            batch = await self.tickets.expire_stale(now=now, limit=limit)
+            total += batch
+            if batch < limit:
+                return total

@@ -115,6 +115,7 @@ class SubscriptionRepository(TenantScopedRepository[SubscriptionRecord]):
         stmt = (
             self._scope(select(SubscriptionRecord))
             .where(SubscriptionRecord.status != SubscriptionStatus.CANCELLED)
+            .order_by(SubscriptionRecord.tenant_id, SubscriptionRecord.business_id)
             .limit(limit)
         )
         rows = (await self.session.execute(stmt)).scalars().all()
@@ -540,7 +541,11 @@ class UnscopedInvoiceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list_payable_before(self, moment: datetime, *, limit: int = 500) -> list[UUID]:
+    async def list_payable_before(
+        self, moment: datetime, *, limit: int | None = None
+    ) -> list[UUID]:
+        """Every unpaid invoice due by `moment`, oldest first. Unbounded unless
+        `limit` is given: a cap would leave overdue invoices undunned."""
         stmt = (
             select(InvoiceRecord.id)
             .where(
@@ -548,6 +553,7 @@ class UnscopedInvoiceRepository:
                 InvoiceRecord.due_at.is_not(None),
                 InvoiceRecord.due_at <= moment,
             )
+            .order_by(InvoiceRecord.due_at, InvoiceRecord.id)
             .limit(limit)
         )
         return list((await self.session.execute(stmt)).scalars().all())
@@ -556,8 +562,12 @@ class UnscopedInvoiceRepository:
         stmt = select(InvoiceRecord.tenant_id).where(InvoiceRecord.id == invoice_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list_active_subscription_ids(self, *, limit: int = 1000) -> list[tuple[UUID, UUID]]:
-        """`(tenant_id, business_id)` for everything the close must bill."""
+    async def list_active_subscription_ids(
+        self, *, limit: int | None = None
+    ) -> list[tuple[UUID, UUID]]:
+        """`(tenant_id, business_id)` for everything the close must bill.
+
+        Unbounded unless `limit` is given: a cap would skip businesses' invoices."""
         stmt = (
             select(SubscriptionRecord.tenant_id, SubscriptionRecord.business_id)
             .where(SubscriptionRecord.status != SubscriptionStatus.CANCELLED)

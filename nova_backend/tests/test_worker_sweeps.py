@@ -120,3 +120,40 @@ async def test_the_delivery_sweep_lists_due_pending_messages_across_tenants(
 
     assert {(n.id, n.tenant_id) for n in due} <= listed
     assert all(n.id not in {i for i, _ in listed} for n in (later, sent))
+
+
+async def test_the_ticket_sweep_keeps_going_past_one_batch(db_session, as_owner, tenant_factory):
+    tenant = await tenant_factory()
+    async with as_owner():
+        db_session.add_all(
+            [_ticket(tenant.id, expires_at=NOW - timedelta(minutes=1)) for _ in range(5)]
+        )
+        await db_session.flush()
+
+    await bypass_tenant_scope(db_session)
+    expired = await build_ticket_sweeper(db_session).expire_stale(now=NOW, limit=2)
+
+    assert expired == 5
+    remaining = (
+        await db_session.execute(
+            select(TicketRecord).where(TicketRecord.status == TicketStatus.ACTIVE)
+        )
+    ).all()
+    assert remaining == []
+
+
+async def test_the_hold_purge_keeps_going_past_one_batch(db_session, as_owner, tenant_factory):
+    tenant = await tenant_factory()
+    async with as_owner():
+        db_session.add_all(
+            [_hold(tenant.id, expires_at=NOW - timedelta(days=2)) for _ in range(5)]
+        )
+        await db_session.flush()
+
+    await bypass_tenant_scope(db_session)
+    purged = await build_slot_hold_sweeper(db_session).purge_expired_before(
+        NOW - timedelta(days=1), limit=2
+    )
+
+    assert purged == 5
+    assert (await db_session.execute(select(SlotHoldRecord))).all() == []

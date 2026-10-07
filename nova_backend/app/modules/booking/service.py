@@ -893,9 +893,15 @@ class SlotHoldSweeper:
         self.holds = holds
 
     async def purge_expired_before(self, cutoff: datetime, *, limit: int = 1000) -> int:
-        """Deletes holds that expired before `cutoff`. Returns how many.
+        """Deletes holds that expired before `cutoff`, `limit` at a time until none
+        are left. Returns how many.
 
         Expiry is by timestamp, so an expired hold already stopped blocking
         availability when it lapsed; this only stops the table growing.
         """
-        return await self.holds.purge_expired_before(cutoff, limit=limit)
+        total = 0
+        while True:
+            batch = await self.holds.purge_expired_before(cutoff, limit=limit)
+            total += batch
+            if batch < limit:
+                return total
