@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import PostgresDsn, RedisDsn, model_validator
+from pydantic import AliasChoices, Field, PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: The environments where a developer convenience may relax a deployed rule.
@@ -13,7 +13,7 @@ MIN_SECRET_KEY_LENGTH = 32
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     #: Production unless told otherwise, so a deployment that forgets ENV gets
     #: the strict rules (SECRET_KEY checked, no dev bypass, an RLS-exempt
@@ -93,7 +93,11 @@ class Settings(BaseSettings):
     #: The account's *secret* key (`sk_test_…` or `sk_live_…`), from the
     #: Moyasar dashboard under Settings > API Keys. Unset, payments answer 503
     #: `integration_not_configured` and the rest of the app runs as normal.
-    moyasar_api_key: str | None = None
+    #: Read from MOYASAR_SECRET_KEY_ID, or MOYASAR_API_KEY.
+    moyasar_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MOYASAR_SECRET_KEY_ID", "MOYASAR_API_KEY"),
+    )
     #: The shared secret set on the webhook in the Moyasar dashboard (Settings >
     #: Webhooks). Moyasar sends it back as `secret_token` in every webhook body.
     moyasar_webhook_secret: str | None = None
@@ -110,6 +114,14 @@ class Settings(BaseSettings):
     #: Deposit required to confirm a booking, as a percentage of service price.
     #: 0 means bookings confirm without payment (docs/11 allows both).
     default_deposit_percent: int = 0
+
+    # --- Maps: reverse geocoding ---
+    #: OpenStreetMap's Nominatim (ADR-0012), turning a branch's pin into its
+    #: district and city. Its usage policy asks for an identifying User-Agent
+    #: and at most one request a second; point this at your own instance for
+    #: more. Empty switches the lookup off (503 `integration_not_configured`).
+    geocoder_url: str = "https://nominatim.openstreetmap.org"
+    geocoder_timeout_seconds: float = 8.0
 
     # --- Notifications / WhatsApp ---
     whatsapp_bsp_api_key: str | None = None

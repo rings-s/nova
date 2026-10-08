@@ -251,7 +251,7 @@ E elevation of privilege. "Ref" points at §6 (TM-xx) or §8 (SR-xx).
 | T   | Forged AI history: tool-return parts from earlier turns count as **grounded**, so an owner agent can be made to quote invented figures | `REDIS_PASSWORD`, loopback                                               | open                                         | TM-08 |
 | T   | Login-failure and rate-limit counters reset                                                                                            | `REDIS_PASSWORD`                                                         | open (same root as TM-08)                    | TM-08 |
 | E   | Code run through the job queue                                                                                                         | JSON codec, no pickle; every job is an idempotent cron with no arguments | closed                                       | —     |
-| I   | Owner revenue figures and redacted customer text persisted in the AOF, unencrypted, for 24 h                                           | TTL, turn cap                                                            | accepted locally; requirement for production | SR-12 |
+| I   | Owner revenue figures and redacted customer text persisted in the AOF, unencrypted, for 24 h                                           | TTL, turn cap, erase on request (`DELETE /ai/conversations`)             | accepted locally; requirement for production | SR-12 |
 | D   | Redis down                                                                                                                             | limiter degrades to in-process buckets; history starts empty             | per-process limits multiply by process count | SR-11 |
 
 ### 5.6 TB6: Outbox → handlers

@@ -3,6 +3,8 @@
 	// The form's own stylesheet, scoped by Moyasar to `div#mysr`. Safe to import
 	// here: it is CSS, and the library itself is only loaded in the browser.
 	import 'moyasar-payment-form/dist/moyasar.css';
+	// NOVA's look on top of it (tokens, radii, focus ring, dark mode).
+	import './moyasar-theme.css';
 	import { onMount } from 'svelte';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import Alert from '$lib/components/ui/Alert.svelte';
@@ -80,7 +82,7 @@
 		{t("The payment form couldn't load. Check your connection and try again.")}
 	</Alert>
 {:else}
-	<div class="space-y-3">
+	<div class="nova-pay space-y-3">
 		{#if !ready}
 			<div class="space-y-3" aria-hidden="true">
 				<Skeleton class="h-10 w-full rounded-control" />

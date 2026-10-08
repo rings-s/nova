@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,7 @@ def _subscription_to_domain(record: SubscriptionRecord) -> Subscription:
         cancelled_at=record.cancelled_at,
         negotiated_monthly_price=record.negotiated_monthly_price,
         marketplace_listing_hidden=record.marketplace_listing_hidden,
+        trial_ai_messages_used=record.trial_ai_messages_used,
     )
 
 
@@ -71,6 +72,7 @@ def _apply_subscription(subscription: Subscription, record: SubscriptionRecord) 
     record.cancelled_at = subscription.cancelled_at
     record.negotiated_monthly_price = subscription.negotiated_monthly_price
     record.marketplace_listing_hidden = subscription.marketplace_listing_hidden
+    record.trial_ai_messages_used = subscription.trial_ai_messages_used
 
 
 class SubscriptionRepository(TenantScopedRepository[SubscriptionRecord]):
@@ -97,6 +99,7 @@ class SubscriptionRepository(TenantScopedRepository[SubscriptionRecord]):
             annual=subscription.annual,
             trial_ends_at=subscription.trial_ends_at,
             negotiated_monthly_price=subscription.negotiated_monthly_price,
+            marketplace_listing_hidden=subscription.marketplace_listing_hidden,
         )
         self.add(record)
         await self.session.flush()
@@ -561,6 +564,23 @@ class UnscopedInvoiceRepository:
     async def tenant_of(self, invoice_id: UUID) -> UUID | None:
         stmt = select(InvoiceRecord.tenant_id).where(InvoiceRecord.id == invoice_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_expired_trials(
+        self, today: date, *, limit: int = 1000
+    ) -> list[tuple[UUID, UUID]]:
+        """`(tenant_id, business_id)` for every trial whose free week is over."""
+        stmt = (
+            select(SubscriptionRecord.tenant_id, SubscriptionRecord.business_id)
+            .where(
+                SubscriptionRecord.status == SubscriptionStatus.TRIALING,
+                or_(
+                    SubscriptionRecord.trial_ends_at.is_(None),
+                    SubscriptionRecord.trial_ends_at <= today,
+                ),
+            )
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in (await self.session.execute(stmt)).all()]
 
     async def list_active_subscription_ids(
         self, *, limit: int | None = None

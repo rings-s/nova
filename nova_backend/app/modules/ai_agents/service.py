@@ -44,7 +44,7 @@ from uuid import UUID
 
 from app.core import metrics
 from app.core.exceptions import ValidationDomainError
-from app.core.security import Principal
+from app.core.security import AuthorizationError, Principal, PrincipalKind
 from app.modules.ai_agents.agents import (
     AGENTS,
     AgentSpec,
@@ -53,13 +53,14 @@ from app.modules.ai_agents.agents import (
     resolve_agent,
 )
 from app.modules.ai_agents.concurrency import InferenceGate
-from app.modules.ai_agents.exceptions import AiBusyError
+from app.modules.ai_agents.exceptions import AiBusyError, AiMemoryUnavailableError
 from app.modules.ai_agents.guardrails import (
     GuardrailError,
     GuardrailViolation,
     ProposedAction,
     assert_caller_may_use_agent,
     assert_tenant_matches,
+    clean_reply,
     grounded_values_in,
     sanitize_untrusted_text,
 )
@@ -74,6 +75,7 @@ from app.modules.ai_agents.tools import (
     decode_offers,
     encode_offers,
 )
+from app.modules.ai_agents.tools.facts import BusinessFacts, business_facts
 from app.modules.analytics.service import AnalyticsService, ChartReport
 from app.modules.billing.service import BillingService
 from app.modules.booking.service import BookingService
@@ -278,6 +280,7 @@ class AiChatService:
         if spec.needs_business and business_id is None:
             raise ValidationDomainError(f"'{spec.name}' works on one business: send business_id.")
         context_business = spec.needs_business or (spec.accepts_business and business_id)
+        facts: BusinessFacts | None = None
         if self.services is None and spec.required_permission is not None:
             # No scope to read this tenant's membership through: refuse rather
             # than skip the check and answer an owner agent's question.
@@ -295,6 +298,13 @@ class AiChatService:
                     await services.catalog.get_business(business_id)
                     if spec.needs_business and spec.required_feature is not None:
                         await services.billing.require_feature(business_id, spec.required_feature)
+                    # A locked business gets no AI (402 `subscription_required`),
+                    # and a trial counts this message against its allowance
+                    # (402 `trial_ai_limit_reached` once it is spent).
+                    await services.billing.use_ai_message(business_id)
+                    if spec.audience is Audience.CUSTOMER:
+                        # What the storefront's assistant can say without a tool.
+                        facts = await business_facts(services, business_id, locale)
 
         sanitized = sanitize_untrusted_text(message)
         if sanitized.injection_detected:
@@ -320,6 +330,8 @@ class AiChatService:
         )
         artifacts = deps.artifacts
         instructions = self._instructions(spec, locale=locale)
+        if facts is not None:
+            instructions = f"{instructions}\n\n{facts.text}"
         # NOVA's own instructions are facts too: a reply may repeat a number they state.
         artifacts.grounded_values |= grounded_values_in(instructions)
         toolkit = AgentToolkit(
@@ -374,8 +386,21 @@ class AiChatService:
                 conversation, encode_offers(self._offers_after(deps)), OFFER_TTL_SECONDS
             )
 
+        reply, says_nothing = clean_reply(result.reply, message)
+        if reply != result.reply:
+            result = replace(result, reply=reply)
+
         if artifacts.handoff_reason is not None and not result.requires_human_handoff:
             result = replace(result, requires_human_handoff=True)
+        elif says_nothing and not (artifacts.held_slots or artifacts.tickets):
+            # The model gave the question back, or nothing at all. Say what the
+            # assistant can do rather than show the customer their own words.
+            logger.info("ai_reply_said_nothing", extra={"agent": spec.name})
+            result = replace(
+                result,
+                reply=_unanswered_reply(locale, facts.branches if facts else ()),
+                requires_human_handoff=False,
+            )
         elif artifacts.booking_failures and not artifacts.tickets:
             # A booking was attempted and refused, and nothing was booked. The
             # model's own text is not trusted here: live, qwen3-1.7b told a
@@ -552,6 +577,31 @@ def _mentions_time(reply: str, offer: HeldSlot) -> bool:
     return hhmm in reply
 
 
+def _unanswered_reply(locale: str, branches: tuple[str, ...] = ()) -> str:
+    """Said for the model when it gave nothing back. With the storefront's branches
+    known, it says where they are (the question that failed live), from the records."""
+    arabic = locale.startswith("ar")
+    if branches:
+        where = "\n".join(f"- {line}" for line in branches)
+        if arabic:
+            return (
+                f"فروعنا:\n{where}\n\nيمكنني أيضًا إخبارك بخدماتنا وأسعارها، أو إيجاد موعد متاح لك."
+            )
+        return (
+            f"Here is where to find us:\n{where}\n\n"
+            "I can also tell you what we offer and what it costs, or find you a free time."
+        )
+    if arabic:
+        return (
+            "عذرًا، لم أستطع الإجابة عن ذلك الآن. يمكنني إخبارك بمواقع فروعنا وخدماتنا "
+            "وأسعارها، أو إيجاد موعد متاح لك."
+        )
+    return (
+        "Sorry, I couldn't answer that just now. I can tell you where our branches are, "
+        "what we offer and what it costs, or find you a free time."
+    )
+
+
 def _holding_reply(locale: str, offer: HeldSlot) -> str:
     """The held time in words, from the hold itself rather than the model."""
     if locale == "ar":
@@ -585,12 +635,43 @@ AGENT_TOOL_ALLOWLIST: dict[str, frozenset[str]] = {
 AVAILABLE_AGENTS: frozenset[str] = frozenset(AGENTS)
 
 
+class ConversationMemoryService:
+    """What the assistants remember of one person, and forgetting all of it.
+
+    Memory is personal data (docs/14, Confidential (PDPL)): redacted, but names
+    and free text remain. It expires on its own after `ai_history_ttl_seconds`;
+    this is the way to erase it sooner, at every business and the marketplace.
+    """
+
+    def __init__(self, history: ConversationStore) -> None:
+        self.history = history
+
+    async def forget(self, principal: Principal) -> int:
+        """Deletes the caller's conversations and offers; how many keys went.
+
+        Offers hold the hold tokens `book_held_slot` books from, so a slot
+        offered before this cannot be booked by pressing "Yes" afterwards.
+        """
+        if principal.kind is PrincipalKind.SERVICE:
+            raise AuthorizationError("A service principal has no conversations to forget.")
+        try:
+            forgotten = await self.history.forget_principal(principal.subject_id)
+        except Exception as error:
+            logger.warning("ai_memory_not_forgotten", exc_info=True)
+            raise AiMemoryUnavailableError(
+                "Conversation memory is unreachable, so nothing was deleted. Try again shortly."
+            ) from error
+        logger.info("ai_memory_forgotten", extra={"keys": forgotten})
+        return forgotten
+
+
 __all__ = [
     "AGENT_TOOL_ALLOWLIST",
     "AVAILABLE_AGENTS",
     "AgentDeps",
     "AiChatService",
     "ChatTurn",
+    "ConversationMemoryService",
     "DiscoveryScope",
     "ServiceScope",
     "TenantServices",

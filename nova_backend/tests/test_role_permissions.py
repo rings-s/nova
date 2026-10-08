@@ -15,8 +15,10 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Principal, PrincipalKind, get_principal
+from app.db.session import set_tenant_scope
 from app.modules.ai_agents.dependencies import get_inference_engine
 from app.modules.ai_agents.runtime import InferenceEngine
+from app.modules.billing.dependencies import build_billing_service
 from app.modules.identity.domain import MembershipRole, StaffPermission, role_allows
 from app.modules.identity.models import Membership, User
 
@@ -249,6 +251,8 @@ async def test_a_manager_reaches_the_accountant(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession, as_owner, salon
 ):
     tenant, business = salon
+    await set_tenant_scope(db_session, tenant.id)
+    await build_billing_service(db_session, tenant.id).subscribe(business_id=business.id)
     principal = await _staff(db_session, as_owner, tenant, MembershipRole.MANAGER)
     app.dependency_overrides[get_principal] = lambda: principal
     _engine_off(app)

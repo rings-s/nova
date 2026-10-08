@@ -19,6 +19,8 @@
 	import { accessStore } from '$lib/stores/access.svelte.js';
 	import { listMyTenants } from '$lib/api/identity.js';
 	import { listBusinesses } from '$lib/api/catalog.js';
+	import { getStanding } from '$lib/api/billing.js';
+	import { landingPath } from '$lib/utils/landing.js';
 	import { businessStore } from '$lib/stores/business.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
@@ -29,6 +31,8 @@
 	import DashboardNav from '$lib/components/layout/DashboardNav.svelte';
 	import TenantSwitcher from '$lib/components/tenant/TenantSwitcher.svelte';
 	import Logo from '$lib/components/layout/Logo.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import { formatDay, lastDayOf, planName } from '$lib/components/billing/plans.js';
 
 	let { children } = $props();
 
@@ -95,11 +99,10 @@
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
 			goto(`${resolve('/login')}?next=${next}`, { replaceState: true });
 		} else if (!authStore.isStaff) {
-			// A signed-in account without a business: most often an owner who
-			// signed up as a customer. Offer to set one up rather than bouncing
-			// them to the home page with no way forward.
-			toastStore.info(t('Set up your business to use the dashboard.'));
-			goto(resolve('/business/new'), { replaceState: true });
+			// A customer account: the dashboard is staff only, and a customer is
+			// never shown it or told about it. Back to their own landing page;
+			// the API refuses every staff route to them regardless.
+			goto(resolve(landingPath(authStore)), { replaceState: true });
 		}
 	});
 
@@ -130,6 +133,49 @@
 		return () => {
 			cancelled = true;
 		};
+	});
+
+	// --- The free trial, and the lock after it ---------------------------------
+	//
+	// Every plan starts with a free week; once it ends unpaid (or before any plan
+	// is chosen) the business is locked and only Billing works. Re-read on every
+	// navigation, so paying unlocks the next page. The API refuses what a
+	// locked business may not do; this only keeps people off pages that would fail.
+
+	/** @type {import('$lib/api/billing.js').Standing | null} */
+	let standing = $state(null);
+	$effect(() => {
+		page.url.pathname;
+		const tenantId = tenantStore.activeTenantId;
+		const businessId = businessStore.activeBusinessId;
+		if (!authStore.isStaff || !tenantId || !businessId) {
+			standing = null;
+			return;
+		}
+		let cancelled = false;
+		getStanding(tenantId, businessId)
+			.then((value) => {
+				if (!cancelled) standing = value;
+			})
+			// Unknown is not locked: the API still refuses what it must.
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	let onBilling = $derived(page.url.pathname.startsWith(resolve('/app/billing')));
+	let canPay = $derived(accessStore.can('manage_subscription'));
+	let locked = $derived(
+		!!(/** @type {import('$lib/api/billing.js').Standing | null} */ (standing)?.locked) &&
+			!onBilling
+	);
+
+	// Whoever can see Billing goes there; anyone else sees the lock screen below.
+	$effect(() => {
+		if (locked && accessStore.can('view_financials')) {
+			goto(resolve('/app/billing'), { replaceState: true });
+		}
 	});
 
 	async function signOut() {
@@ -249,7 +295,45 @@
 		{/if}
 
 		<main class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
-			{@render children()}
+			{#if standing?.trialing && standing.trial_ends_at && !onBilling}
+				<div
+					class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-accent-soft px-4 py-3 text-sm text-fg-secondary"
+				>
+					<span>
+						{t('Free trial of {plan} until {date}.', {
+							plan: planName(standing.tier ?? ''),
+							date: formatDay(lastDayOf(standing.trial_ends_at))
+						})}
+						{t('{count} of 10 AI messages left.', {
+							count: standing.trial_ai_messages_left ?? 0
+						})}
+					</span>
+					{#if canPay}
+						<Button size="sm" href={resolve('/app/billing/checkout')}>{t('Pay now')}</Button>
+					{/if}
+				</div>
+			{/if}
+			{#if locked}
+				<div
+					class="mx-auto mt-10 max-w-lg rounded-panel border border-line bg-surface p-8 text-center shadow-card"
+				>
+					<div
+						class="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-accent-soft text-accent"
+					>
+						<Icon name="lock" class="size-6" />
+					</div>
+					<h1 class="text-xl font-semibold tracking-tight text-fg">
+						{standing?.has_plan ? t('Your free trial has ended') : t('Choose a plan to start')}
+					</h1>
+					<p class="mt-2 text-sm text-fg-muted">
+						{standing?.has_plan
+							? t('Ask the business owner to pay for the plan to unlock the dashboard.')
+							: t('Ask the business owner to choose a plan and start the 7-day free trial.')}
+					</p>
+				</div>
+			{:else}
+				{@render children()}
+			{/if}
 		</main>
 	</div>
 {/if}

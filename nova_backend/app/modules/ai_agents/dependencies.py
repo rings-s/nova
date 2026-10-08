@@ -31,7 +31,11 @@ from app.integrations.payments.moyasar import PaymentGateway
 from app.modules.ai_agents.concurrency import InferenceGate, get_inference_gate
 from app.modules.ai_agents.history import ConversationStore, RedisConversationStore
 from app.modules.ai_agents.runtime import InferenceEngine, build_inference_engine
-from app.modules.ai_agents.service import AiChatService, TenantServices
+from app.modules.ai_agents.service import (
+    AiChatService,
+    ConversationMemoryService,
+    TenantServices,
+)
 from app.modules.analytics.dependencies import build_analytics_service
 from app.modules.billing.dependencies import build_billing_service
 from app.modules.booking.dependencies import build_booking_service
@@ -148,6 +152,12 @@ def get_conversation_store() -> ConversationStore:
             max_turns=settings.ai_history_max_turns,
         )
     return _conversation_store
+
+
+def get_conversation_memory_service(
+    history: ConversationStore = Depends(get_conversation_store),
+) -> ConversationMemoryService:
+    return ConversationMemoryService(history)
 
 
 def get_inference_engine() -> InferenceEngine:

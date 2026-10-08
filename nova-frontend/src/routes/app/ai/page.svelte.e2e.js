@@ -14,7 +14,7 @@ const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64
 /** @param {string} tier @param {string[]} included_features */
 const plan = (tier, included_features) => ({
 	tier,
-	monthly_price: tier === 'solo' ? '0.00' : '199.00',
+	monthly_price: { free: '0.00', solo: '400.00', studio: '600.00', chain: '1200.00' }[tier],
 	annual_price: null,
 	currency: 'SAR',
 	new_client_commission_pct: '30.00',
@@ -29,6 +29,7 @@ const plan = (tier, included_features) => ({
 });
 
 const PLANS = [
+	plan('free', ['ai_booking_agent', 'ai_support_agent']),
 	plan('solo', ['ai_booking_agent', 'ai_support_agent']),
 	plan('studio', ['ai_booking_agent', 'ai_support_agent', INSIGHTS]),
 	plan('chain', ['ai_booking_agent', 'ai_support_agent', INSIGHTS])
@@ -132,7 +133,7 @@ const subscription = (tier, status = 'active') => ({
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
-test('on Solo, the insights agents are locked and point to the upgrade', async ({ page }) => {
+test('on Free, the insights agents are locked and point to the upgrade', async ({ page }) => {
 	await openAi(page, { subscription: null });
 
 	// The accountant comes with every plan: a chat, not a lock.
@@ -147,7 +148,7 @@ test('on Solo, the insights agents are locked and point to the upgrade', async (
 	);
 });
 
-test('a Studio plan waiting on its first payment is still Solo here', async ({ page }) => {
+test('a Studio plan waiting on its first payment is still Free here', async ({ page }) => {
 	await openAi(page, { subscription: subscription('studio', 'pending_payment') });
 
 	await page.getByRole('button', { name: /Business manager/ }).click();

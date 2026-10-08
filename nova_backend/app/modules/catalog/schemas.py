@@ -78,6 +78,23 @@ class SetLocationPositionRequest(ApiSchema):
     longitude: float | None
 
 
+class PlaceOut(ApiSchema):
+    """What the map calls a point, in both languages, to fill the branch form.
+
+    `name_en`/`name_ar` are a suggested branch name (the district, else the
+    city); any field is null where the map has nothing (open desert, the sea).
+    """
+
+    latitude: float
+    longitude: float
+    city_en: str | None = None
+    city_ar: str | None = None
+    district_en: str | None = None
+    district_ar: str | None = None
+    name_en: str | None = None
+    name_ar: str | None = None
+
+
 class CreateLocationRequest(ApiSchema):
     business_id: UUID
     name_en: str = Field(min_length=1, max_length=255)

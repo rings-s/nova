@@ -47,7 +47,6 @@ src/
 │   ├── +page.svelte, about/, pricing/, features/   marketing pages
 │   ├── discover/          the marketplace and each business's storefront
 │   ├── (auth)/            /login and /register
-│   ├── business/new/      create a business; you become its owner
 │   ├── bookings/          a customer's bookings and QR tickets
 │   ├── app/               the staff dashboard (its own sidebar layout)
 │   └── api/v1/[...path]/  an in-memory mock of the API, for `vite dev` only

@@ -77,34 +77,21 @@ async function signedInCustomer(page) {
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
-test('a customer who opens the dashboard is offered to list their business', async ({ page }) => {
+test('a customer never sees the dashboard, and is not told about it', async ({ page }) => {
 	await signedInCustomer(page);
-	await page.goto('/app');
+	await page.goto('/app/bookings');
 
-	await expect(page).toHaveURL(/\/business\/new$/);
-	await expect(page.getByRole('heading', { name: 'List your business' })).toBeVisible();
+	await expect(page).toHaveURL(/\/$/);
+	await expect(page.getByRole('link', { name: 'Dashboard' })).toHaveCount(0);
+	await expect(page.getByText(/dashboard/i)).toHaveCount(0);
 });
 
-test('listing a business makes the account its owner and opens the dashboard', async ({ page }) => {
-	const calls = await signedInCustomer(page);
-	await page.goto('/business/new');
-	await page.waitForLoadState('networkidle');
+test('a customer is not offered to list a business', async ({ page }) => {
+	await signedInCustomer(page);
+	await page.goto('/');
 
-	await page.getByLabel('Business name (English)').fill('New Lounge');
-	await page.getByLabel('Business name (Arabic)').fill('صالة جديدة');
-	await page.getByLabel('Business phone').fill('+966500000010');
-	await page.getByRole('button', { name: 'Create my business' }).click();
-
-	await expect(page).toHaveURL(/\/app$/);
-	await expect(page.getByRole('navigation', { name: 'Dashboard' })).toBeVisible();
-	// Order matters: the storefront can only be created once the session knows
-	// about the new membership.
-	const order = [
-		'POST /tenants',
-		'POST /auth/refresh',
-		`POST /tenants/${TENANT}/catalog/businesses`
-	];
-	expect(calls.filter((c) => order.includes(c))).toEqual(order);
+	await expect(page.getByRole('link', { name: 'My bookings' }).first()).toBeVisible();
+	await expect(page.getByRole('link', { name: 'List your business' })).toHaveCount(0);
 });
 
 test('business sign-up links choose the business account for you', async ({ page }) => {

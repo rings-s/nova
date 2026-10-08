@@ -10,8 +10,8 @@ import { http, tenantPath } from './client.js';
 
 /**
  * @typedef {'solo'|'studio'|'chain'} PlanTier
- * `pending_payment`: a paid plan chosen but not paid for yet; billed and gated as
- * Solo until `startPlanCheckout` is paid.
+ * `trialing`: the plan's free week (every plan starts with one). `pending_payment`:
+ * the week ended unpaid, and the business is locked until `startPlanCheckout` is paid.
  * @typedef {'trialing'|'pending_payment'|'active'|'past_due'|'cancelled'} SubscriptionStatus
  * @typedef {'draft'|'issued'|'paid'|'overdue'|'void'} InvoiceStatus
  * @typedef {'new_marketplace'|'repeat'|'direct'|'exempt'} CommissionClass
@@ -49,8 +49,24 @@ import { http, tenantPath } from './client.js';
  * @property {boolean} annual Billed yearly; `monthly_amount` is still per month.
  * @property {string} monthly_amount
  * @property {string} currency
- * @property {boolean} marketplace_listing_hidden True means 21+ days overdue: the
- *   listing is hidden, but the calendar, queue and existing bookings still work.
+ * @property {boolean} marketplace_listing_hidden The listing is hidden: 21+ days
+ *   overdue, or the business is locked.
+ * @property {string|null} [trial_ends_at] The free week's last day is the day before.
+ * @property {number|null} [trial_ai_messages_left] Null once the plan is paid for.
+ * @property {boolean} [locked] The trial ended unpaid: only Billing works.
+ */
+
+/**
+ * Whether a business may use NOVA today; readable by every staff role.
+ * @typedef {Object} Standing
+ * @property {string} business_id
+ * @property {boolean} has_plan
+ * @property {PlanTier|null} tier
+ * @property {SubscriptionStatus|null} status
+ * @property {boolean} trialing
+ * @property {string|null} trial_ends_at
+ * @property {number|null} trial_ai_messages_left
+ * @property {boolean} locked No plan, or a trial that ended unpaid.
  */
 
 /**
@@ -125,21 +141,29 @@ export function listPlans(tenantId) {
 /**
  * @param {string} tenantId
  * @param {{ businessId: string, tier?: PlanTier, seats?: number, locations?: number,
- *   annual?: boolean, trialDays?: number }} params
+ *   annual?: boolean }} params
  * @returns {Promise<Subscription>}
  */
 export function createSubscription(
 	tenantId,
-	{ businessId, tier = 'solo', seats = 1, locations = 1, annual = false, trialDays = 0 }
+	{ businessId, tier = 'solo', seats = 1, locations = 1, annual = false }
 ) {
 	return http.post(tenantPath(tenantId, '/billing/subscriptions'), {
 		business_id: businessId,
 		tier,
 		seats,
 		locations,
-		annual,
-		trial_days: trialDays
+		annual
 	});
+}
+
+/**
+ * Whether the business is locked (no plan, or its trial ended unpaid), and how
+ * its trial stands. Any staff member; the dashboard reads it on every load.
+ * @param {string} tenantId @param {string} businessId @returns {Promise<Standing>}
+ */
+export function getStanding(tenantId, businessId) {
+	return http.get(tenantPath(tenantId, `/billing/subscriptions/${businessId}/standing`));
 }
 
 /** @param {string} tenantId @param {string} businessId @returns {Promise<Subscription>} */
@@ -161,7 +185,8 @@ export function changePlan(tenantId, businessId, { tier, annual = false }) {
 }
 
 /**
- * One payment for a paid plan, on Moyasar's hosted page.
+ * One payment for a paid plan: in NOVA's checkout page (`checkout`), else on
+ * Moyasar's hosted page (`redirect_url`).
  * @typedef {Object} PlanCheckout
  * @property {string} id
  * @property {string} business_id
@@ -176,10 +201,14 @@ export function changePlan(tenantId, businessId, { tier, annual = false }) {
  * @property {string} covers_until First day NOT covered.
  * @property {string|null} paid_at
  * @property {string|null} redirect_url Moyasar's page; only when just opened.
+ * @property {import('./payment.js').PaymentFormConfig|null} [checkout] The embedded
+ *   Payment Form's options, when the deployment has a publishable key; only when
+ *   just opened. The way to pay when set.
  */
 
 /**
- * Opens Moyasar's payment page for a plan waiting on payment (owner only).
+ * Opens a Moyasar invoice for a plan waiting on payment (owner only): pay it in
+ * the embedded form (`checkout`), else on Moyasar's page (`redirect_url`).
  * Moyasar sends the owner back to `returnUrl?checkout=<id>`; call
  * `syncPlanCheckout` from there. 503 `integration_not_configured` without keys.
  * @param {string} tenantId @param {string} businessId @param {string} returnUrl

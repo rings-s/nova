@@ -67,7 +67,7 @@
 	<div class="flex items-center justify-between gap-4">
 		<Logo />
 
-		<Badge tone="success" size="sm">{t('14-Day Free Trial')}</Badge>
+		<Badge tone="success" size="sm">{t('7-Day Free Trial')}</Badge>
 	</div>
 
 	<!-- Intro -->

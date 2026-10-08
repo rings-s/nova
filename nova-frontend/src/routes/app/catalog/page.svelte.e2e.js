@@ -25,19 +25,6 @@ const BLANK_TILE =
 /** @param {object} value */
 const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-/**
- * The web tile that shows a point at a zoom, as OpenStreetMap numbers them.
- * @param {number} lat @param {number} lng @param {number} z
- */
-function tileFor(lat, lng, z) {
-	const n = 2 ** z;
-	const rad = (lat * Math.PI) / 180;
-	return {
-		x: Math.floor(((lng + 180) / 360) * n),
-		y: Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n)
-	};
-}
-
 /** @param {string} id @param {string} name @param {{lat:number,lng:number}|null} at */
 function branch(id, name, at) {
 	return {
@@ -90,7 +77,24 @@ async function signInAndStub(page, existing = []) {
 		locations: [...existing],
 		/** @type {any[]} */ created: [],
 		/** @type {any[]} */ positioned: [],
-		/** @type {string[]} */ tiles: []
+		/** @type {string[]} */ tiles: [],
+		/** @type {{ latitude: number, longitude: number }[]} */ looked: [],
+		/** What the map service answers: a place, `null` for nowhere, or a status to fail with. */
+		/** @type {(lat: number) => object | number} */
+		place: (lat) =>
+			lat > 23
+				? {
+						name_en: 'Al Olaya branch',
+						name_ar: 'فرع العليا',
+						city_en: 'Riyadh',
+						city_ar: 'الرياض'
+					}
+				: {
+						name_en: 'Al Andalus branch',
+						name_ar: 'فرع الأندلس',
+						city_en: 'Jeddah',
+						city_ar: 'جدة'
+					}
 	};
 
 	await page.route('https://tile.openstreetmap.org/**', (route) => {
@@ -122,6 +126,30 @@ async function signInAndStub(page, existing = []) {
 					'view_financials'
 				],
 				manageable_roles: ['manager', 'owner', 'provider', 'receptionist']
+			});
+		}
+		if (method === 'GET' && path === `${catalog}/places/reverse`) {
+			const query = new URL(request.url()).searchParams;
+			const latitude = Number(query.get('latitude'));
+			const longitude = Number(query.get('longitude'));
+			state.looked.push({ latitude, longitude });
+			const answer = state.place(latitude);
+			if (typeof answer === 'number') {
+				return respond(
+					{ error: { code: 'geocoding_unavailable', message: 'Not answering.', retryable: true } },
+					answer
+				);
+			}
+			return respond({
+				latitude,
+				longitude,
+				city_en: null,
+				city_ar: null,
+				district_en: null,
+				district_ar: null,
+				name_en: null,
+				name_ar: null,
+				...answer
 			});
 		}
 		if (method === 'GET' && path === `${catalog}/businesses/${BUSINESS}/locations`) {
@@ -156,23 +184,6 @@ async function signInAndStub(page, existing = []) {
 	return state;
 }
 
-/**
- * Whether the map has asked for the tile (±1) that shows a point at a zoom.
- * @param {string[]} tiles @param {{ lat: number, lng: number }} at @param {number} z
- */
-function askedForTileNear(tiles, at, z) {
-	const want = tileFor(at.lat, at.lng, z);
-	return tiles.some((path) => {
-		const m = path.match(/^\/(\d+)\/(\d+)\/(\d+)\.png$/);
-		return (
-			m !== null &&
-			Number(m[1]) === z &&
-			Math.abs(Number(m[2]) - want.x) <= 1 &&
-			Math.abs(Number(m[3]) - want.y) <= 1
-		);
-	});
-}
-
 /** @param {import('@playwright/test').Page} page */
 async function openAddLocation(page) {
 	await page.goto('/app/catalog');
@@ -181,106 +192,74 @@ async function openAddLocation(page) {
 	await expect(dialog).toBeVisible();
 	return {
 		dialog,
-		coordinates: dialog.getByLabel('Coordinates', { exact: true }),
 		submit: dialog.getByRole('button', { name: 'Add location' }),
-		pins: dialog.locator('.leaflet-marker-icon')
+		pins: dialog.locator('.leaflet-marker-icon'),
+		nameEn: dialog.getByLabel('Name (English)'),
+		nameAr: dialog.getByLabel('Name (Arabic)'),
+		city: dialog.getByLabel('City')
 	};
-}
-
-/** @param {import('@playwright/test').Locator} dialog */
-async function fillRequired(dialog) {
-	await dialog.getByLabel('Name (English)').fill('Olaya Branch');
-	await dialog.getByLabel('Name (Arabic)').fill('فرع العليا');
 }
 
 test.describe('adding a location', () => {
 	test.use({ viewport: { width: 1280, height: 900 } });
 
-	test('typing a city takes the map there, and clicking it places the pin', async ({ page }) => {
+	test('"Detect my location" fills the pin, the names and the city: nothing is typed', async ({
+		page,
+		context
+	}) => {
+		await context.grantPermissions(['geolocation']);
+		await context.setGeolocation({ latitude: JEDDAH.lat, longitude: JEDDAH.lng });
 		const state = await signInAndStub(page);
-		const { dialog, coordinates, submit, pins } = await openAddLocation(page);
-		await fillRequired(dialog);
-		await expect(pins).toHaveCount(0);
+		const { dialog, submit, pins, nameEn, nameAr, city } = await openAddLocation(page);
+		await expect(submit).toBeDisabled();
 
-		await dialog.getByLabel('City').fill('Riyadh');
-		// The proof the map moved: it asked OpenStreetMap for Riyadh's tiles.
-		await expect.poll(() => askedForTileNear(state.tiles, RIYADH, 12)).toBe(true);
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 
-		await dialog.locator('.leaflet-container').click();
 		await expect(pins).toHaveCount(1);
-		await expect(coordinates).toHaveValue(/^24\.7\d+, 46\.6\d+$/);
+		await expect(nameEn).toHaveValue('Al Andalus branch');
+		await expect(nameAr).toHaveValue('فرع الأندلس');
+		await expect(city).toHaveValue('Jeddah');
+		// Read-only: filled in from the map, never typed.
+		for (const field of [nameEn, nameAr, city]) await expect(field).toHaveAttribute('readonly');
+		await expect(dialog.getByLabel('Coordinates', { exact: true })).toHaveCount(0);
+		expect(state.looked.at(-1)).toEqual({ latitude: JEDDAH.lat, longitude: JEDDAH.lng });
 
 		await submit.click();
 		await expect.poll(() => state.created.length).toBe(1);
-		const sent = state.created[0];
-		expect(sent.latitude).toBeCloseTo(RIYADH.lat, 2);
-		expect(sent.longitude).toBeCloseTo(RIYADH.lng, 2);
+		expect(state.created[0]).toMatchObject({
+			name_en: 'Al Andalus branch',
+			name_ar: 'فرع الأندلس',
+			city: 'Jeddah',
+			latitude: JEDDAH.lat,
+			longitude: JEDDAH.lng
+		});
 		await expect(page.getByText('On the map', { exact: true })).toBeVisible();
 	});
 
-	test('pasting coordinates places the pin, and a bad value holds the submit back', async ({
-		page
-	}) => {
-		await signInAndStub(page);
-		const { dialog, coordinates, submit, pins } = await openAddLocation(page);
-		await fillRequired(dialog);
-
-		await coordinates.fill('24.7136, 46.6753');
-		await expect(pins).toHaveCount(1);
-		await expect(submit).toBeEnabled();
-
-		// One number is not a position. The last good pair is kept, and the field
-		// says what it wants.
-		await coordinates.fill('24.7');
-		await expect(dialog.getByText('Enter latitude and longitude')).toBeVisible();
-		await expect(submit).toBeDisabled();
-		await expect(pins).toHaveCount(1);
-
-		await coordinates.fill('91, 46');
-		await expect(dialog.getByText('Latitude must be between -90 and 90.')).toBeVisible();
-		await expect(submit).toBeDisabled();
-
-		await coordinates.fill('21.4858, 39.1925');
-		await expect(submit).toBeEnabled();
-		await expect(dialog.getByText('Latitude must be between')).toHaveCount(0);
-	});
-
-	test('a branch can be added with no pin at all', async ({ page }) => {
+	test('clicking the map places the pin and fills the form', async ({ page }) => {
 		const state = await signInAndStub(page);
-		const { dialog, submit } = await openAddLocation(page);
-		await fillRequired(dialog);
+		const { dialog, submit, pins, nameEn, city } = await openAddLocation(page);
 
-		await submit.click();
-
-		await expect.poll(() => state.created.length).toBe(1);
-		expect(state.created[0].latitude).toBeNull();
-		expect(state.created[0].longitude).toBeNull();
-		await expect(page.getByText('Not on the map yet')).toBeVisible();
-	});
-
-	test('"Remove pin" clears both the pin and the field', async ({ page }) => {
-		const state = await signInAndStub(page);
-		const { dialog, coordinates, submit, pins } = await openAddLocation(page);
-		await fillRequired(dialog);
-		await coordinates.fill('24.7136, 46.6753');
-		await expect(pins).toHaveCount(1);
-
-		await dialog.getByRole('button', { name: 'Remove pin' }).click();
-
-		await expect(pins).toHaveCount(0);
-		await expect(coordinates).toHaveValue('');
-		await submit.click();
-		await expect.poll(() => state.created.length).toBe(1);
-		expect(state.created[0].latitude).toBeNull();
-	});
-
-	test('dragging the pin moves it, and the field follows', async ({ page }) => {
-		await signInAndStub(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
-		await dialog.getByLabel('City').fill('Riyadh');
 		await dialog.locator('.leaflet-container').click();
+
 		await expect(pins).toHaveCount(1);
-		const before = await coordinates.inputValue();
+		await expect(nameEn).toHaveValue('Al Olaya branch');
+		await expect(city).toHaveValue('Riyadh');
+		await expect(submit).toBeEnabled();
+		expect(state.looked).toHaveLength(1);
+	});
+
+	test('dragging the pin fills the form again from where it lands', async ({ page }) => {
+		const state = await signInAndStub(page);
+		const { dialog, pins, nameEn } = await openAddLocation(page);
+		await dialog.locator('.leaflet-container').click();
+		await expect(nameEn).toHaveValue('Al Olaya branch');
+		state.place = () => ({
+			name_en: 'As Salamah branch',
+			name_ar: 'فرع السلامة',
+			city_en: 'Riyadh',
+			city_ar: 'الرياض'
+		});
 
 		const box = /** @type {NonNullable<Awaited<ReturnType<typeof pins.boundingBox>>>} */ (
 			await pins.boundingBox()
@@ -292,43 +271,65 @@ test.describe('adding a location', () => {
 		await page.mouse.move(x + 60, y - 30, { steps: 8 });
 		await page.mouse.up();
 
-		await expect.poll(() => coordinates.inputValue()).not.toBe(before);
-		const [lat, lng] = (await coordinates.inputValue()).split(',').map(Number);
-		const [lat0, lng0] = before.split(',').map(Number);
-		expect(lng).toBeGreaterThan(lng0); // dragged right: further east
-		expect(lat).toBeGreaterThan(lat0); // dragged up: further north
+		await expect(nameEn).toHaveValue('As Salamah branch');
+		expect(state.looked.length).toBeGreaterThanOrEqual(2);
 	});
 
-	test('"Use my location" places the pin where the device is', async ({ page, context }) => {
-		await context.grantPermissions(['geolocation']);
-		await context.setGeolocation({ latitude: JEDDAH.lat, longitude: JEDDAH.lng });
-		await signInAndStub(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
-
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
-
-		await expect(coordinates).toHaveValue('21.485800, 39.192500');
-		await expect(pins).toHaveCount(1);
-	});
-
-	test('a city typed after the pin is placed does not pull the map away', async ({ page }) => {
+	test('where the map has no address, the add button waits for a better pin', async ({ page }) => {
 		const state = await signInAndStub(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
-		await coordinates.fill('21.4858, 39.1925'); // Jeddah
-		await expect(pins).toHaveCount(1);
-		await expect.poll(() => askedForTileNear(state.tiles, JEDDAH, 17)).toBe(true);
+		state.place = () => ({});
+		const { dialog, submit } = await openAddLocation(page);
 
-		await dialog.getByLabel('City').fill('Riyadh');
-		await page.waitForTimeout(500);
+		await dialog.locator('.leaflet-container').click();
 
-		expect(askedForTileNear(state.tiles, RIYADH, 12)).toBe(false);
+		await expect(dialog.getByText('The map has no address here.')).toBeVisible();
+		await expect(submit).toBeDisabled();
+	});
+
+	test('a map service that does not answer can be asked again', async ({ page }) => {
+		const state = await signInAndStub(page);
+		state.place = () => 503;
+		const { dialog, submit, nameEn } = await openAddLocation(page);
+		await dialog.locator('.leaflet-container').click();
+		await expect(dialog.getByRole('button', { name: 'Try again' })).toBeVisible();
+		await expect(submit).toBeDisabled();
+
+		state.place = () => ({
+			name_en: 'Al Olaya branch',
+			name_ar: 'فرع العليا',
+			city_en: 'Riyadh',
+			city_ar: 'الرياض'
+		});
+		await dialog.getByRole('button', { name: 'Try again' }).click();
+
+		await expect(nameEn).toHaveValue('Al Olaya branch');
+		await expect(submit).toBeEnabled();
+	});
+
+	test('"Remove pin" empties the form, and the add button waits', async ({ page }) => {
+		await signInAndStub(page);
+		const { dialog, submit, pins, nameEn } = await openAddLocation(page);
+		await dialog.locator('.leaflet-container').click();
+		await expect(nameEn).toHaveValue('Al Olaya branch');
+
+		await dialog.getByRole('button', { name: 'Remove pin' }).click();
+
+		await expect(pins).toHaveCount(0);
+		await expect(nameEn).toHaveCount(0);
+		await expect(dialog.getByRole('button', { name: 'Detect my location' })).toBeVisible();
+		await expect(submit).toBeDisabled();
 	});
 });
 
 test.describe('positioning a branch that exists', () => {
 	test.use({ viewport: { width: 1280, height: 900 } });
 
-	test('sets, moves and removes the pin, and the card follows each step', async ({ page }) => {
+	test('sets, moves and removes the pin, and the card follows each step', async ({
+		page,
+		context
+	}) => {
+		await context.grantPermissions(['geolocation']);
+		await context.setGeolocation({ latitude: RIYADH.lat, longitude: RIYADH.lng });
 		const state = await signInAndStub(page, [
 			branch('loc-a', 'Olaya Branch', null),
 			branch('loc-b', 'Jeddah Branch', JEDDAH)
@@ -345,7 +346,8 @@ test.describe('positioning a branch that exists', () => {
 		await page.getByRole('button', { name: 'Set on map' }).click();
 		const dialog = page.getByRole('dialog', { name: 'Map position' });
 		await expect(dialog.getByText('Olaya Branch')).toBeVisible();
-		await dialog.getByLabel('Coordinates', { exact: true }).fill('24.7136, 46.6753');
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
+		await expect(dialog.locator('.leaflet-marker-icon')).toHaveCount(1);
 		await dialog.getByRole('button', { name: 'Save position' }).click();
 		await expect.poll(() => state.positioned.length).toBe(1);
 		expect(state.positioned[0]).toEqual({
@@ -358,13 +360,17 @@ test.describe('positioning a branch that exists', () => {
 
 		// Move: the dialog opens on the pin it already has.
 		await page.getByRole('button', { name: 'Move pin' }).first().click();
-		await expect(dialog.getByLabel('Coordinates', { exact: true })).toHaveValue(
-			'24.713600, 46.675300'
-		);
-		await dialog.getByLabel('Coordinates', { exact: true }).fill('24.75, 46.7');
+		const shown = dialog.locator('[data-coordinates]');
+		await expect(shown).toHaveText('24.713600, 46.675300');
+		// Moved by clicking elsewhere on the map: still nothing typed.
+		await dialog.locator('.leaflet-container').click({ position: { x: 320, y: 70 } });
+		await expect(shown).not.toHaveText('24.713600, 46.675300');
+		const [lat, lng] = String(await shown.textContent())
+			.split(',')
+			.map(Number);
 		await dialog.getByRole('button', { name: 'Save position' }).click();
 		await expect.poll(() => state.positioned.length).toBe(2);
-		expect(state.positioned[1]).toEqual({ id: 'loc-a', latitude: 24.75, longitude: 46.7 });
+		expect(state.positioned[1]).toEqual({ id: 'loc-a', latitude: lat, longitude: lng });
 
 		// Remove: both null, the pair the API accepts for "no pin".
 		await page.getByRole('button', { name: 'Move pin' }).first().click();
@@ -535,20 +541,21 @@ test.describe('finding the device', () => {
 		await scriptGeolocation(page);
 		await signInAndStub(page);
 		const geo = geoDriver(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
+		const { dialog, pins } = await openAddLocation(page);
+		const coordinates = dialog.locator('[data-coordinates]');
 		const status = dialog.getByRole('status');
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await expect(status).toContainText('Finding your location');
 		await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible();
 
 		await geo.answer(RIYADH.lat, RIYADH.lng, 12);
 
-		await expect(coordinates).toHaveValue('24.713600, 46.675300');
+		await expect(coordinates).toHaveText('24.713600, 46.675300');
 		await expect(pins).toHaveCount(1);
 		await expect(status).toContainText('within about 12 m');
 		await expect(circle(dialog)).toHaveCount(1);
-		await expect(dialog.getByRole('button', { name: 'Use my location' })).toBeEnabled();
+		await expect(dialog.getByRole('button', { name: 'Detect again' })).toBeEnabled();
 		expect(await geo.watching()).toBe(0); // good enough: it did not go on looking
 	});
 
@@ -558,17 +565,18 @@ test.describe('finding the device', () => {
 		await scriptGeolocation(page);
 		await signInAndStub(page);
 		const geo = geoDriver(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
+		const { dialog, pins } = await openAddLocation(page);
+		const coordinates = dialog.locator('[data-coordinates]');
 		const status = dialog.getByRole('status');
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await geo.answer(24.7, 46.7, 20_000);
 
 		// 20 km is a different neighbourhood. Say so, and do not guess.
 		await expect(status).toContainText('too rough for a pin');
 		await expect(status).toContainText('within about 20 km');
 		await expect(pins).toHaveCount(0);
-		await expect(coordinates).toHaveValue('');
+		await expect(coordinates).toHaveCount(0);
 		await expect(circle(dialog)).toHaveCount(1);
 		await expect(status).toContainText('Refining');
 		await expect.poll(() => geo.watching()).toBe(1);
@@ -576,7 +584,7 @@ test.describe('finding the device', () => {
 		await geo.emit(RIYADH.lat, RIYADH.lng, 15);
 
 		await expect(pins).toHaveCount(1);
-		await expect(coordinates).toHaveValue('24.713600, 46.675300');
+		await expect(coordinates).toHaveText('24.713600, 46.675300');
 		await expect(status).toContainText('within about 15 m');
 		await expect(status).not.toContainText('Refining');
 		expect(await geo.watching()).toBe(0);
@@ -586,21 +594,22 @@ test.describe('finding the device', () => {
 		await scriptGeolocation(page);
 		await signInAndStub(page);
 		const geo = geoDriver(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
+		const { dialog, pins } = await openAddLocation(page);
+		const coordinates = dialog.locator('[data-coordinates]');
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await geo.answer(24.7, 46.7, 20_000);
 		await expect.poll(() => geo.watching()).toBe(1);
 
 		await dialog.locator('.leaflet-container').click(); // the owner picks the spot
 		await expect(pins).toHaveCount(1);
-		const chosen = await coordinates.inputValue();
+		const chosen = String(await coordinates.textContent());
 		await expect(circle(dialog)).toHaveCount(0);
 		expect(await geo.watching()).toBe(0); // and the search was called off
 
 		await geo.emit(21.4858, 39.1925, 5); // a late, precise fix from somewhere else
 
-		await expect(coordinates).toHaveValue(chosen);
+		await expect(coordinates).toHaveText(chosen);
 		await expect(pins).toHaveCount(1);
 	});
 
@@ -608,16 +617,17 @@ test.describe('finding the device', () => {
 		await scriptGeolocation(page);
 		await signInAndStub(page);
 		const geo = geoDriver(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
+		const { dialog, pins } = await openAddLocation(page);
+		const coordinates = dialog.locator('[data-coordinates]');
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await dialog.getByRole('button', { name: 'Cancel' }).click();
 
 		await expect(dialog.getByRole('status')).toHaveCount(0);
-		await expect(dialog.getByRole('button', { name: 'Use my location' })).toBeEnabled();
+		await expect(dialog.getByRole('button', { name: 'Detect my location' })).toBeEnabled();
 		await geo.answer(RIYADH.lat, RIYADH.lng, 10);
 		await expect(pins).toHaveCount(0);
-		await expect(coordinates).toHaveValue('');
+		await expect(coordinates).toHaveCount(0);
 	});
 
 	test('a refused permission says how to allow it, and what the browser said', async ({ page }) => {
@@ -626,13 +636,13 @@ test.describe('finding the device', () => {
 		const geo = geoDriver(page);
 		const { dialog } = await openAddLocation(page);
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await geo.refuse(1, 'User denied Geolocation');
 
 		const status = dialog.getByRole('status');
 		await expect(status).toContainText('blocked for this site');
 		await expect(status).toContainText('Your browser said: User denied Geolocation');
-		await expect(dialog.getByRole('button', { name: 'Use my location' })).toBeEnabled();
+		await expect(dialog.getByRole('button', { name: 'Detect my location' })).toBeEnabled();
 	});
 
 	test('a browser that cannot find the device says so, with a hint that fits the platform', async ({
@@ -645,7 +655,7 @@ test.describe('finding the device', () => {
 		const userAgent = await page.evaluate(() => navigator.userAgent);
 		const onLinux = /linux/i.test(userAgent) && !/android/i.test(userAgent);
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await geo.refuse(2, 'Unknown error acquiring position');
 		await expect.poll(() => geo.watching()).toBe(1);
 		await geo.failWatch(2, 'Unknown error acquiring position');
@@ -665,7 +675,7 @@ test.describe('finding the device', () => {
 		const geo = geoDriver(page);
 		const { dialog } = await openAddLocation(page);
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 		await geo.refuse(3, 'Timeout expired');
 		await expect.poll(() => geo.watching()).toBe(1);
 		await geo.failWatch(3, 'Timeout expired');
@@ -682,7 +692,7 @@ test.describe('finding the device', () => {
 		const geo = geoDriver(page);
 		const { dialog } = await openAddLocation(page);
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 
 		await expect(dialog.getByRole('status')).toContainText(
 			'only shares your location with secure pages'
@@ -699,13 +709,14 @@ test.describe('finding the device', () => {
 		await context.grantPermissions(['geolocation']);
 		await context.setGeolocation({ latitude: 24.7, longitude: 46.7, accuracy: 20_000 });
 		await signInAndStub(page);
-		const { dialog, coordinates, pins } = await openAddLocation(page);
+		const { dialog, pins } = await openAddLocation(page);
+		const coordinates = dialog.locator('[data-coordinates]');
 
-		await dialog.getByRole('button', { name: 'Use my location' }).click();
+		await dialog.getByRole('button', { name: 'Detect my location' }).click();
 
 		await expect(dialog.getByRole('status')).toContainText('too rough for a pin');
 		await expect(pins).toHaveCount(0);
-		await expect(coordinates).toHaveValue('');
+		await expect(coordinates).toHaveCount(0);
 		await expect(circle(dialog)).toHaveCount(1);
 	});
 });

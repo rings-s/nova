@@ -95,5 +95,6 @@ export const COMMON = {
 	"Join the queue": "انضم إلى الطابور",
 	"Most popular": "الأكثر اختيارًا",
 	"/month": "/ شهريًا",
-	"Get started": "ابدأ الآن"
+	"Get started": "ابدأ الآن",
+	"Switch theme": "تبديل المظهر"
 };

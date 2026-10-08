@@ -1,13 +1,13 @@
-"""Paying for a paid plan on Moyasar's hosted page.
+"""Paying for a paid plan, in NOVA's checkout page or on Moyasar's hosted page.
 
-A Studio or Chain subscription starts `pending_payment` and is billed and
-gated as Solo until Moyasar's own record shows the first payment: plan price
-plus 15% VAT, paid on this checkout's invoice. The owner's return and the
+Every plan starts with a free week (`trialing`) and is locked once it ends
+unpaid, until Moyasar's own record shows a payment: plan price plus 15% VAT,
+paid on this checkout's invoice. The owner's return and the
 webhook both get there; neither trusts what it is told without asking Moyasar.
 """
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -18,7 +18,7 @@ from httpx import AsyncClient
 from app.core.config import get_settings
 from app.integrations.payments.moyasar import MoyasarGateway
 from app.modules.billing.dependencies import build_billing_service
-from app.modules.billing.domain import BillingPeriod
+from app.modules.billing.domain import BillingPeriod, SubscriptionRequiredError
 from app.modules.payment.dependencies import get_payment_gateway
 
 WEBHOOK_SECRET = "whsec_plan_test"
@@ -116,21 +116,51 @@ async def test_a_paid_plan_waits_for_payment_and_opens_moyasar(
     client: AsyncClient, moyasar, tenant_factory, business_factory
 ) -> None:
     tenant, business, subscription = await _studio(client, tenant_factory, business_factory)
-    assert subscription["status"] == "pending_payment"
+    assert subscription["status"] == "trialing"
 
     checkout = await _checkout(client, tenant, business)
 
-    # 199 SAR plus 15% VAT, for the month it is paid in.
+    # 600 SAR plus 15% VAT, for the month it is paid in.
     assert (checkout["net_amount"], checkout["vat_amount"], checkout["total_amount"]) == (
-        "199.00",
-        "29.85",
-        "228.85",
+        "600.00",
+        "90.00",
+        "690.00",
     )
     assert checkout["redirect_url"].startswith("https://checkout.moyasar.test/")
     sent = moyasar.created[0]
-    assert sent["amount_minor"] == 22885
+    assert sent["amount_minor"] == 69000
     assert sent["success_url"] == f"{_return_url()}?checkout={checkout['id']}"
     assert sent["metadata"]["purpose"] == "subscription"
+
+
+async def test_with_a_publishable_key_the_plan_is_paid_in_nova_own_checkout(
+    client: AsyncClient, moyasar, tenant_factory, business_factory, monkeypatch
+) -> None:
+    """The embedded form pays exactly this checkout's invoice, for its total."""
+    monkeypatch.setenv("MOYASAR_PUBLISHABLE_KEY", "pk_test_plan")
+    get_settings.cache_clear()
+    tenant, business, _ = await _studio(client, tenant_factory, business_factory)
+
+    checkout = await _checkout(client, tenant, business)
+
+    form = checkout["checkout"]
+    assert form["publishable_api_key"] == "pk_test_plan"
+    assert form["invoice_id"] == moyasar.created[0]["id"]
+    assert (form["amount"], form["currency"]) == (69000, "SAR")
+    assert form["callback_url"] == f"{_return_url()}?checkout={checkout['id']}"
+
+
+async def test_without_a_publishable_key_the_plan_is_paid_on_moyasars_page(
+    client: AsyncClient, moyasar, tenant_factory, business_factory, monkeypatch
+) -> None:
+    monkeypatch.delenv("MOYASAR_PUBLISHABLE_KEY", raising=False)
+    get_settings.cache_clear()
+    tenant, business, _ = await _studio(client, tenant_factory, business_factory)
+
+    checkout = await _checkout(client, tenant, business)
+
+    assert checkout["checkout"] is None
+    assert checkout["redirect_url"].startswith("https://checkout.moyasar.test/")
 
 
 async def test_the_owners_return_activates_the_plan_once_moyasar_says_it_is_paid(
@@ -142,9 +172,9 @@ async def test_the_owners_return_activates_the_plan_once_moyasar_says_it_is_paid
 
     # Back before paying: nothing changes.
     assert (await client.post(sync)).json()["status"] == "pending"
-    assert (await _subscription(client, tenant, business))["status"] == "pending_payment"
+    assert (await _subscription(client, tenant, business))["status"] == "trialing"
 
-    moyasar.pay(moyasar.created[0]["id"], amount_minor=22885)
+    moyasar.pay(moyasar.created[0]["id"], amount_minor=69000)
     synced = await client.post(sync)
 
     assert synced.json()["status"] == "paid"
@@ -162,7 +192,7 @@ async def test_a_payment_for_the_wrong_amount_does_not_activate_the_plan(
     synced = await client.post(f"{_billing(tenant)}/checkouts/{checkout['id']}/sync")
 
     assert synced.status_code == 409
-    assert (await _subscription(client, tenant, business))["status"] == "pending_payment"
+    assert (await _subscription(client, tenant, business))["status"] == "trialing"
 
 
 async def test_the_webhook_activates_the_plan_independently(
@@ -171,7 +201,7 @@ async def test_the_webhook_activates_the_plan_independently(
     tenant, business, _ = await _studio(client, tenant_factory, business_factory)
     await _checkout(client, tenant, business)
     invoice_id = moyasar.created[0]["id"]
-    payment_id = moyasar.pay(invoice_id, amount_minor=22885)
+    payment_id = moyasar.pay(invoice_id, amount_minor=69000)
 
     delivered = await client.post(
         "/api/v1/webhooks/moyasar",
@@ -192,26 +222,31 @@ async def test_the_webhook_activates_the_plan_independently(
     assert (await _subscription(client, tenant, business))["status"] == "active"
 
 
-async def test_a_pending_plan_unlocks_nothing(
+async def test_a_business_that_never_chose_a_plan_is_locked(
     client: AsyncClient, moyasar, tenant_factory, business_factory, db_session
-) -> None:
-    tenant, business, _ = await _studio(client, tenant_factory, business_factory)
-    billing = build_billing_service(db_session, tenant.id, gateway=moyasar)
-
-    subscription = await billing.subscription_or_default(business.id)
-
-    assert subscription.plan.tier == "solo"
-    assert subscription.subscription_amount().amount == Decimal("0.00")
-
-
-async def test_nothing_to_pay_on_a_free_or_already_paid_plan(
-    client: AsyncClient, moyasar, tenant_factory, business_factory
 ) -> None:
     tenant = await tenant_factory()
     business = await business_factory(tenant)
-    await client.post(
-        f"{_billing(tenant)}/subscriptions", json={"business_id": str(business.id), "tier": "solo"}
-    )
+    billing = build_billing_service(db_session, tenant.id, gateway=moyasar)
+
+    standing = await client.get(f"{_billing(tenant)}/subscriptions/{business.id}/standing")
+
+    assert standing.json()["has_plan"] is False
+    assert standing.json()["locked"] is True
+    with pytest.raises(SubscriptionRequiredError):
+        await billing.require_unlocked(business.id)
+    # Nothing is billed for a plan never chosen.
+    default = await billing.subscription_or_default(business.id)
+    assert default.subscription_amount().amount == Decimal("0.00")
+
+
+async def test_nothing_to_pay_on_a_plan_already_paid_for(
+    client: AsyncClient, moyasar, tenant_factory, business_factory
+) -> None:
+    tenant, business, _ = await _studio(client, tenant_factory, business_factory)
+    checkout = await _checkout(client, tenant, business)
+    moyasar.pay(moyasar.created[0]["id"], amount_minor=69000)
+    await client.post(f"{_billing(tenant)}/checkouts/{checkout['id']}/sync")
 
     response = await client.post(
         f"{_billing(tenant)}/subscriptions/{business.id}/checkout",
@@ -222,20 +257,41 @@ async def test_nothing_to_pay_on_a_free_or_already_paid_plan(
     assert response.json()["error"]["code"] == "subscription_not_awaiting_payment"
 
 
-async def test_upgrading_from_solo_waits_for_payment(
+async def test_choosing_a_plan_starts_a_free_week(
     client: AsyncClient, moyasar, tenant_factory, business_factory
 ) -> None:
+    tenant, business, subscription = await _studio(client, tenant_factory, business_factory)
+
+    assert subscription["status"] == "trialing"
+    assert subscription["locked"] is False
+    assert subscription["trial_ai_messages_left"] == 10
+    starts = datetime.now(UTC).date()
+    assert date.fromisoformat(subscription["trial_ends_at"]) == starts + timedelta(days=7)
+    # Moving plan during the trial keeps its end date.
+    moved = await client.post(
+        f"{_billing(tenant)}/subscriptions/{business.id}/plan", json={"tier": "solo"}
+    )
+    assert moved.json()["trial_ends_at"] == subscription["trial_ends_at"]
+
+
+async def test_solo_is_a_paid_plan_now(
+    client: AsyncClient, moyasar, tenant_factory, business_factory
+) -> None:
+    """400 SAR a month plus 15% VAT, paid before it applies."""
     tenant = await tenant_factory()
     business = await business_factory(tenant)
-    await client.post(
+    subscribed = await client.post(
         f"{_billing(tenant)}/subscriptions", json={"business_id": str(business.id), "tier": "solo"}
     )
+    assert subscribed.json()["status"] == "trialing"
 
-    changed = await client.post(
-        f"{_billing(tenant)}/subscriptions/{business.id}/plan", json={"tier": "studio"}
+    checkout = await _checkout(client, tenant, business)
+
+    assert (checkout["net_amount"], checkout["vat_amount"], checkout["total_amount"]) == (
+        "400.00",
+        "60.00",
+        "460.00",
     )
-
-    assert changed.json()["status"] == "pending_payment"
 
 
 async def test_the_return_url_must_be_on_the_apps_own_site(
@@ -257,7 +313,7 @@ async def test_a_month_paid_up_front_is_not_charged_again_at_the_monthly_close(
 ) -> None:
     tenant, business, _ = await _studio(client, tenant_factory, business_factory)
     checkout = await _checkout(client, tenant, business)
-    moyasar.pay(moyasar.created[0]["id"], amount_minor=22885)
+    moyasar.pay(moyasar.created[0]["id"], amount_minor=69000)
     await client.post(f"{_billing(tenant)}/checkouts/{checkout['id']}/sync")
 
     billing = build_billing_service(db_session, tenant.id, gateway=moyasar)

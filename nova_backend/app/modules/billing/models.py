@@ -80,8 +80,13 @@ class SubscriptionRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     #: A negotiated Chain rate. Null means the published price list applies.
     negotiated_monthly_price: Mapped[Decimal | None] = mapped_column(_MONEY, nullable=True)
 
-    #: docs/11 section 7 step 6 — the ONLY consequence of non-payment.
+    #: docs/11 section 7 step 6 (day 21 of dunning), or a business locked
+    #: after its trial ran out unpaid.
     marketplace_listing_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: AI messages used during the trial (`TRIAL_AI_MESSAGES` allowed).
+    trial_ai_messages_used: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
 
 class CustomerBusinessFirstBookingRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):

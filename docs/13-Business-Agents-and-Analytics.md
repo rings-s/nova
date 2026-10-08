@@ -7,7 +7,7 @@ status: current
 tags: [ai, agents, pydanticai, analytics, pandas, numpy, plotly, charts]
 related_code:
   - app/modules/ai_agents/agents.py
-  - app/modules/ai_agents/tools.py
+  - app/modules/ai_agents/tools/__init__.py
   - app/modules/ai_agents/guardrails.py
   - app/modules/ai_agents/service.py
   - app/modules/analytics/metrics.py
@@ -93,7 +93,7 @@ Rules:
 ```text
 app/modules/ai_agents/
   agents.py        # AgentSpec roster: goal, audience, tools, charts, output type, feature, instructions
-  tools.py         # AgentToolkit: tool functions over application services
+  tools/           # AgentToolkit: tool functions over application services, one file per agent
   guardrails.py    # owner-only, grounding check, proposal and chart allowlists (pure)
   service.py       # AgentDeps, TurnArtifacts, AiChatService
   runtime.py       # PydanticAI 2.x + Ollama, fallback matrix

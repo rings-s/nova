@@ -29,17 +29,19 @@ const plan = (tier, extra = {}) => ({
 });
 
 const PLANS = [
-	plan('solo'),
+	plan('free'),
+	plan('solo', { monthly_price: '400.00', annual_price: '4000.00' }),
 	plan('studio', {
-		monthly_price: '199.00',
-		annual_price: '1990.00',
+		monthly_price: '600.00',
+		annual_price: '6000.00',
 		new_client_commission_pct: '30.00',
 		included_features: ['marketplace_profile', 'calendar', 'ai_insights_agent'],
 		max_seats: null,
 		whatsapp_reminders_per_month: null
 	}),
 	plan('chain', {
-		monthly_price: '449.00',
+		monthly_price: '1200.00',
+		annual_price: '12000.00',
 		new_client_commission_pct: '25.00',
 		included_features: ['marketplace_profile', 'calendar', 'ai_insights_agent', 'api_access'],
 		priced_per_location: true,
@@ -61,7 +63,7 @@ const SUBSCRIPTION = {
 	locations: 2,
 	cancel_at_period_end: false,
 	annual: false,
-	monthly_amount: '199.00',
+	monthly_amount: '600.00',
 	currency: 'SAR',
 	marketplace_listing_hidden: false
 };
@@ -203,10 +205,14 @@ test('an upgrade is confirmed first, showing what changes', async ({ page }) => 
 
 	await page.getByRole('button', { name: 'Upgrade to Chain' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Upgrade to Chain?' });
-	await expect(dialog.getByText('SAR 449 / month per branch')).toBeVisible();
-	// Priced per branch: two branches make it 898.
-	await expect(dialog.getByText('SAR 898 a month for your 2 branches')).toBeVisible();
+	await expect(dialog.getByText('SAR 1,200 / month per branch')).toBeVisible();
+	// Priced per branch: two branches make it 2,400.
+	await expect(dialog.getByText('SAR 2,400 a month for your 2 branches')).toBeVisible();
 	await expect(dialog.getByText('12 months')).toBeVisible();
+	// A year is per branch too, with two months free: 2 × 12,000.
+	await dialog.getByLabel('Pay yearly (SAR 12,000 a year per branch)').check();
+	await expect(dialog.getByText('SAR 24,000 a year for your 2 branches')).toBeVisible();
+	await dialog.getByLabel('Pay yearly (SAR 12,000 a year per branch)').uncheck();
 	expect(calls.some((c) => c.path.endsWith('/plan'))).toBe(false);
 
 	await dialog.getByRole('button', { name: 'Confirm change' }).click();
@@ -252,7 +258,7 @@ test('yearly billing is offered where a plan has a yearly price', async ({ page 
 
 	await page.getByRole('radio', { name: /Yearly/ }).click();
 	const studio = page.getByRole('article', { name: 'Studio' });
-	await expect(studio.getByText('SAR 1,990')).toBeVisible();
+	await expect(studio.getByText('SAR 6,000')).toBeVisible();
 	await expect(studio.getByText('2 months free')).toBeVisible();
 
 	await studio.getByRole('button', { name: 'Switch to yearly' }).click();

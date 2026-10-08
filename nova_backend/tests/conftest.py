@@ -90,7 +90,12 @@ def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     refused the test key, and an intent grew an embedded-form payload. Tests
     that need a key set it themselves.
     """
-    for name in ("MOYASAR_API_KEY", "MOYASAR_PUBLISHABLE_KEY", "MOYASAR_WEBHOOK_SECRET"):
+    for name in (
+        "MOYASAR_API_KEY",
+        "MOYASAR_SECRET_KEY_ID",
+        "MOYASAR_PUBLISHABLE_KEY",
+        "MOYASAR_WEBHOOK_SECRET",
+    ):
         monkeypatch.delenv(name, raising=False)
     from app.core.config import get_settings
 

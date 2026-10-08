@@ -13,7 +13,7 @@ current state before acting.
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -244,6 +244,9 @@ __all__ = ["EventHandler", "handlers_for", "subscribe"]
 
 @subscribe("InvoiceOverdue")
 @subscribe("InvoicePaid")
+@subscribe("SubscriptionTrialStarted")
+@subscribe("SubscriptionActivated")
+@subscribe("SubscriptionLocked")
 async def on_invoice_standing_changed(
     session: AsyncSession, tenant_id: UUID, payload: dict[str, Any]
 ) -> None:
@@ -265,6 +268,11 @@ async def on_invoice_standing_changed(
     business_id = UUID(payload["business_id"])
     billing = build_billing_service(session, tenant_id)
     subscription = await billing.subscription_or_default(business_id)
+    # Hidden at day 21 of dunning, and while the business is locked (a trial
+    # that ended unpaid): the marketplace never advertises what cannot be booked.
+    hidden = subscription.marketplace_listing_hidden or subscription.locked_on(
+        datetime.now(UTC).date()
+    )
     await build_catalog_service(session, tenant_id).set_billing_visibility(
-        business_id, hidden=subscription.marketplace_listing_hidden
+        business_id, hidden=hidden
     )

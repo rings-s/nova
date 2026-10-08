@@ -150,6 +150,12 @@ class BusinessPhotoRepository(TenantScopedRepository[BusinessPhoto]):
 class LocationRepository(_SoftDeleteAwareRepository[Location]):
     model = Location
 
+    async def slugs_starting_with(self, prefix: str) -> set[str]:
+        """Every slug in this tenant that begins with `prefix`, deleted branches
+        included: the unique constraint counts them too."""
+        stmt = self._scope(select(Location.slug).where(Location.slug.startswith(prefix)))
+        return set((await self.session.execute(stmt)).scalars().all())
+
     async def list_for_business(self, business_id: UUID) -> list[Location]:
         stmt = self._active(
             self._scope(self._base_select().where(Location.business_id == business_id))

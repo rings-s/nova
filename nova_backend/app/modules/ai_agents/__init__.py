@@ -79,5 +79,5 @@ Public surface:
     from app.modules.ai_agents.agents import AGENTS, AGENT_ALIASES, resolve_agent
 
 Internal — do not import from other modules:
-    runtime.py, tools.py, dependencies.py, router.py
+    runtime.py, tools/, dependencies.py, router.py
 """

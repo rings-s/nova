@@ -16,7 +16,7 @@
 		{
 			tier: 'solo',
 			name: m('Solo'),
-			priceMonthly: 149,
+			priceMonthly: 400,
 			description: m('One location, one provider.'),
 			label: m('For independent operators'),
 			features: [
@@ -29,7 +29,7 @@
 		{
 			tier: 'studio',
 			name: m('Studio'),
-			priceMonthly: 349,
+			priceMonthly: 600,
 			description: m('A small team, multiple providers.'),
 			label: m('For growing teams'),
 			features: [
@@ -43,7 +43,8 @@
 		{
 			tier: 'chain',
 			name: m('Chain'),
-			priceMonthly: 799,
+			priceMonthly: 1200,
+			perBranch: true,
 			description: m('Multiple locations under one account.'),
 			label: m('For multi-location businesses'),
 			features: [
@@ -160,6 +161,12 @@
 					{t('No long-term contract')}
 				</span>
 			</div>
+
+			<p class="mx-auto mt-4 max-w-xl text-sm text-fg-muted">
+				{t(
+					'Every plan starts with a 7-day free trial, including 10 AI messages. Pay any time during the week to keep going.'
+				)}
+			</p>
 		</div>
 	</Container>
 </Section>
@@ -229,7 +236,9 @@
 								{tier.priceMonthly}
 							</span>
 
-							<span class="mb-1.5 text-sm font-medium text-fg-muted">{t('SAR / month')}</span>
+							<span class="mb-1.5 text-sm font-medium text-fg-muted"
+								>{tier.perBranch ? t('SAR / month per branch') : t('SAR / month')}</span
+							>
 						</div>
 
 						<p class="mt-2 text-xs text-fg-muted">
@@ -389,7 +398,7 @@
 
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
 			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
-				{t('Start 14-day free trial')}
+				{t('Start 7-day free trial')}
 			</Button>
 
 			<Button size="lg" variant="outline-inverse" href={resolve('/features')}>

@@ -112,7 +112,7 @@
 		Promise.all([
 			listPlans(tenant),
 			getSubscription(tenant, business).catch((err) => {
-				// Never subscribed: on Solo.
+				// Never subscribed: locked, and the dashboard sends the owner to Billing.
 				if (err instanceof ApiError && err.status === 404) return null;
 				throw err;
 			})
@@ -120,7 +120,7 @@
 			.then(([page, subscription]) => {
 				if (cancelled) return;
 				plans = [...page.items].sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
-				// A paid plan waiting on its first payment runs on Solo's terms.
+				// Unpaid after its trial: locked; the lowest tier locks every insights agent.
 				tierInForce =
 					!subscription || subscription.status === 'pending_payment' ? 'solo' : subscription.tier;
 			})

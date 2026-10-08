@@ -13,6 +13,7 @@
 	import {
 		createBusiness,
 		createLocation,
+		reversePlace,
 		listLocations,
 		setLocationPosition,
 		createService,
@@ -103,6 +104,56 @@
 	});
 	// True while the picker's coordinates field holds text that is not a position.
 	let locationPinInvalid = $state(false);
+
+	// The branch form fills itself from its pin: wherever the pin lands (detected,
+	// clicked or dragged), the map is asked what the place is called, and the
+	// names and city follow. Nothing is typed. The latest pin wins: an answer
+	// for a pin that has since moved is dropped.
+	/** @type {'idle'|'looking'|'done'|'empty'|'error'} */
+	let placeStatus = $state('idle');
+	let placeError = $state(/** @type {string|null} */ (null));
+	let placeRetry = $state(0);
+	let placeSeq = 0;
+	$effect(() => {
+		const lat = locationForm.latitude;
+		const lng = locationForm.longitude;
+		placeRetry;
+		if (!locationModalOpen) return;
+		const seq = ++placeSeq;
+		if (lat == null || lng == null) {
+			placeStatus = 'idle';
+			return;
+		}
+		placeStatus = 'looking';
+		placeError = null;
+		// A dragged pin moves in a burst; ask once it settles.
+		const timer = setTimeout(async () => {
+			try {
+				const place = await reversePlace(tenantId, lat, lng);
+				if (seq !== placeSeq) return;
+				if (!place.name_en || !place.name_ar) {
+					placeStatus = 'empty';
+					return;
+				}
+				locationForm.nameEn = place.name_en;
+				locationForm.nameAr = place.name_ar;
+				locationForm.city = place.city_en ?? '';
+				placeStatus = 'done';
+			} catch (err) {
+				if (seq !== placeSeq) return;
+				placeError = formatApiError(err);
+				placeStatus = 'error';
+			}
+		}, 400);
+		return () => clearTimeout(timer);
+	});
+
+	function openLocationModal() {
+		locationForm = { nameEn: '', nameAr: '', city: '', latitude: null, longitude: null };
+		locationError = null;
+		placeStatus = 'idle';
+		locationModalOpen = true;
+	}
 
 	// Positioning a branch that already exists (one created before a pin could be
 	// set, or one that has moved).
@@ -684,7 +735,7 @@
 						{t('Each branch has its own services, providers, hours and map pin.')}
 					</p>
 					{#if canEdit}
-						<Button size="sm" onclick={() => (locationModalOpen = true)}>
+						<Button size="sm" onclick={openLocationModal}>
 							<Icon name="plus" class="size-4" />
 							{t('Add location')}
 						</Button>
@@ -893,22 +944,55 @@
 		<Alert tone="error" class="mb-4">{locationError}</Alert>
 	{/if}
 	<form class="flex flex-col gap-4" onsubmit={handleCreateLocation}>
-		<div class="grid gap-4 sm:grid-cols-2">
-			<Input label={t('Name (English)')} required bind:value={locationForm.nameEn} />
-			<Input label={t('Name (Arabic)')} required dir="rtl" bind:value={locationForm.nameAr} />
-		</div>
-		<Input
-			label={t('City')}
-			hint={t('Optional — used by marketplace search.')}
-			bind:value={locationForm.city}
-		/>
 		<LocationPicker
 			bind:latitude={locationForm.latitude}
 			bind:longitude={locationForm.longitude}
 			city={locationForm.city}
+			typing={false}
+			required
 			onvalidity={(invalid) => (locationPinInvalid = invalid)}
 		/>
-		<Button type="submit" loading={creatingLocation} disabled={locationPinInvalid} fullWidth>
+
+		<!-- Filled in from the pin, never typed. -->
+		<div class="flex flex-col gap-3 rounded-card border border-line bg-surface-sunken p-4">
+			<div class="flex items-center justify-between gap-2">
+				<p class="text-sm font-medium text-fg">{t('Branch details')}</p>
+				{#if placeStatus === 'looking'}
+					<span class="text-xs text-fg-muted">{t('Finding the address…')}</span>
+				{:else if placeStatus === 'done'}
+					<span class="text-xs text-fg-muted">{t('Filled in from the map')}</span>
+				{/if}
+			</div>
+			{#if placeStatus === 'idle'}
+				<p class="text-sm text-fg-muted">
+					{t(
+						'Detect your location, or click the map, and the name and city fill in by themselves.'
+					)}
+				</p>
+			{:else if placeStatus === 'empty'}
+				<p class="text-sm text-fg-muted">
+					{t('The map has no address here. Move the pin onto a street.')}
+				</p>
+			{:else if placeStatus === 'error'}
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<p class="text-sm text-red-600 dark:text-red-400">{placeError}</p>
+					<Button size="sm" variant="outline" onclick={() => placeRetry++}>{t('Try again')}</Button>
+				</div>
+			{:else}
+				<div class="grid gap-3 sm:grid-cols-2">
+					<Input label={t('Name (English)')} value={locationForm.nameEn} dir="ltr" readonly />
+					<Input label={t('Name (Arabic)')} value={locationForm.nameAr} dir="rtl" readonly />
+				</div>
+				<Input label={t('City')} value={locationForm.city} dir="ltr" readonly />
+			{/if}
+		</div>
+
+		<Button
+			type="submit"
+			loading={creatingLocation}
+			disabled={locationPinInvalid || placeStatus !== 'done'}
+			fullWidth
+		>
 			{t('Add location')}
 		</Button>
 	</form>
@@ -928,6 +1012,7 @@
 			bind:latitude={positionForm.latitude}
 			bind:longitude={positionForm.longitude}
 			city={positionTarget?.city ?? null}
+			typing={false}
 			onvalidity={(invalid) => (positionPinInvalid = invalid)}
 		/>
 		<Button type="submit" loading={savingPosition} disabled={positionPinInvalid} fullWidth>

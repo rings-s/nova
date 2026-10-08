@@ -31,7 +31,6 @@
 		cancelSubscription,
 		listInvoices,
 		listPayouts,
-		startPlanCheckout,
 		syncPlanCheckout
 	} from '$lib/api/billing.js';
 
@@ -145,6 +144,7 @@
 		if (!plan || !business) return;
 		changing = true;
 		changeError = null;
+		const hadPlan = !!subscription;
 		try {
 			subscription = subscription
 				? await changePlan(tenantId, business, { tier: plan.tier, annual: targetAnnual })
@@ -153,10 +153,15 @@
 						tier: plan.tier,
 						annual: targetAnnual
 					});
+			const started = !hadPlan;
 			target = null;
-			if (subscription.status === 'pending_payment') {
-				// A paid plan starts once it is paid for: straight to Moyasar.
+			if (subscription.locked) {
+				// The free week is over: this plan starts once it is paid for.
 				await payNow();
+			} else if (started) {
+				toastStore.success(
+					t('Your free week of {plan} has started.', { plan: planName(plan.tier) })
+				);
 			} else {
 				toastStore.success(t("You're on {plan} now.", { plan: planName(plan.tier) }));
 			}
@@ -168,15 +173,9 @@
 		}
 	}
 
-	// Moving onto a paid plan from nothing, Solo, or an unpaid choice is paid
-	// for on Moyasar before it applies (the server decides; this only words it).
-	let needsPayment = $derived(
-		!!target &&
-			Number(target.monthly_price) > 0 &&
-			(!subscription ||
-				subscription.status === 'pending_payment' ||
-				Number(currentPlan?.monthly_price ?? 0) === 0)
-	);
+	// Choosing a plan starts its free week; only a locked business (its week is
+	// over) pays before the plan applies. The server decides; this only words it.
+	let needsPayment = $derived(!!target && !!subscription?.locked);
 
 	let isUpgrade = $derived(
 		!!target && !!subscription && tierRank(target.tier) > tierRank(subscription.tier)
@@ -204,27 +203,15 @@
 	let paying = $state(false);
 
 	/**
-	 * Opens Moyasar's payment page for the plan waiting on payment. Moyasar sends
-	 * the owner back here with `?checkout=<id>`, handled below.
+	 * Opens NOVA's checkout page for the plan waiting on payment, which pays it
+	 * in Moyasar's form (or on Moyasar's page without a publishable key). Moyasar
+	 * sends the owner back here with `?checkout=<id>`, handled below.
 	 */
 	async function payNow() {
-		const business = businessId;
-		if (!business) return;
+		if (!businessId) return;
 		paying = true;
-		try {
-			const checkout = await startPlanCheckout(
-				tenantId,
-				business,
-				new URL(resolve('/app/billing'), window.location.origin).href
-			);
-			if (!checkout.redirect_url?.startsWith('https://')) {
-				throw new Error(t('The payment page could not be opened. Try again.'));
-			}
-			window.location.assign(checkout.redirect_url);
-		} catch (err) {
-			toastStore.error(formatApiError(err));
-			paying = false;
-		}
+		await goto(resolve('/app/billing/checkout'));
+		paying = false;
 	}
 
 	// Back from Moyasar: ask the API how it went (the redirect alone proves
@@ -346,13 +333,35 @@
 			{t('After 21 days overdue, your marketplace listing is hidden until it is paid.')}
 		</Alert>
 	{/if}
-	{#if subscription?.status === 'pending_payment'}
-		<Alert tone="warning" class="mb-4">
+	{#if subscription?.locked}
+		<Alert tone="error" class="mb-4">
 			<div class="flex flex-wrap items-center justify-between gap-3">
 				<span>
-					{t('{plan} starts once it is paid for. Until then your business is on Solo terms.', {
-						plan: planName(subscription.tier)
+					{t(
+						'Your free trial has ended. Pay for {plan} to unlock your dashboard, marketplace listing and online bookings.',
+						{ plan: planName(subscription.tier) }
+					)}
+				</span>
+				{#if canManagePlan}
+					<Button size="sm" loading={paying} onclick={payNow}>{t('Pay now')}</Button>
+				{:else}
+					<span class="text-xs">{t('Ask the business owner to pay.')}</span>
+				{/if}
+			</div>
+		</Alert>
+	{:else if subscription?.status === 'trialing'}
+		<Alert tone="info" class="mb-4">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<span>
+					{t('Your free trial of {plan} ends on {date}.', {
+						plan: planName(subscription.tier),
+						date: formatDay(lastDayOf(subscription.trial_ends_at ?? ''))
 					})}
+					{tp(
+						subscription.trial_ai_messages_left ?? 0,
+						'{count} AI message left.',
+						'{count} AI messages left.'
+					)}
 				</span>
 				{#if canManagePlan}
 					<Button size="sm" loading={paying} onclick={payNow}>{t('Pay now')}</Button>
@@ -387,9 +396,9 @@
 					<p class="mt-1 max-w-md text-sm text-fg-muted">
 						{canManagePlan
 							? t(
-									'Your business is on Solo terms until you choose a plan. Solo is free: NOVA takes commission only on new clients it brings you.'
+									'Choose a plan to start your 7-day free trial. Your dashboard, marketplace listing and online bookings open as soon as you do.'
 								)
-							: t('Your business is on Solo terms. Only the owner can choose a plan.')}
+							: t('Only the business owner can choose a plan and start the free trial.')}
 					</p>
 				</div>
 				{#if canManagePlan}
@@ -777,14 +786,17 @@
 								? t('year')
 								: t('month')}{target.priced_per_location ? ` ${t('per branch')}` : ''}
 							{#if target.priced_per_location && (subscription?.locations ?? 1) > 1}
+								{@const branchesTotal = {
+									amount: formatPrice(
+										Number(price ?? target.monthly_price) * (subscription?.locations ?? 1),
+										target.currency
+									),
+									count: subscription?.locations
+								}}
 								<span class="block text-xs font-normal text-fg-muted">
-									{t('{amount} a month for your {count} branches', {
-										amount: formatPrice(
-											Number(target.monthly_price) * (subscription?.locations ?? 1),
-											target.currency
-										),
-										count: subscription?.locations
-									})}
+									{targetAnnual
+										? t('{amount} a year for your {count} branches', branchesTotal)
+										: t('{amount} a month for your {count} branches', branchesTotal)}
 								</span>
 							{/if}
 						{/if}
@@ -813,15 +825,23 @@
 			{#if target.annual_price !== null}
 				<label class="flex items-center gap-2.5 text-sm text-fg-secondary">
 					<input type="checkbox" class="size-4 accent-brand-600" bind:checked={targetAnnual} />
-					{t('Pay yearly ({amount} a year)', {
-						amount: formatPrice(target.annual_price, target.currency)
-					})}
+					{target.priced_per_location
+						? t('Pay yearly ({amount} a year per branch)', {
+								amount: formatPrice(target.annual_price, target.currency)
+							})
+						: t('Pay yearly ({amount} a year)', {
+								amount: formatPrice(target.annual_price, target.currency)
+							})}
 				</label>
 			{/if}
 			<p class="text-sm text-fg-muted">
 				{#if needsPayment}
 					{t(
-						"Next, you pay on Moyasar's secure page (price plus 15% VAT). The plan starts as soon as the payment is confirmed."
+						'Next, you pay on the secure checkout page (price plus 15% VAT). The plan starts as soon as the payment is confirmed.'
+					)}
+				{:else if !subscription}
+					{t(
+						'Your 7-day free trial starts now, with 10 AI messages. Pay any time before it ends to keep using NOVA.'
 					)}
 				{:else}
 					{t(
@@ -838,7 +858,7 @@
 				? t('Continue to payment')
 				: subscription
 					? t('Confirm change')
-					: t('Start plan')}
+					: t('Start free trial')}
 		</Button>
 	{/snippet}
 </Modal>

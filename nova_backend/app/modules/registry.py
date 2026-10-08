@@ -17,6 +17,7 @@ discovery -> catalog, review -> booking/catalog/identity).
 from app.core import idempotency as _idempotency  # noqa: F401
 from app.db import outbox as _outbox  # noqa: F401
 from app.modules.ai_agents.router import marketplace_router as ai_marketplace_router
+from app.modules.ai_agents.router import memory_router as ai_memory_router
 from app.modules.ai_agents.router import router as ai_router
 
 # analytics owns no tables, so only its router is imported (ADR-0011).
@@ -66,4 +67,5 @@ routers = [
     analytics_router,
     ai_router,
     ai_marketplace_router,
+    ai_memory_router,
 ]

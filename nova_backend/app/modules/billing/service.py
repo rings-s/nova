@@ -31,6 +31,7 @@ from app.integrations.payments.moyasar import (
 )
 from app.modules.billing.domain import (
     PLANS,
+    TRIAL_DAYS,
     BillingPeriod,
     CheckoutStatus,
     CommissionClass,
@@ -42,14 +43,13 @@ from app.modules.billing.domain import (
     PlanTier,
     Subscription,
     SubscriptionCheckout,
+    SubscriptionRequiredError,
     SubscriptionStatus,
     build_commission_line,
     build_payout,
     build_reversal,
     checkout_for,
     percentage_of,
-    plan_for,
-    requires_payment,
     to_fils,
 )
 from app.modules.billing.events import (
@@ -62,6 +62,8 @@ from app.modules.billing.events import (
     PlanChanged,
     SubscriptionActivated,
     SubscriptionCancelled,
+    SubscriptionLocked,
+    SubscriptionTrialStarted,
 )
 from app.modules.billing.exceptions import (
     CheckoutNotFoundError,
@@ -88,6 +90,7 @@ from app.modules.payment.domain import (
     to_minor_units,
     with_query,
 )
+from app.modules.payment.service import PaymentFormConfig
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +111,13 @@ _CLOSED_CHECKOUT_STATUSES = frozenset({"expired", "canceled", "voided", "failed"
 
 @dataclass(frozen=True)
 class CheckoutStart:
-    """A checkout, and the Moyasar page the owner is sent to to pay it."""
+    """A checkout, and how the owner pays it: Moyasar's Payment Form embedded in
+    NOVA's own page (`form`, with a publishable key configured), else
+    Moyasar's hosted page (`redirect_url`)."""
 
     checkout: SubscriptionCheckout
     redirect_url: str | None
+    form: PaymentFormConfig | None = None
 
 
 class BillingService:
@@ -128,6 +134,7 @@ class BillingService:
         gateway: PaymentGateway | None = None,
         public_app_url: str = "",
         checkout_ttl_minutes: int = 30,
+        publishable_key: str | None = None,
     ) -> None:
         self.subscriptions = subscriptions
         self.lines = lines
@@ -141,6 +148,7 @@ class BillingService:
         self.gateway: PaymentGateway = gateway or NotConfiguredPaymentGateway()
         self.public_app_url = public_app_url
         self.checkout_ttl_minutes = checkout_ttl_minutes
+        self.publishable_key = publishable_key
 
     @property
     def session(self):
@@ -160,14 +168,18 @@ class BillingService:
             raise SubscriptionNotFoundError(business_id)
         return subscription
 
-    async def subscription_or_default(self, business_id: UUID) -> Subscription:
-        """The subscription, or a notional Solo one.
+    async def find_subscription(self, business_id: UUID) -> Subscription | None:
+        """The business's subscription, or None if it never chose a plan."""
+        return await self.subscriptions.get_for_business(business_id)
 
-        A business that never explicitly subscribed is on Solo: it costs
-        nothing, and docs/11 section 2 says a solo provider "can start at
-        zero". Returning a default rather than raising means accrual works for
-        a salon that has been taking bookings since before billing existed —
-        which is every salon on the platform today.
+    async def subscription_or_default(self, business_id: UUID) -> Subscription:
+        """The subscription, or a notional unpaid Solo one.
+
+        A business that never chose a plan has nothing to use until it does
+        (choosing one starts its trial): the default is locked, and costs
+        nothing. Returning a default rather than raising means commission
+        accrual still works for a salon that took bookings before billing
+        existed.
         """
         subscription = await self.subscriptions.get_for_business(business_id)
         if subscription is not None:
@@ -180,7 +192,7 @@ class BillingService:
             tenant_id=self.tenant_id,
             business_id=business_id,
             tier=PlanTier.SOLO,
-            status=SubscriptionStatus.ACTIVE,
+            status=SubscriptionStatus.PENDING_PAYMENT,
             current_period_start=period.period_start,
             current_period_end=period.period_end,
         )
@@ -188,17 +200,57 @@ class BillingService:
     async def require_feature(self, business_id: UUID, feature: str) -> Plan:
         """The business's plan, provided it includes `feature` (docs/11 section 2).
 
-        A business that never subscribed is on Solo, so a paid feature is
-        refused to it rather than assumed. So is one whose cancelled plan has
-        run past the period it paid for: it is back on Solo's terms.
+        A locked business (no plan, a trial run out, an unpaid or lapsed plan)
+        has no features at all: 402 `subscription_required`.
         """
-        subscription = await self.subscription_or_default(business_id)
+        subscription = await self.require_unlocked(business_id)
         plan = subscription.plan
-        if not subscription.has_access_on(datetime.now(UTC).date()):
-            plan = plan_for(PlanTier.SOLO)
         if feature not in plan.included_features:
             raise PlanFeatureRequiredError(feature, plan.tier)
         return plan
+
+    async def require_unlocked(self, business_id: UUID) -> Subscription:
+        """The subscription, provided the business may use NOVA today: on a
+        paid plan, or within its trial week. Else 402 `subscription_required`."""
+        subscription = await self.subscription_or_default(business_id)
+        if subscription.locked_on(datetime.now(UTC).date()):
+            raise SubscriptionRequiredError()
+        return subscription
+
+    async def use_ai_message(self, business_id: UUID) -> Subscription:
+        """Counts one AI message for the business, before the model runs.
+
+        Locked: 402 `subscription_required`. On trial: one of
+        `TRIAL_AI_MESSAGES`, then 402 `trial_ai_limit_reached`. Paid: free.
+        """
+        subscription = await self.require_unlocked(business_id)
+        if not subscription.trialing:
+            return subscription
+        subscription.use_trial_ai_message()
+        return await self.subscriptions.save(subscription)
+
+    async def expire_trial(self, business_id: UUID, *, now: datetime | None = None) -> bool:
+        """Locks a business whose trial ran out unpaid. Returns whether it did.
+
+        Idempotent: a paid, still-running or already-locked subscription is
+        left alone, so a re-run of the cron changes nothing.
+        """
+        today = (now or datetime.now(UTC)).date()
+        subscription = await self.subscriptions.get_for_business(business_id)
+        if subscription is None or not subscription.trial_over_on(today):
+            return False
+        subscription.lock()
+        saved = await self.subscriptions.save(subscription)
+        await publish_event(
+            self.session,
+            SubscriptionLocked(
+                tenant_id=self.tenant_id,
+                subscription_id=saved.id,
+                business_id=business_id,
+                tier=str(saved.tier),
+            ),
+        )
+        return True
 
     async def subscribe(
         self,
@@ -208,9 +260,13 @@ class BillingService:
         seats: int = 1,
         locations: int = 1,
         annual: bool = False,
-        trial_days: int = 0,
         now: datetime | None = None,
     ) -> Subscription:
+        """Chooses a plan, starting its free week (`TRIAL_DAYS`).
+
+        One subscription per business, so one trial per business: changing
+        plan later keeps the trial's end date.
+        """
         now = now or datetime.now(UTC)
         if await self.subscriptions.get_for_business(business_id) is not None:
             raise SubscriptionAlreadyExistsError(business_id)
@@ -221,32 +277,24 @@ class BillingService:
             tenant_id=self.tenant_id,
             business_id=business_id,
             tier=tier,
-            # A paid plan is paid for before it applies (`start_checkout`),
-            # unless it starts with a trial; a free one applies at once.
-            status=(
-                SubscriptionStatus.TRIALING
-                if trial_days
-                else SubscriptionStatus.PENDING_PAYMENT
-                if requires_payment(tier)
-                else SubscriptionStatus.ACTIVE
-            ),
+            # Every plan starts with its free week; paying for it
+            # (`start_checkout`) at any point activates it.
+            status=SubscriptionStatus.TRIALING,
             current_period_start=period.period_start,
             current_period_end=period.period_end,
             seats=seats,
             locations=locations,
             annual=annual,
-            trial_ends_at=(now.date() + timedelta(days=trial_days)) if trial_days else None,
+            trial_ends_at=now.date() + timedelta(days=TRIAL_DAYS),
         )
         # Validates seats/locations against the tier before anything is stored.
         subscription.change_plan(tier, annual=annual)
         saved = await self.subscriptions.add_subscription(subscription)
-        if saved.awaiting_payment:
-            # Activated by `_activate_paid_plan` once the payment is verified.
-            return saved
 
+        # The listing goes up for the trial (`app/worker/handlers.py`).
         await publish_event(
             self.session,
-            SubscriptionActivated(
+            SubscriptionTrialStarted(
                 tenant_id=self.tenant_id,
                 subscription_id=saved.id,
                 business_id=business_id,
@@ -299,7 +347,10 @@ class BillingService:
     async def start_checkout(
         self, business_id: UUID, *, return_url: str, now: datetime | None = None
     ) -> CheckoutStart:
-        """Opens Moyasar's hosted page to pay for the chosen plan.
+        """Opens a Moyasar invoice to pay for the chosen plan.
+
+        Paid in the embedded Payment Form when a publishable key is set, else on
+        Moyasar's hosted page; either way the invoice fixes the amount.
 
         Only for a subscription waiting on payment. The owner comes back to
         `return_url` with `?checkout=<id>`, and that page calls `sync_checkout`;
@@ -318,10 +369,11 @@ class BillingService:
         checkout = await self.checkouts.add_checkout(checkout)
 
         landing = with_query(return_url, checkout=str(checkout.id))
+        description = f"NOVA {checkout.tier} plan" + (" (annual)" if checkout.annual else "")
         invoice = await self.gateway.create_invoice(
             amount_minor=amount_minor,
             currency=checkout.total.currency,
-            description=f"NOVA {checkout.tier} plan" + (" (annual)" if checkout.annual else ""),
+            description=description,
             success_url=landing,
             back_url=landing,
             expired_at=now + timedelta(minutes=self.checkout_ttl_minutes),
@@ -332,10 +384,21 @@ class BillingService:
                 "checkout_id": str(checkout.id),
             },
         )
+        form: PaymentFormConfig | None = None
         if invoice.get("id"):
-            checkout.gateway_invoice_id = str(invoice["id"])
+            invoice_id = str(invoice["id"])
+            checkout.gateway_invoice_id = invoice_id
             checkout = await self.checkouts.save(checkout)
-        return CheckoutStart(checkout=checkout, redirect_url=invoice.get("url"))
+            if self.publishable_key:
+                form = PaymentFormConfig(
+                    publishable_api_key=self.publishable_key,
+                    invoice_id=invoice_id,
+                    amount=amount_minor,
+                    currency=checkout.total.currency,
+                    description=description,
+                    callback_url=landing,
+                )
+        return CheckoutStart(checkout=checkout, redirect_url=invoice.get("url"), form=form)
 
     async def get_checkout(self, checkout_id: UUID) -> SubscriptionCheckout:
         checkout = await self.checkouts.get_checkout(checkout_id)
@@ -910,6 +973,11 @@ class BillingSweeper:
 
     def __init__(self, invoices: UnscopedInvoiceRepository) -> None:
         self.invoices = invoices
+
+    async def list_expired_trials(self, today: date) -> list[tuple[UUID, UUID]]:
+        """`(tenant_id, business_id)` for every trial whose free week is over;
+        each is then locked in its own tenant's session (`expire_trial`)."""
+        return await self.invoices.list_expired_trials(today)
 
     async def list_billable_subscriptions(self) -> list[tuple[UUID, UUID]]:
         """`(tenant_id, business_id)` for every subscription the monthly close bills."""

@@ -21,6 +21,7 @@ from app.core.throttling import write_rate_limit
 from app.modules.ai_agents.agents import AGENT_ALIASES, AGENTS
 from app.modules.ai_agents.dependencies import (
     get_ai_chat_service,
+    get_conversation_memory_service,
     get_inference_engine,
     get_marketplace_chat_service,
 )
@@ -31,13 +32,14 @@ from app.modules.ai_agents.schemas import (
     AiChatRequest,
     AiChatResponse,
     BookingTicketOut,
+    ForgottenConversationsOut,
     MarketplaceAssistantOut,
     MarketplaceChatRequest,
     PendingCancellationOut,
     ProposedActionOut,
     QueuePlaceOut,
 )
-from app.modules.ai_agents.service import AiChatService, ChatTurn
+from app.modules.ai_agents.service import AiChatService, ChatTurn, ConversationMemoryService
 from app.modules.analytics.schemas import ChartOut
 from app.modules.booking.dependencies import resolve_booking_customer
 from app.modules.booking.schemas import HoldSlotResult
@@ -263,3 +265,30 @@ async def marketplace_status(
     Authenticated like the chat itself: an anonymous visitor could not use it.
     """
     return MarketplaceAssistantOut(inference_available=await engine.reachable())
+
+
+#: What the assistants remember of the caller, everywhere. No tenant in the
+#: path: one request forgets the caller's conversations at every business and
+#: at the marketplace, which is what a person asking to be forgotten means.
+memory_router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+@memory_router.delete(
+    "/conversations",
+    response_model=ForgottenConversationsOut,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def forget_my_conversations(
+    principal: Principal = Depends(get_principal),
+    service: ConversationMemoryService = Depends(get_conversation_memory_service),
+) -> ForgottenConversationsOut:
+    """Forget every AI conversation the caller has had, at any business.
+
+    Deletes the remembered turns and the offered slots kept with them, so an
+    assistant's next turn starts fresh and an earlier offer can no longer be
+    booked. Memory also expires on its own after `ai_history_ttl_seconds`.
+    Answers `ai_memory_unavailable` (503) rather than "done" when the memory
+    store is unreachable. Bookings, queue places and tickets are records, not
+    memory, and are not touched.
+    """
+    return ForgottenConversationsOut(forgotten=await service.forget(principal))

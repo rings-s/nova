@@ -26,6 +26,11 @@ and showed the customer. `book_held_slot` may only book one of these, and only
 one offered in an *earlier* turn — one the customer has seen and answered. The
 offers hold hold tokens, so they live here, server-side and short-lived, and
 never in the turns the model reads.
+
+A person may ask for all of it to go (`forget_principal`): every conversation
+and offer they have with any business or the marketplace. Unlike the rest of
+this store, that one does not swallow a Redis failure. A "forget me" answered
+"done" while the turns survive would be the one lie this store can tell.
 """
 
 import hashlib
@@ -56,6 +61,11 @@ class ConversationKey:
         return f"{self.storage_key()}:offers"
 
 
+def principal_pattern(principal_id: UUID) -> str:
+    """Every key one person's conversations and offers live under, as a glob."""
+    return f"ai:conversation:*:{principal_id}:*"
+
+
 class ConversationStore(Protocol):
     async def load(self, key: ConversationKey) -> list[bytes]:
         """The remembered turns, oldest first; empty when there are none."""
@@ -71,6 +81,14 @@ class ConversationStore(Protocol):
 
     async def save_offers(self, key: ConversationKey, offers: bytes, ttl_seconds: int) -> None:
         """Replaces the offers; they expire with the last hold they describe."""
+        ...
+
+    async def forget_principal(self, principal_id: UUID) -> int:
+        """Deletes every conversation and offer of one person; how many keys.
+
+        Raises when the store cannot be reached, rather than reporting nothing
+        to delete.
+        """
         ...
 
 
@@ -131,6 +149,19 @@ class RedisConversationStore:
         except Exception:
             logger.warning("ai_offers_not_saved", exc_info=True)
 
+    async def forget_principal(self, principal_id: UUID) -> int:
+        if self._redis is None:
+            raise ConnectionError("conversation memory has no Redis client")
+        names = [
+            name
+            async for name in self._redis.scan_iter(
+                match=principal_pattern(principal_id), count=500
+            )
+        ]
+        for start in range(0, len(names), 500):
+            await self._redis.unlink(*names[start : start + 500])
+        return len(names)
+
 
 class InMemoryConversationStore:
     """The same contract in one process, with no expiry. For tests."""
@@ -154,10 +185,20 @@ class InMemoryConversationStore:
     async def save_offers(self, key: ConversationKey, offers: bytes, ttl_seconds: int) -> None:
         self._offers[key.offers_key()] = offers
 
+    async def forget_principal(self, principal_id: UUID) -> int:
+        marker = f":{principal_id}:"
+        forgotten = 0
+        for store in (self._turns, self._offers):
+            for name in [name for name in store if marker in name]:
+                del store[name]
+                forgotten += 1
+        return forgotten
+
 
 __all__ = [
     "ConversationKey",
     "ConversationStore",
     "InMemoryConversationStore",
     "RedisConversationStore",
+    "principal_pattern",
 ]

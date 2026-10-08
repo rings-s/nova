@@ -45,6 +45,7 @@ def build_billing_service(
         gateway=gateway or get_payment_gateway(),
         public_app_url=settings.public_app_url,
         checkout_ttl_minutes=settings.moyasar_checkout_ttl_minutes,
+        publishable_key=settings.moyasar_publishable_key,
     )
 
 

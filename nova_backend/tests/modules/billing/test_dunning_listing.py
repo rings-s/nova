@@ -6,10 +6,13 @@ Billing decides; catalog owns the listing; the worker carries one to the other
 recorded on the subscription and nothing read it.
 """
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import set_tenant_scope
 from app.modules.billing.dependencies import build_billing_service
+from app.modules.billing.domain import TRIAL_DAYS
 from app.worker.handlers import handlers_for, on_invoice_standing_changed
 
 DISCOVERY = "/api/v1/discovery"
@@ -30,9 +33,15 @@ async def _subscribe(db_session: AsyncSession, business, *, hidden: bool):
     return subscription
 
 
-def test_both_invoice_events_reach_the_listing() -> None:
-    assert on_invoice_standing_changed in handlers_for("InvoiceOverdue")
-    assert on_invoice_standing_changed in handlers_for("InvoicePaid")
+def test_every_standing_event_reaches_the_listing() -> None:
+    for event in (
+        "InvoiceOverdue",
+        "InvoicePaid",
+        "SubscriptionTrialStarted",
+        "SubscriptionActivated",
+        "SubscriptionLocked",
+    ):
+        assert on_invoice_standing_changed in handlers_for(event), event
 
 
 async def test_a_business_hidden_by_billing_is_not_on_the_marketplace(
@@ -108,7 +117,7 @@ async def test_a_stale_overdue_event_after_payment_leaves_the_listing_up(
     assert business.hidden_by_billing is False
 
 
-async def test_a_business_that_never_subscribed_stays_listed(
+async def test_a_business_that_never_chose_a_plan_is_off_the_marketplace(
     tenant_factory, business_factory, db_session
 ):
     business = await business_factory(await tenant_factory())
@@ -116,5 +125,31 @@ async def test_a_business_that_never_subscribed_stays_listed(
 
     await on_invoice_standing_changed(db_session, business.tenant_id, _event(business))
 
+    await db_session.refresh(business)
+    assert business.hidden_by_billing is True
+
+
+async def test_the_listing_follows_the_trial(tenant_factory, business_factory, db_session):
+    """Up for the free week, down when it ends unpaid, back up once paid."""
+    business = await business_factory(await tenant_factory(), hidden_by_billing=True)
+    await set_tenant_scope(db_session, business.tenant_id)
+    billing = build_billing_service(db_session, business.tenant_id)
+
+    await billing.subscribe(business_id=business.id)
+    await on_invoice_standing_changed(db_session, business.tenant_id, _event(business))
+    await db_session.refresh(business)
+    assert business.hidden_by_billing is False
+
+    week_later = datetime.now(UTC) + timedelta(days=TRIAL_DAYS)
+    assert await billing.expire_trial(business.id, now=week_later) is True
+    assert await billing.expire_trial(business.id, now=week_later) is False, "idempotent"
+    await on_invoice_standing_changed(db_session, business.tenant_id, _event(business))
+    await db_session.refresh(business)
+    assert business.hidden_by_billing is True
+
+    subscription = await billing.get_subscription(business.id)
+    subscription.activate()
+    await billing.subscriptions.save(subscription)
+    await on_invoice_standing_changed(db_session, business.tenant_id, _event(business))
     await db_session.refresh(business)
     assert business.hidden_by_billing is False

@@ -17,10 +17,15 @@ from app.core.deps import get_db_session
 from app.core.pagination import PageParams
 from app.core.schemas import Page
 from app.core.security import purpose_key, require_staff
-from app.core.throttling import write_rate_limit
+from app.core.throttling import default_rate_limit, write_rate_limit
+from app.integrations.geocoding import ReverseGeocoder
 from app.modules.booking.dependencies import get_booking_service
 from app.modules.booking.service import BookingService
-from app.modules.catalog.dependencies import get_catalog_service, get_category_service
+from app.modules.catalog.dependencies import (
+    get_catalog_service,
+    get_category_service,
+    get_geocoder,
+)
 from app.modules.catalog.domain import (
     PHOTO_LINK_PURPOSE,
     PHOTO_LINK_TTL_SECONDS,
@@ -40,6 +45,7 @@ from app.modules.catalog.schemas import (
     CreateProviderRequest,
     CreateServiceRequest,
     LocationOut,
+    PlaceOut,
     ProviderOut,
     ServiceOut,
     SetListingVisibilityRequest,
@@ -249,6 +255,39 @@ async def list_locations(
     """A business's branches, listed or not. Staff only: the public view is `/discovery`."""
     rows = await service.list_locations(business_id)
     return Page(items=[LocationOut.model_validate(r) for r in rows])
+
+
+@router.get(
+    "/places/reverse",
+    response_model=PlaceOut,
+    dependencies=[Depends(require_staff), Depends(_MANAGE_CATALOG), Depends(default_rate_limit)],
+)
+async def reverse_place(
+    tenant_id: UUID,
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    geocoder: ReverseGeocoder = Depends(get_geocoder),
+) -> PlaceOut:
+    """What the map calls a point: its district and city, in English and Arabic,
+    and a branch name made from them. Owners and managers.
+
+    The branch form calls this whenever its pin moves (detected, clicked or
+    dragged) and fills its fields from the answer, so nothing is typed. From
+    OpenStreetMap's Nominatim; 503 `geocoding_unavailable` when it does not
+    answer, which is worth retrying."""
+    place = await geocoder.reverse(latitude=latitude, longitude=longitude)
+    area_en = place.district_en or place.city_en
+    area_ar = place.district_ar or place.city_ar
+    return PlaceOut(
+        latitude=latitude,
+        longitude=longitude,
+        city_en=place.city_en,
+        city_ar=place.city_ar,
+        district_en=place.district_en,
+        district_ar=place.district_ar,
+        name_en=f"{area_en} branch" if area_en else None,
+        name_ar=f"فرع {area_ar}" if area_ar else None,
+    )
 
 
 @router.post(

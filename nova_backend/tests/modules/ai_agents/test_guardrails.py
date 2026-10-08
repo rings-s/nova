@@ -31,6 +31,7 @@ from app.modules.ai_agents.guardrails import (
     assert_tenant_matches,
     assert_tool_allowed,
     check_proposal,
+    clean_reply,
     detect_injection,
     extract_numbers,
     find_ungrounded_numbers,
@@ -493,3 +494,69 @@ class TestInjectionDetectionInArabic:
     )
     def test_leaves_ordinary_requests_alone(self, text):
         assert not detect_injection(text)
+
+
+class TestCleanReply:
+    """What a customer may see of a model's reply (`clean_reply`)."""
+
+    def test_the_frame_is_removed(self):
+        assert clean_reply("<untrusted_user_text>\nHello.\n</untrusted_user_text>", "Hi") == (
+            "Hello.",
+            False,
+        )
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "<untrusted_user_text>Where is your branch located?</untrusted_user_text>",
+            "Where is your branch located",
+            "  where is your BRANCH located?  ",
+            "",
+            "<untrusted_user_text></untrusted_user_text>",
+        ],
+    )
+    def test_the_question_back_or_nothing_says_nothing(self, reply):
+        assert clean_reply(reply, "Where is your branch located?")[1] is True
+
+    def test_an_answer_that_quotes_the_question_still_answers(self):
+        cleaned, empty = clean_reply(
+            "Where is our branch? On King Fahd Road, Riyadh.", "Where is your branch located?"
+        )
+        assert not empty and cleaned.endswith("Riyadh.")
+
+    def test_the_question_repeated_above_an_answer_and_made_up_tags_are_dropped(self):
+        # Live, from qwen3-1.7b, word for word.
+        reply = (
+            "Where is your branch located?\n\n<List Branches>\n"
+            "- Olaya Branch (Riyadh, map: https://osm.test/x)\n</List Branches>"
+        )
+        assert clean_reply(reply, "Where is your branch located?") == (
+            "- Olaya Branch (Riyadh, map: https://osm.test/x)",
+            False,
+        )
+
+    def test_angle_brackets_inside_a_sentence_are_kept(self):
+        cleaned, _ = clean_reply("Prices are <= 200 SAR at <Olaya>, Riyadh.", "Prices?")
+        assert cleaned == "Prices are <= 200 SAR at <Olaya>, Riyadh."
+
+    def test_arabic_question_marks_count_as_punctuation(self):
+        assert clean_reply("أين فرعكم؟", "أين فرعكم")[1] is True
+
+
+class TestCityNames:
+    """An Arabic reply names a GCC city in Arabic, not a transliteration."""
+
+    @pytest.mark.parametrize(
+        ("city", "locale", "shown"),
+        [
+            ("Riyadh", "ar", "الرياض"),
+            ("  al   KHOBAR ", "ar", "الخبر"),
+            ("Riyadh", "en", "Riyadh"),
+            ("Tabuk", "ar", "Tabuk"),
+            (None, "ar", None),
+        ],
+    )
+    def test_city_name(self, city, locale, shown):
+        from app.modules.ai_agents.tools.facts import city_name
+
+        assert city_name(city, locale) == shown

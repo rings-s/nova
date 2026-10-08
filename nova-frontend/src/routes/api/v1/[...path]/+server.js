@@ -263,8 +263,8 @@ const mockData = {
 	plans: [
 		{
 			tier: 'solo',
-			monthly_price: '199.00',
-			annual_price: '1990.00',
+			monthly_price: '400.00',
+			annual_price: '4000.00',
 			currency: 'SAR',
 			new_client_commission_pct: '12.0',
 			repeat_commission_pct: '0.0',
@@ -276,8 +276,8 @@ const mockData = {
 		},
 		{
 			tier: 'studio',
-			monthly_price: '499.00',
-			annual_price: '4990.00',
+			monthly_price: '600.00',
+			annual_price: '6000.00',
 			currency: 'SAR',
 			new_client_commission_pct: '10.0',
 			repeat_commission_pct: '0.0',
@@ -297,8 +297,8 @@ const mockData = {
 		},
 		{
 			tier: 'chain',
-			monthly_price: '1199.00',
-			annual_price: '11990.00',
+			monthly_price: '1200.00',
+			annual_price: '12000.00',
 			currency: 'SAR',
 			new_client_commission_pct: '8.0',
 			repeat_commission_pct: '0.0',

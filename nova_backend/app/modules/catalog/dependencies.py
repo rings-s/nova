@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import get_db_session, get_tenant_context
+from app.integrations.geocoding import ReverseGeocoder, build_geocoder
 from app.integrations.storage import ImageStore, LocalImageStore
 from app.modules.catalog.repository import (
     BusinessPhotoRepository,
@@ -21,6 +22,11 @@ from app.modules.catalog.service import CatalogService, CategoryService, PublicC
 def get_image_store() -> ImageStore:
     """Where business photos live. Local disk today; see `integrations.storage`."""
     return LocalImageStore(get_settings().media_root)
+
+
+def get_geocoder() -> ReverseGeocoder:
+    """What a point on the map is called; overridden in tests with a fake."""
+    return build_geocoder(get_settings())
 
 
 def build_catalog_service(session: AsyncSession, tenant_id: UUID) -> CatalogService:

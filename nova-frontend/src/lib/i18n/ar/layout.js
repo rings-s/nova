@@ -10,7 +10,6 @@ export const LAYOUT = {
 	"Mobile navigation": "قائمة التنقل",
 	"Dashboard": "لوحة التحكم",
 	"My bookings": "حجوزاتي",
-	"List your business": "سجّل نشاطك التجاري",
 	"Sign out": "تسجيل الخروج",
 	"Sign in": "تسجيل الدخول",
 	"Get started": "ابدأ الآن",
@@ -39,7 +38,6 @@ export const LAYOUT = {
 	"Provider": "مقدّم الخدمة",
 	"Service": "حساب خدمة",
 	"Staff": "الفريق",
-	"Set up your business to use the dashboard.": "أنشئ نشاطك التجاري لاستخدام لوحة التحكم.",
 	"Marketplace": "السوق",
 	"Menu": "القائمة"
 };

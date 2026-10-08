@@ -19,6 +19,7 @@ from httpx import AsyncClient, Response
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
+    SystemPromptPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -32,9 +33,16 @@ from app.db.session import set_tenant_scope
 from app.modules.ai_agents.agents import AGENTS
 from app.modules.ai_agents.dependencies import get_inference_engine
 from app.modules.ai_agents.runtime import InferenceEngine
-from app.modules.billing.domain import PlanTier, plan_for, requires_payment
+from app.modules.billing.dependencies import build_billing_service
+from app.modules.billing.domain import (
+    TRIAL_AI_MESSAGES,
+    TRIAL_DAYS,
+    PlanTier,
+    plan_for,
+)
 from app.modules.billing.models import SubscriptionRecord
-from app.modules.booking.domain import BookingSource, BookingStatus
+from app.modules.booking.dependencies import build_booking_service
+from app.modules.booking.domain import BookingSource, BookingStatus, WorkingWindow
 from app.modules.booking.models import BookingRecord
 from app.modules.catalog.service import CatalogService
 from app.modules.identity.models import User
@@ -159,9 +167,8 @@ async def add_bookings(
 async def subscribe_to_studio(client: AsyncClient, salon: dict) -> None:
     response = await client.post(
         f"/api/v1/tenants/{salon['tenant'].id}/billing/subscriptions",
-        # A trial, because a paid plan without one waits on its first payment
-        # (billing's checkout) and is gated as Solo until then.
-        json={"business_id": str(salon["business"].id), "tier": "studio", "trial_days": 14},
+        # Every plan starts on its free week, during which it applies at once.
+        json={"business_id": str(salon["business"].id), "tier": "studio"},
     )
     assert response.status_code == 201, response.text
 
@@ -239,6 +246,7 @@ async def test_an_invented_figure_is_retried_then_handed_off(
 async def test_the_old_billing_agent_name_reaches_the_accountant_with_grounded_figures(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
 ):
+    await subscribe_to_studio(client, salon)
     await add_bookings(db_session, salon, count=2)
     script = Script(
         ("get_financial_summary", {}),
@@ -376,6 +384,7 @@ async def test_the_manager_proposes_an_action_and_changes_nothing(
 
 
 async def test_the_analyst_needs_a_plan_with_insights(app: FastAPI, client: AsyncClient, salon):
+    await subscribe(client, salon, PlanTier.SOLO)
     use_model(app, Script())
     response = await chat(client, salon, "analyst_agent")
     assert response.status_code == 403
@@ -543,6 +552,7 @@ async def test_a_conversation_remembers_its_own_earlier_turns_and_nobody_elses(
 async def test_a_figure_a_tool_returned_in_an_earlier_turn_is_still_grounded(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
 ):
+    await subscribe_to_studio(client, salon)
     await add_bookings(db_session, salon, count=2)
     use_model(
         app,
@@ -584,8 +594,8 @@ async def subscribe(client: AsyncClient, salon: dict, tier: PlanTier, **extra: A
 async def test_every_plan_runs_the_agents_it_includes_and_only_those(
     app: FastAPI, client: AsyncClient, salon, tier: PlanTier, agent: str
 ):
-    # Paid plans on a trial: they apply at once, as a paid-up plan would.
-    await subscribe(client, salon, tier, trial_days=14 if requires_payment(tier) else 0)
+    # On its free week a plan applies at once, as a paid-up plan would.
+    await subscribe(client, salon, tier)
     spec = AGENTS[agent]
     use_model(app, Recorder())
 
@@ -603,21 +613,39 @@ async def test_every_plan_runs_the_agents_it_includes_and_only_those(
         assert response.json()["error"]["code"] == "plan_feature_required"
 
 
-async def test_an_unpaid_plan_runs_only_solo_agents(app: FastAPI, client: AsyncClient, salon):
-    # No trial: Studio waits on its first payment and is gated as Solo until then.
+async def test_a_locked_business_runs_no_agents(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
+):
+    """The free week ended unpaid: no assistant answers until the plan is paid."""
+    await subscribe(client, salon, PlanTier.STUDIO)
+    await set_tenant_scope(db_session, salon["tenant"].id)
+    billing = build_billing_service(db_session, salon["tenant"].id)
+    week_later = datetime.now(UTC) + timedelta(days=TRIAL_DAYS)
+    assert await billing.expire_trial(salon["business"].id, now=week_later)
+    use_model(app, Recorder())
+
+    refused = await chat(client, salon, "accountant_agent")
+
+    assert refused.status_code == 402
+    assert refused.json()["error"]["code"] == "subscription_required"
+
+
+async def test_the_trial_allows_ten_ai_messages(app: FastAPI, client: AsyncClient, salon):
     await subscribe(client, salon, PlanTier.STUDIO)
     use_model(app, Recorder())
 
-    assert (await chat(client, salon, "accountant_agent")).status_code == 200
-    refused = await chat(client, salon, "analyst_agent")
-    assert refused.status_code == 403
-    assert refused.json()["error"]["code"] == "plan_feature_required"
+    for _ in range(TRIAL_AI_MESSAGES):
+        assert (await chat(client, salon, "accountant_agent")).status_code == 200
+    refused = await chat(client, salon, "accountant_agent")
+
+    assert refused.status_code == 402
+    assert refused.json()["error"]["code"] == "trial_ai_limit_reached"
 
 
 async def test_a_cancelled_plan_stops_unlocking_agents_after_its_paid_period(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
 ):
-    await subscribe(client, salon, PlanTier.STUDIO, trial_days=14)
+    await subscribe(client, salon, PlanTier.STUDIO)
     cancelled = await client.post(
         f"/api/v1/tenants/{salon['tenant'].id}/billing/subscriptions/{salon['business'].id}/cancel",
         json={"at_period_end": False},
@@ -635,6 +663,150 @@ async def test_a_cancelled_plan_stops_unlocking_agents_after_its_paid_period(
     )
     await db_session.flush()
 
+    # Past it, the business is locked: nothing runs until it pays.
     refused = await chat(client, salon, "analyst_agent")
-    assert refused.status_code == 403
-    assert refused.json()["error"]["code"] == "plan_feature_required"
+    assert refused.status_code == 402
+    assert refused.json()["error"]["code"] == "subscription_required"
+
+
+# --- what a customer is told ------------------------------------------------
+
+
+async def test_the_receptionist_can_say_where_a_branch_is(
+    app: FastAPI, client: AsyncClient, location_factory, salon
+):
+    """Live, asked "Where is your branch located?", it had only a name and a city
+    to go on, and gave the question back. Now each branch carries its map link."""
+    await subscribe_to_studio(client, salon)
+    await location_factory(
+        salon["business"], name_en="Olaya Branch", city="Riyadh", latitude=24.69, longitude=46.6853
+    )
+    script = Script(
+        ("list_branches", {}),
+        (FINAL, {"reply": "Our Olaya Branch is in Riyadh."}),
+    )
+    use_model(app, script)
+
+    response = await chat(client, salon, "receptionist_agent", message="Where are you?")
+
+    assert response.status_code == 200, response.text
+    branches = {b["name"]: b for b in script.tool_returns[0]["branches"]}
+    assert branches["Olaya Branch"]["city"] == "Riyadh"
+    assert branches["Olaya Branch"]["map_url"] == (
+        "https://www.openstreetmap.org/?mlat=24.690000&mlon=46.685300#map=17/24.690000/46.685300"
+    )
+    # A branch never put on the map has no link to share, rather than a wrong one.
+    assert branches["Main Branch"]["map_url"] is None
+
+
+async def test_a_reply_that_only_repeats_the_question_is_not_shown(
+    app: FastAPI, client: AsyncClient, salon
+):
+    await subscribe_to_studio(client, salon)
+    use_model(
+        app,
+        Script(
+            (
+                FINAL,
+                {
+                    "reply": "<untrusted_user_text>Where is your branch located?"
+                    "</untrusted_user_text>"
+                },
+            )
+        ),
+    )
+
+    response = await chat(
+        client, salon, "receptionist_agent", message="Where is your branch located?"
+    )
+
+    reply = response.json()["reply"]
+    assert "untrusted_user_text" not in reply
+    # Said for the model, from the records: where the storefront's branch is.
+    assert reply.startswith("Here is where to find us:\n- Main Branch")
+    assert response.json()["requires_human_handoff"] is False
+
+
+async def test_the_internal_frame_never_reaches_a_customer(
+    app: FastAPI, client: AsyncClient, salon
+):
+    await subscribe_to_studio(client, salon)
+    use_model(
+        app,
+        Script((FINAL, {"reply": "<untrusted_user_text>We open at nine.</untrusted_user_text>"})),
+    )
+
+    response = await chat(client, salon, "receptionist_agent", message="When do you open?")
+
+    assert response.json()["reply"] == "We open at nine."
+
+
+class Briefed:
+    """A model that notes the instructions it was given, then answers."""
+
+    def __init__(self) -> None:
+        self.instructions = ""
+
+    async def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        self.instructions = "\n".join(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, SystemPromptPart)
+        ) + "\n".join(getattr(message, "instructions", None) or "" for message in messages)
+        answer = {"reply": "Noted."}
+        return ModelResponse(parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=answer)])
+
+
+async def _bookable_salon(db_session: AsyncSession, salon: dict, qualify, service_factory):
+    """`salon["service"]` is performed by a provider with hours; a second
+    service is performed by nobody."""
+    await qualify(salon["provider"], salon["service"])
+    await set_tenant_scope(db_session, salon["tenant"].id)
+    await build_booking_service(db_session, salon["tenant"].id).set_provider_schedule(
+        provider_id=salon["provider"].id,
+        windows=[WorkingWindow(weekday=d, start_minute=540, end_minute=1020) for d in range(7)],
+    )
+    return await service_factory(salon["location"], name_en="Hot Stone Massage", name_ar="مساج")
+
+
+async def test_a_service_nobody_can_perform_is_marked_not_bookable(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon, qualify, service_factory
+):
+    """Live, the receptionist offered three services when only one had anyone
+    to perform it."""
+    await subscribe_to_studio(client, salon)
+    unstaffed = await _bookable_salon(db_session, salon, qualify, service_factory)
+    script = Script(("search_services", {}), (FINAL, {"reply": "Here they are."}))
+    use_model(app, script)
+
+    await chat(client, salon, "receptionist_agent", message="What do you offer?")
+
+    listed = {s["service_id"]: s["bookable"] for s in script.tool_returns[0]["services"]}
+    assert listed[str(salon["service"].id)] is True
+    assert listed[str(unstaffed.id)] is False
+
+
+async def test_the_receptionist_starts_with_the_business_facts(
+    app: FastAPI,
+    client: AsyncClient,
+    db_session: AsyncSession,
+    salon,
+    qualify,
+    service_factory,
+    location_factory,
+):
+    await subscribe_to_studio(client, salon)
+    await _bookable_salon(db_session, salon, qualify, service_factory)
+    await location_factory(
+        salon["business"], name_en="Olaya Branch", city="Riyadh", latitude=24.69, longitude=46.6853
+    )
+    model = Briefed()
+    use_model(app, model)
+
+    await chat(client, salon, "receptionist_agent", message="Where are you?")
+
+    facts = model.instructions
+    assert "Olaya Branch (Riyadh, map: https://www.openstreetmap.org/?mlat=24.690000" in facts
+    assert "Hot Stone Massage" in facts and "(not bookable right now)" in facts
+    assert "(bookable)" in facts

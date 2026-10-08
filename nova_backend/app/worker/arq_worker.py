@@ -341,6 +341,40 @@ async def settle_daily_payouts(ctx: dict) -> int:
     return settled
 
 
+async def expire_trials(ctx: dict) -> int:
+    """Locks every business whose free week ended without a payment.
+
+    Locking hides the marketplace listing (through `SubscriptionLocked`) and
+    shuts everything but Billing until the plan is paid. Idempotent: a trial
+    paid for in the meantime, or one already locked, is left alone. Each
+    business commits on its own, so one bad row cannot stop the rest.
+    """
+    from app.modules.billing.dependencies import build_billing_service, build_billing_sweeper
+
+    now = datetime.now(UTC)
+    session_factory = get_session_factory()
+
+    async with session_factory() as session:
+        await bypass_tenant_scope(session)
+        expired = await build_billing_sweeper(session).list_expired_trials(now.date())
+
+    locked = 0
+    for tenant_id, business_id in expired:
+        try:
+            async with session_factory() as session:
+                await set_tenant_scope(session, tenant_id)
+                billing = build_billing_service(session, tenant_id)
+                if await billing.expire_trial(business_id, now=now):
+                    locked += 1
+                await session.commit()
+        except Exception:
+            logger.exception("trial_expiry_failed", extra={"business_id": str(business_id)})
+
+    if locked:
+        logger.info("trials_expired", extra={"count": locked})
+    return locked
+
+
 async def advance_dunning(ctx: dict) -> int:
     """Chases unpaid invoices on the docs/11 section 7 step 5 schedule.
 
@@ -412,6 +446,7 @@ class WorkerSettings:
         close_monthly_invoices,
         settle_daily_payouts,
         advance_dunning,
+        expire_trials,
     ]
 
     cron_jobs = [
@@ -440,6 +475,8 @@ class WorkerSettings:
         # due); this job only asks "is anything owing?" and lets
         # `advance_dunning` decide whether today is a retry day.
         cron(advance_dunning, hour={9}, minute={0}),
+        # Hourly: a trial ends on a date, and the lock follows within the hour.
+        cron(expire_trials, minute={5}),
     ]
 
     on_startup = startup

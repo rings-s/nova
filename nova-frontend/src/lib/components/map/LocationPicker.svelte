@@ -10,6 +10,7 @@
 	import { LocateError, explainFix, explainLocateError, locate } from '$lib/map/geolocate.js';
 	import { addBaseLayer, loadLeaflet, pinIcon } from '$lib/map/leaflet.js';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 
 	/**
@@ -29,14 +30,23 @@
 	 *   longitude?: number | null,
 	 *   onvalidity?: (invalid: boolean) => void,
 	 *   city?: string | null,
+	 *   typing?: boolean,
+	 *   required?: boolean,
 	 *   class?: string
 	 * }}
+	 *
+	 * `typing: false` drops the coordinates field: the pin is then placed only by
+	 * detecting the device, clicking the map or dragging the pin, for a form that
+	 * fills itself from the position (the branch form). `required` drops the
+	 * "Optional" label.
 	 */
 	let {
 		latitude = $bindable(null),
 		longitude = $bindable(null),
 		onvalidity,
 		city = null,
+		typing = true,
+		required = false,
 		class: className = ''
 	} = $props();
 
@@ -355,47 +365,39 @@
 	});
 </script>
 
-<div class={['flex flex-col gap-2', className]}>
+<div class={['flex flex-col gap-3', className]}>
 	<div class="flex items-baseline justify-between gap-2">
 		<span class="text-sm font-medium text-fg-secondary">{t('Map position')}</span>
-		<span class="text-xs text-fg-muted">{t('Optional')}</span>
+		{#if !required}<span class="text-xs text-fg-muted">{t('Optional')}</span>{/if}
 	</div>
 
-	<!-- `isolate` keeps Leaflet's z-indexes (up to 1000) from escaping this box. -->
-	<div
-		class="relative isolate h-64 overflow-hidden rounded-card border border-line-strong bg-surface-muted shadow-card"
-	>
-		<div
-			bind:this={container}
-			class="absolute inset-0"
-			dir="ltr"
-			role="region"
-			aria-label={t(
-				'Map for placing the branch pin. Click it to place the pin, or type coordinates below.'
-			)}
-		></div>
-		{#if failed}
-			<div class="absolute inset-0 flex items-center justify-center p-6 text-center">
-				<p class="text-sm text-fg-muted">
-					{t('The map could not be loaded. You can still type coordinates below.')}
-				</p>
-			</div>
-		{/if}
-	</div>
-
-	<div class="flex flex-wrap items-center gap-2">
-		{#if canLocate}
-			<Button variant="outline" size="sm" onclick={useMyLocation} disabled={finding}>
-				{finding ? t('Finding your location…') : t('Use my location')}
-			</Button>
+	<!-- Detecting the device is the main way in: first, and full width. -->
+	{#if canLocate}
+		<div class="flex flex-wrap items-center gap-2">
 			{#if finding}
+				<Button size="sm" loading class="grow" disabled>
+					{t('Detecting your location…')}
+				</Button>
 				<Button variant="ghost" size="sm" onclick={cancelDetecting}>{t('Cancel')}</Button>
+			{:else if latitude != null && longitude != null}
+				<Button variant="outline" size="sm" class="grow" onclick={useMyLocation}>
+					<Icon name="map-pin" class="size-4" />
+					{t('Detect again')}
+				</Button>
+				<Button variant="ghost" size="sm" onclick={removePin}>{t('Remove pin')}</Button>
+			{:else}
+				<Button size="sm" class="grow" onclick={useMyLocation}>
+					<Icon name="map-pin" class="size-4" />
+					{t('Detect my location')}
+				</Button>
 			{/if}
-		{/if}
-		{#if latitude != null && longitude != null}
-			<Button variant="ghost" size="sm" onclick={removePin}>{t('Remove pin')}</Button>
-		{/if}
-	</div>
+		</div>
+	{:else}
+		<p class="text-sm text-fg-muted">
+			{t("This browser can't detect a location. Click the map to place the pin.")}
+		</p>
+	{/if}
+
 	{#if notice}
 		<div
 			role="status"
@@ -412,15 +414,49 @@
 		</div>
 	{/if}
 
-	<Input
-		label={t('Coordinates')}
-		placeholder="24.7136, 46.6753"
-		dir="ltr"
-		value={text}
-		oninput={handleInput}
-		error={problem}
-		hint={t(
-			'Click the map, drag the pin, or paste coordinates. A branch without a pin does not appear on the map when customers browse.'
-		)}
-	/>
+	<!-- `isolate` keeps Leaflet's z-indexes (up to 1000) from escaping this box. -->
+	<div
+		class="relative isolate h-64 overflow-hidden rounded-card border border-line-strong bg-surface-muted shadow-card"
+	>
+		<div
+			bind:this={container}
+			class="absolute inset-0"
+			dir="ltr"
+			role="region"
+			aria-label={typing
+				? t('Map for placing the branch pin. Click it to place the pin, or type coordinates below.')
+				: t('Map for placing the branch pin. Click it, or drag the pin, to move it.')}
+		></div>
+		{#if failed}
+			<div class="absolute inset-0 flex items-center justify-center p-6 text-center">
+				<p class="text-sm text-fg-muted">
+					{typing
+						? t('The map could not be loaded. You can still type coordinates below.')
+						: t('The map could not be loaded. Detect your location instead.')}
+				</p>
+			</div>
+		{/if}
+	</div>
+
+	{#if typing}
+		<Input
+			label={t('Coordinates')}
+			placeholder="24.7136, 46.6753"
+			dir="ltr"
+			value={text}
+			oninput={handleInput}
+			error={problem}
+			hint={t(
+				'Click the map, drag the pin, or paste coordinates. A branch without a pin does not appear on the map when customers browse.'
+			)}
+		/>
+	{:else}
+		<p class="text-xs text-fg-muted">
+			{#if latitude != null && longitude != null}
+				<span dir="ltr" class="font-mono tabular-nums" data-coordinates>{text}</span>
+				·
+			{/if}
+			{t('Click the map or drag the pin to move it.')}
+		</p>
+	{/if}
 </div>

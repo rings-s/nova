@@ -7,7 +7,7 @@ status: design
 tags: [ai, agents, pydanticai, tools, guardrails]
 related_code:
   - app/modules/ai_agents/agents.py
-  - app/modules/ai_agents/tools.py
+  - app/modules/ai_agents/tools/__init__.py
   - app/modules/ai_agents/schemas.py
   - app/modules/ai_agents/router.py
 ---
@@ -48,8 +48,10 @@ app/modules/ai_agents/
 > - `agents.py` holds the roster as data: one `AgentSpec` per agent (goal, audience, tool
 >   allowlist, output type, instructions, charts, required plan feature), the old names as
 >   aliases, and `resolve_agent`.
-> - `tools.py` holds `AgentToolkit`, one method per tool. Each one calls an Application Service,
->   is checked against the agent's allowlist, and runs under a timeout.
+> - `tools/` holds `AgentToolkit`, one method per tool, in one file per agent (`receptionist.py`,
+>   `marketplace.py`, `customer_service.py`, `accountant.py`, `analyst.py`) over a shared
+>   `base.py`. Each tool calls an Application Service, is checked against the agent's allowlist,
+>   and runs under a timeout.
 > - `service.py` holds `AgentDeps`, `TurnArtifacts` and `AiChatService`. There is no `deps.py`.
 > - `runtime.py` holds the guarded PydanticAI/Ollama import, the output validator that enforces
 >   numeric grounding, and the fallback reply.

@@ -376,9 +376,14 @@ never fails the request, and the rest of the app is unaffected.
   `AI_HISTORY_TTL_SECONDS` (default 24 hours), at most `AI_HISTORY_MAX_TURNS`
   (10), keyed by tenant, caller, business and a hash of `session_id`. Phone
   numbers, emails and card numbers are masked before the model sees a message,
-  but names and free text are kept as written. There is no erase-on-request
-  route: to forget a conversation now, delete its `ai:conversation:*` keys in Redis,
-  or wait for the TTL. State this retention in the privacy notice.
+  but names and free text are kept as written. A signed-in person erases all of
+  theirs at once, at every business and the marketplace, with
+  `DELETE /api/v1/ai/conversations` (the chat window's "Forget chat"); the
+  offered times kept beside the turns go too. It answers
+  `503 ai_memory_unavailable` rather than "done" when Redis is unreachable.
+  Deleted keys leave the dataset at once, but an append-only file keeps the old
+  writes until Redis next rewrites it. State the 24 hours and the erase route
+  in the privacy notice.
 
 ## Commands
 

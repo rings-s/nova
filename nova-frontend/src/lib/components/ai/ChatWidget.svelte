@@ -22,7 +22,7 @@
 	 * Wrap it in `{#key}` to start a new conversation: the session id is made
 	 * once per mount.
 	 */
-	import { sendChatMessage } from '../../api/ai.js';
+	import { forgetMyConversations, sendChatMessage } from '../../api/ai.js';
 	import { formatDateTime, formatRelative } from '../../utils/datetime.js';
 	import { errorMessage } from '../../utils/errors.js';
 	import Button from '../ui/Button.svelte';
@@ -33,6 +33,7 @@
 	import TicketCard from '../ticket/TicketCard.svelte';
 	import { saveTicket } from '../../stores/tickets.js';
 	import { customerTenantsStore } from '../../stores/customerTenants.svelte.js';
+	import { toastStore } from '../../stores/toast.svelte.js';
 
 	/**
 	 * @type {{
@@ -73,6 +74,7 @@
 	let sending = $state(false);
 	let error = $state(/** @type {string|null} */ (null));
 	let elapsed = $state(0);
+	let forgetting = $state(false);
 
 	/** @type {HTMLDivElement|undefined} */
 	let scroller = $state();
@@ -134,6 +136,34 @@
 		}
 	}
 
+	/**
+	 * Erases what the assistants remember of this person, everywhere, then
+	 * clears this window. The server answers an error rather than "done" when it
+	 * could not reach its memory, so the window is cleared only on success.
+	 */
+	async function forget() {
+		if (forgetting || sending) return;
+		if (
+			!confirm(
+				t(
+					'Delete your conversations with every NOVA assistant? Your bookings and tickets are kept.'
+				)
+			)
+		)
+			return;
+		forgetting = true;
+		try {
+			await forgetMyConversations();
+			messages = [];
+			error = null;
+			toastStore.success(t('Your assistant conversations were deleted.'));
+		} catch (err) {
+			toastStore.fromError(err);
+		} finally {
+			forgetting = false;
+		}
+	}
+
 	/** @param {SubmitEvent} event */
 	function submit(event) {
 		event.preventDefault();
@@ -170,10 +200,20 @@
 		>
 			<Icon name="sparkles" class="size-4" />
 		</span>
-		<div class="min-w-0">
+		<div class="min-w-0 flex-1">
 			<p class="truncate font-semibold text-fg">{title ?? t('Assistant')}</p>
 			{#if subtitle}<p class="truncate text-xs text-fg-muted">{subtitle}</p>{/if}
 		</div>
+		<Button
+			variant="ghost"
+			size="sm"
+			loading={forgetting}
+			disabled={sending}
+			onclick={forget}
+			title={t('Delete what the assistants remember of your conversations')}
+		>
+			{t('Forget chat')}
+		</Button>
 	</div>
 
 	<div bind:this={scroller} class="flex-1 space-y-4 overflow-y-auto p-4" aria-live="polite">

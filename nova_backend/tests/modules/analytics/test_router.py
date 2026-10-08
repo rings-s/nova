@@ -101,6 +101,11 @@ async def test_a_customer_cannot_read_a_salons_numbers(app: FastAPI, client: Asy
 
 
 async def test_branch_comparison_needs_the_chain_plan(client: AsyncClient, db_session, salon):
+    subscribed = await client.post(
+        f"/api/v1/tenants/{salon['tenant'].id}/billing/subscriptions",
+        json={"business_id": str(salon["business"].id), "tier": "solo"},
+    )
+    assert subscribed.status_code == 201, subscribed.text
     await add_bookings(db_session, salon, count=3, status=BookingStatus.COMPLETED)
     params = {"business_id": str(salon["business"].id)}
 
@@ -111,7 +116,7 @@ async def test_branch_comparison_needs_the_chain_plan(client: AsyncClient, db_se
         url(salon, "breakdown"), params={**params, "dimension": "service"}
     )
 
-    # A business that never subscribed is on Solo (docs/11 section 2).
+    # Solo, on its free week: the plan's own features, not Chain's (docs/11 section 2).
     assert by_location.status_code == 403
     assert by_location.json()["error"]["code"] == "plan_feature_required"
     assert by_service.status_code == 200

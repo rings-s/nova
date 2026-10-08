@@ -192,7 +192,7 @@ POST /v1/payments
 			</p>
 			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
 				<Button size="lg" href={`${resolve('/register')}?as=business`}
-					>{t('Start 14-day free trial')}</Button
+					>{t('Start 7-day free trial')}</Button
 				>
 				<Button size="lg" variant="outline" href={resolve('/features')}
 					>{t('Explore features')}</Button
@@ -467,7 +467,7 @@ POST /v1/payments
 		</p>
 		<div class="mt-8 flex flex-wrap justify-center gap-3">
 			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}>
-				{t('Start 14-day free trial')}
+				{t('Start 7-day free trial')}
 			</Button>
 			<Button size="lg" variant="outline-inverse" href={resolve('/discover')}>
 				{t('Find a spa, salon or clinic near you')}

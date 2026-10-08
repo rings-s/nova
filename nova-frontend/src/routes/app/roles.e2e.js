@@ -154,6 +154,9 @@ test.describe('a receptionist', () => {
 		await page.goto('/app/billing');
 
 		await expect(page.getByText("You don't have access to billing")).toBeVisible();
-		expect(calls.some((path) => path.includes('/billing/'))).toBe(false);
+		// Only whether the business is locked, which every role's dashboard reads.
+		expect(calls.some((path) => path.includes('/billing/') && !path.endsWith('/standing'))).toBe(
+			false
+		);
 	});
 });

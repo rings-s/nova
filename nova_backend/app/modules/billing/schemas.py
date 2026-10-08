@@ -23,6 +23,7 @@ from app.modules.billing.domain import (
     SubscriptionStatus,
 )
 from app.modules.booking.domain import BookingSource
+from app.modules.payment.schemas import PaymentFormConfigOut
 
 
 class PlanOut(ApiSchema):
@@ -38,7 +39,7 @@ class PlanOut(ApiSchema):
     included_features: list[str] = []
 
     #: Not in docs/11 section 6, added because a client rendering the pricing
-    #: table needs to know 449 SAR is *per location* rather than flat.
+    #: table needs to know Chain's price is *per location* rather than flat.
     priced_per_location: bool = False
     max_seats: int | None = None
     max_locations: int | None = None
@@ -62,12 +63,33 @@ class SubscriptionOut(ApiSchema):
     annual: bool = False
 
     #: What the next invoice will charge for the subscription line, given the
-    #: current footprint. A Chain with three branches pays 3 x 449.
+    #: current footprint. A Chain with three branches pays 3 x 1,200.
     monthly_amount: Decimal
     currency: str = "SAR"
-    #: docs/11 section 7 step 6. True means the marketplace listing is hidden
-    #: for non-payment; the calendar and queue are unaffected.
+    #: docs/11 section 7 step 6, or a locked business: the marketplace listing
+    #: is hidden for non-payment.
     marketplace_listing_hidden: bool = False
+    #: The free week's last day is the day before this; set on every plan.
+    trial_ends_at: date | None = None
+    #: AI messages left in the trial; null once the plan is paid for.
+    trial_ai_messages_left: int | None = None
+    #: The trial ran out, or the plan is unpaid: nothing but Billing works.
+    locked: bool = False
+
+
+class StandingOut(ApiSchema):
+    """Whether a business may use NOVA today, for every staff role: the
+    dashboard reads it to decide whether to send everyone to Billing."""
+
+    business_id: UUID
+    #: False when the business has never chosen a plan.
+    has_plan: bool
+    tier: PlanTier | None = None
+    status: SubscriptionStatus | None = None
+    trialing: bool = False
+    trial_ends_at: date | None = None
+    trial_ai_messages_left: int | None = None
+    locked: bool
 
 
 class StartCheckoutRequest(ApiSchema):
@@ -93,6 +115,9 @@ class CheckoutOut(ApiSchema):
     paid_at: datetime | None = None
     #: Moyasar's hosted page. Only when the checkout was just opened.
     redirect_url: str | None = None
+    #: The embedded Payment Form's options, when a publishable key is set;
+    #: the web app then pays in its own checkout page instead of redirecting.
+    checkout: PaymentFormConfigOut | None = None
 
 
 class CreateSubscriptionRequest(ApiSchema):
@@ -101,7 +126,6 @@ class CreateSubscriptionRequest(ApiSchema):
     seats: int = Field(default=1, ge=1)
     locations: int = Field(default=1, ge=1)
     annual: bool = False
-    trial_days: int = Field(default=0, ge=0, le=90)
 
 
 class ChangePlanRequest(ApiSchema):

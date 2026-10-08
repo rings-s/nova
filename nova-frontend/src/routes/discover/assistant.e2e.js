@@ -34,8 +34,13 @@ function turn(fields) {
 	};
 }
 
-/** @param {import('@playwright/test').Page} page @returns {Promise<any[]>} chat request bodies */
-async function signInAsCustomer(page) {
+/**
+ * @param {import('@playwright/test').Page} page
+ * @param {{ forgetStatus?: number, forgets?: string[] }} [options] how `DELETE /ai/conversations`
+ *   answers, and a list each such request is recorded in
+ * @returns {Promise<any[]>} chat request bodies
+ */
+async function signInAsCustomer(page, { forgetStatus = 200, forgets = [] } = {}) {
 	const now = Math.floor(Date.now() / 1000);
 	const token = [
 		base64url({ alg: 'HS256', typ: 'JWT' }),
@@ -100,6 +105,23 @@ async function signInAsCustomer(page) {
 						})
 			});
 		}
+		if (path === '/ai/conversations' && request.method() === 'DELETE') {
+			forgets.push(path);
+			return forgetStatus === 200
+				? route.fulfill({ headers: cors, json: { forgotten: 1 } })
+				: route.fulfill({
+						status: forgetStatus,
+						headers: cors,
+						json: {
+							error: {
+								code: 'ai_memory_unavailable',
+								message: 'Conversation memory is unreachable, so nothing was deleted.',
+								field: null,
+								retryable: true
+							}
+						}
+					});
+		}
 		if (path === '/discovery/map') {
 			return route.fulfill({
 				headers: cors,
@@ -128,4 +150,38 @@ test('only the "Yes, book it" button confirms a held time, by its hold token', a
 	// Typed text carries no confirmation, however it is worded.
 	expect(chats[0].confirm_hold_token).toBeNull();
 	expect(chats[1].confirm_hold_token).toBe(HOLD_TOKEN);
+});
+
+/** @param {import('@playwright/test').Page} page */
+async function chatOnce(page) {
+	await page.goto('/discover');
+	await page.getByRole('button', { name: 'Ask the assistant' }).click();
+	const box = page.getByPlaceholder('Type a message…');
+	await box.fill('A haircut the day after tomorrow');
+	await box.press('Enter');
+	await expect(page.getByText('I am holding that time. Shall I book it?')).toBeVisible();
+}
+
+test('"Forget chat" deletes the server-side memory, then clears the window', async ({ page }) => {
+	/** @type {string[]} */ const forgets = [];
+	await signInAsCustomer(page, { forgets });
+	await chatOnce(page);
+
+	page.once('dialog', (dialog) => dialog.accept());
+	await page.getByRole('button', { name: 'Forget chat' }).click();
+
+	await expect(page.getByText('Your assistant conversations were deleted.')).toBeVisible();
+	await expect(page.getByText('I am holding that time. Shall I book it?')).toHaveCount(0);
+	expect(forgets).toHaveLength(1);
+});
+
+test('when the server cannot forget, the window says so and keeps the chat', async ({ page }) => {
+	await signInAsCustomer(page, { forgetStatus: 503 });
+	await chatOnce(page);
+
+	page.once('dialog', (dialog) => dialog.accept());
+	await page.getByRole('button', { name: 'Forget chat' }).click();
+
+	await expect(page.getByText('Your assistant conversations were deleted.')).toHaveCount(0);
+	await expect(page.getByText('I am holding that time. Shall I book it?')).toBeVisible();
 });

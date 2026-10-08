@@ -179,3 +179,15 @@ export function sendMarketplaceMessage({
 export function getMarketplaceAssistant() {
 	return http.get('/discovery/ai/status');
 }
+
+/**
+ * Forgets every AI conversation the caller has had, at any business and on the
+ * marketplace: the remembered turns, and the offered times kept with them (an
+ * earlier offer can no longer be booked). Bookings and tickets are untouched.
+ * Fails with `ai_memory_unavailable` rather than claiming success when the
+ * server cannot reach its memory.
+ * @returns {Promise<{ forgotten: number }>}
+ */
+export function forgetMyConversations() {
+	return http.delete('/ai/conversations');
+}

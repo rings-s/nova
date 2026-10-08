@@ -87,3 +87,14 @@ class HorizonTooLargeError(ValidationDomainError):
 
     def __init__(self, max_days: int) -> None:
         super().__init__(f"Availability can be requested at most {max_days} days at a time.")
+
+
+class BusinessUnavailableError(ConflictError):
+    """The business is not taking online bookings: its trial ended unpaid (or
+    its listing is hidden for non-payment). Staff can still book for walk-ins."""
+
+    code = "business_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("This business isn't taking online bookings right now.")
+

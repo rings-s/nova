@@ -21,6 +21,26 @@ class SubscriptionActivated(DomainEvent):
 
 
 @dataclass(frozen=True)
+class SubscriptionTrialStarted(DomainEvent):
+    """A plan was chosen and its free week began: the listing goes up."""
+
+    tenant_id: UUID
+    subscription_id: UUID
+    business_id: UUID
+    tier: str
+
+
+@dataclass(frozen=True)
+class SubscriptionLocked(DomainEvent):
+    """The trial ran out unpaid: the business is locked until it pays."""
+
+    tenant_id: UUID
+    subscription_id: UUID
+    business_id: UUID
+    tier: str
+
+
+@dataclass(frozen=True)
 class PlanChanged(DomainEvent):
     tenant_id: UUID
     subscription_id: UUID

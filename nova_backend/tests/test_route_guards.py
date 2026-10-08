@@ -103,7 +103,14 @@ ROLE_GATED_ROUTES: dict[tuple[str, str], frozenset[StaffPermission]] = {
     ("GET", f"{_ANALYTICS}/financial-summary"): _INSIGHTS | _FINANCIALS,
 }
 #: The published price list: any authenticated caller on the tenant, by design.
-UNGATED_BILLING_ROUTES: frozenset[tuple[str, str]] = frozenset({("GET", f"{_BILLING}/plans")})
+#: And whether the business is locked, which every staff role's dashboard needs
+#: (no amounts in it; `require_staff`).
+UNGATED_BILLING_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", f"{_BILLING}/plans"),
+        ("GET", f"{_BILLING}/subscriptions/{{business_id}}/standing"),
+    }
+)
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 

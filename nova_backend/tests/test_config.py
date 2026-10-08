@@ -170,3 +170,15 @@ class TestMoyasarPublishableKey:
 
     def test_no_key_at_all_is_fine(self):
         assert build(moyasar_publishable_key=None).moyasar_publishable_key is None
+
+
+class TestMoyasarKeyNames:
+    @pytest.mark.parametrize("name", ["MOYASAR_SECRET_KEY_ID", "MOYASAR_API_KEY"])
+    def test_the_secret_key_is_read_from_either_name(self, monkeypatch, name):
+        for other in ("MOYASAR_SECRET_KEY_ID", "MOYASAR_API_KEY"):
+            monkeypatch.delenv(other, raising=False)
+        monkeypatch.setenv(name, "sk_test_abc")
+
+        settings = Settings(_env_file=None, **REQUIRED, secret_key=GENERATED_KEY, env="local")
+
+        assert settings.moyasar_api_key == "sk_test_abc"

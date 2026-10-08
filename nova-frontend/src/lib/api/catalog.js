@@ -195,6 +195,32 @@ export function setListingVisibility(tenantId, businessId, isListed) {
 // --- Locations -----------------------------------------------------------
 
 /**
+ * What the map calls a point, to fill the branch form so nothing is typed.
+ * Any field is null where the map has nothing there.
+ * @typedef {Object} Place
+ * @property {number} latitude
+ * @property {number} longitude
+ * @property {string|null} city_en
+ * @property {string|null} city_ar
+ * @property {string|null} district_en
+ * @property {string|null} district_ar
+ * @property {string|null} name_en Suggested branch name, e.g. "Al Olaya branch".
+ * @property {string|null} name_ar
+ */
+
+/**
+ * The district, city and a branch name for a pin, in English and Arabic
+ * (OpenStreetMap). Owners and managers. 503 `geocoding_unavailable` is retryable.
+ * @param {string} tenantId @param {number} latitude @param {number} longitude
+ * @returns {Promise<Place>}
+ */
+export function reversePlace(tenantId, latitude, longitude) {
+	return http.get(tenantPath(tenantId, '/catalog/places/reverse'), {
+		query: { latitude, longitude }
+	});
+}
+
+/**
  * @param {string} tenantId
  * @param {{ businessId: string, nameEn: string, nameAr: string, timezone?: string,
  *   city?: string|null, latitude?: number|null, longitude?: number|null }} params

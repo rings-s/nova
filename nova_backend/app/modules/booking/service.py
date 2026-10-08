@@ -48,6 +48,7 @@ from app.modules.booking.events import (
 )
 from app.modules.booking.exceptions import (
     BookingNotFoundError,
+    BusinessUnavailableError,
     HoldExpiredError,
     HoldLimitReachedError,
     HoldNotFoundError,
@@ -462,6 +463,14 @@ class BookingService:
 
         if not await self.catalog.is_provider_qualified(provider_id, service_id):
             raise ProviderNotQualifiedError(provider_id, service_id)
+
+        # A customer cannot book online at a business billing has taken off the
+        # marketplace (a trial that ended unpaid, or day 21 of dunning).
+        if (
+            self_service
+            and (await self.catalog.get_business(location.business_id)).hidden_by_billing
+        ):
+            raise BusinessUnavailableError()
 
         # 1b. Now the business is known, so ask whether NOVA can prove it
         #     introduced this customer. Only the unattributed default is ever

@@ -205,3 +205,10 @@ class MarketplaceAssistantOut(ApiSchema):
     """Whether the marketplace assistant can answer right now."""
 
     inference_available: bool
+
+
+class ForgottenConversationsOut(ApiSchema):
+    """What a request to forget deleted."""
+
+    #: Conversations and offer lists removed; 0 when there was nothing to forget.
+    forgotten: int

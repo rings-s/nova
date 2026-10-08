@@ -129,6 +129,9 @@ class CatalogService:
             slug=slug,
             description_en=description_en,
             description_ar=description_ar,
+            # Off the marketplace until it chooses a plan: choosing one starts
+            # its free week and billing puts the listing up (`SubscriptionTrialStarted`).
+            hidden_by_billing=True,
         )
         self.businesses.add(business)
         await self.businesses.session.flush()
@@ -299,7 +302,13 @@ class CatalogService:
         validate_timezone(timezone)
         validate_coordinates(latitude, longitude)
 
-        slug = generate_slug(name_en)
+        # Two branches can share a name (two "Al Olaya branch"es, filled in from
+        # the map): the second gets `-2`, and so on, instead of a 409.
+        base = generate_slug(name_en)
+        taken = await self.locations.slugs_starting_with(base)
+        slug, n = base, 2
+        while slug in taken:
+            slug, n = f"{base}-{n}", n + 1
         location = Location(
             tenant_id=self.tenant_id,
             business_id=business_id,

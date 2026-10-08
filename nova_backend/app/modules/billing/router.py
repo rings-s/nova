@@ -15,6 +15,7 @@ immutable (docs/11 section 5). The only write paths are the ones an owner
 genuinely owns: subscribe, change plan, cancel.
 """
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db_session
 from app.core.pagination import PageParams
 from app.core.schemas import Page
+from app.core.security import require_staff
 from app.core.throttling import write_rate_limit
 from app.modules.billing.dependencies import get_billing_service
 from app.modules.billing.domain import (
@@ -41,6 +43,7 @@ from app.modules.billing.schemas import (
     InvoiceOut,
     PayoutOut,
     PlanOut,
+    StandingOut,
     StartCheckoutRequest,
     SubscriptionOut,
 )
@@ -48,6 +51,8 @@ from app.modules.billing.service import BillingService
 from app.modules.booking.domain import BookingSource
 from app.modules.identity.dependencies import RequirePermission
 from app.modules.identity.domain import StaffPermission
+from app.modules.payment.schemas import PaymentFormConfigOut
+from app.modules.payment.service import PaymentFormConfig
 
 router = APIRouter(prefix="/tenants/{tenant_id}/billing", tags=["billing"])
 
@@ -72,10 +77,19 @@ def _subscription_out(subscription: Subscription) -> SubscriptionOut:
         monthly_amount=amount.amount,
         currency=amount.currency,
         marketplace_listing_hidden=subscription.marketplace_listing_hidden,
+        trial_ends_at=subscription.trial_ends_at,
+        trial_ai_messages_left=(
+            subscription.trial_ai_messages_left if subscription.trialing else None
+        ),
+        locked=subscription.locked_on(datetime.now(UTC).date()),
     )
 
 
-def _checkout_out(checkout: SubscriptionCheckout, redirect_url: str | None = None) -> CheckoutOut:
+def _checkout_out(
+    checkout: SubscriptionCheckout,
+    redirect_url: str | None = None,
+    form: PaymentFormConfig | None = None,
+) -> CheckoutOut:
     return CheckoutOut(
         id=checkout.id,
         business_id=checkout.business_id,
@@ -90,6 +104,7 @@ def _checkout_out(checkout: SubscriptionCheckout, redirect_url: str | None = Non
         covers_until=checkout.covers_until,
         paid_at=checkout.paid_at,
         redirect_url=redirect_url,
+        checkout=PaymentFormConfigOut.model_validate(form) if form else None,
     )
 
 
@@ -168,12 +183,10 @@ async def create_subscription(
 ) -> SubscriptionOut:
     """Subscribes a business to a plan. Owners only (`manage_subscription`).
 
-    One subscription per business: change it with `/plan` afterwards. A business
-    that never subscribes is billed as Solo. `trial_days` is at most 90.
-
-    A paid plan (Studio, Chain) without a trial starts as `pending_payment`, and
-    is billed and gated as Solo until paid: open the payment page with
-    `POST /subscriptions/{business_id}/checkout`."""
+    One subscription per business: change it with `/plan` afterwards. Every plan
+    starts `trialing` for a free week (`trial_ends_at`), with 10 AI messages.
+    Pay for it any time with `POST /subscriptions/{business_id}/checkout`; a
+    trial that ends unpaid locks the business (`locked`) until it is paid."""
     subscription = await service.subscribe(**payload.model_dump())
     await session.commit()
     return _subscription_out(subscription)
@@ -199,6 +212,36 @@ async def get_subscription(
     return _subscription_out(await service.get_subscription(business_id))
 
 
+@router.get(
+    "/subscriptions/{business_id}/standing",
+    response_model=StandingOut,
+    dependencies=[Depends(require_staff)],
+)
+async def get_standing(
+    tenant_id: UUID,
+    business_id: UUID,
+    service: BillingService = Depends(get_billing_service),
+) -> StandingOut:
+    """Whether the business may use NOVA today. Any staff member.
+
+    No prices or amounts: just whether a plan was chosen, whether it is on its
+    free week (and how many trial AI messages are left), and `locked`, which
+    means the trial ended unpaid and only Billing works until it is paid."""
+    found = await service.find_subscription(business_id)
+    if found is None:
+        return StandingOut(business_id=business_id, has_plan=False, locked=True)
+    return StandingOut(
+        business_id=business_id,
+        has_plan=True,
+        tier=found.tier,
+        status=found.status,
+        trialing=found.trialing,
+        trial_ends_at=found.trial_ends_at,
+        trial_ai_messages_left=found.trial_ai_messages_left if found.trialing else None,
+        locked=found.locked_on(datetime.now(UTC).date()),
+    )
+
+
 @router.post(
     "/subscriptions/{business_id}/plan",
     response_model=SubscriptionOut,
@@ -214,8 +257,9 @@ async def change_plan(
     """Moves plan. A downgrade below current seats or locations is refused by
     the domain with a 409, naming what is in the way.
 
-    Moving from Solo to a paid plan leaves the subscription `pending_payment`
-    until it is paid for (`POST /subscriptions/{business_id}/checkout`)."""
+    During the trial, or while unpaid, the business pays for whichever plan it
+    has chosen when it pays (`POST /subscriptions/{business_id}/checkout`); a
+    paid plan moves now and is billed at the new price from the next invoice."""
     subscription = await service.change_plan(business_id, tier=payload.tier, annual=payload.annual)
     await session.commit()
     return _subscription_out(subscription)
@@ -234,9 +278,11 @@ async def start_checkout(
     session: AsyncSession = Depends(get_db_session),
     service: BillingService = Depends(get_billing_service),
 ) -> CheckoutOut:
-    """Opens Moyasar's payment page for a plan waiting on payment. Owners only.
+    """Opens a Moyasar invoice for a plan waiting on payment. Owners only.
 
-    Send the owner's browser to `redirect_url`. It charges the plan's price plus
+    With a publishable key configured, `checkout` holds the options for
+    Moyasar's embedded Payment Form, paid on the web app's own page; otherwise
+    send the owner's browser to `redirect_url`. It charges the plan's price plus
     15% VAT for the current month (a year for an annual plan). Moyasar sends
     them back to `return_url?checkout=<id>`; call
     `POST /checkouts/{checkout_id}/sync` from there. 409
@@ -244,7 +290,7 @@ async def start_checkout(
     `integration_not_configured` without Moyasar keys."""
     started = await service.start_checkout(business_id, return_url=payload.return_url)
     await session.commit()
-    return _checkout_out(started.checkout, started.redirect_url)
+    return _checkout_out(started.checkout, started.redirect_url, started.form)
 
 
 @router.post(

@@ -1,0 +1,180 @@
+/*
+ * Moyasar's Payment Form in NOVA's design system.
+ *
+ * moyasar.css scopes every rule to `div#mysr` with `!important`, so each
+ * override here adds one class (`.nova-pay`, on MoyasarForm's wrapper) to win
+ * on specificity. Colours come from the `--nv-*` tokens in routes/layout.css,
+ * so light and dark mode follow the rest of the app; brand and error colours
+ * are the literal values `Button` (primary) and `fieldError` use. Only
+ * appearance changes: the form's fields, order and behaviour are Moyasar's.
+ */
+
+.nova-pay div#mysr,
+.nova-pay div#mysr * {
+	font-family: inherit !important;
+}
+
+/* --- Surfaces and text ----------------------------------------------------- */
+
+.nova-pay div#mysr .bg-white {
+	background-color: var(--nv-surface) !important;
+}
+
+.nova-pay div#mysr .bg-slate-100,
+.nova-pay div#mysr .bg-neutral-300,
+.nova-pay div#mysr .hover\:bg-neutral-50:hover {
+	background-color: var(--nv-surface-muted) !important;
+}
+
+.nova-pay div#mysr .text-black,
+.nova-pay div#mysr .text-black\/90,
+.nova-pay div#mysr .text-neutral-800\/90 {
+	color: var(--nv-fg) !important;
+}
+
+.nova-pay div#mysr .text-primary-400 {
+	color: var(--nv-fg-muted) !important;
+}
+
+.nova-pay div#mysr label,
+.nova-pay div#mysr .font-medium {
+	color: var(--nv-fg-secondary) !important;
+}
+
+/* The "Or pay with card" rules take the text colour unless told otherwise. */
+.nova-pay div#mysr hr {
+	border-color: var(--nv-line) !important;
+	background-color: transparent !important;
+}
+
+/* --- Fields: the same look as `fieldBase` in ui/styles.js ---------------- */
+
+.nova-pay div#mysr input {
+	background-color: var(--nv-surface) !important;
+	color: var(--nv-fg) !important;
+	transition:
+		box-shadow 150ms cubic-bezier(0.16, 1, 0.3, 1),
+		border-color 150ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.nova-pay div#mysr input::placeholder {
+	color: var(--nv-fg-subtle) !important;
+	opacity: 1 !important;
+}
+
+.nova-pay div#mysr .shadow-input {
+	box-shadow:
+		0 0 0 1px var(--nv-line-strong),
+		var(--nv-shadow-card) !important;
+}
+
+.nova-pay div#mysr .shadow-input:hover {
+	box-shadow:
+		0 0 0 1px var(--nv-fg-subtle),
+		var(--nv-shadow-card) !important;
+}
+
+.nova-pay div#mysr .focus\:shadow-input-focus:focus,
+.nova-pay div#mysr .shadow-input:focus,
+.nova-pay div#mysr .shadow-input:focus-within {
+	box-shadow:
+		0 0 0 1px #f43f5e,
+		0 0 0 4px rgb(244 63 94 / 0.15) !important;
+	outline: none !important;
+}
+
+.nova-pay div#mysr .shadow-input-error {
+	box-shadow:
+		0 0 0 1px #f87171,
+		0 0 0 4px rgb(239 68 68 / 0.12) !important;
+}
+
+.nova-pay div#mysr .border-neutral-300 {
+	border-color: var(--nv-line) !important;
+}
+
+.nova-pay div#mysr .hover\:border-neutral-400:hover {
+	border-color: var(--nv-line-strong) !important;
+}
+
+/*
+ * The card-network logos (mada, Visa, Mastercard). Moyasar places them at a
+ * quarter of the card group's height, which leaves them on the card-number
+ * field's top edge. Pinned to that field instead (the group's first row,
+ * `py-2` + `text-sm`: 2.25rem) and centred in it. Tailwind 4 moves them with
+ * the `translate` property, not `transform`, so both are cleared.
+ */
+.nova-pay div#mysr .relative.grid > .absolute.top-1\/4 {
+	top: 0 !important;
+	bottom: auto !important;
+	height: 2.25rem !important;
+	translate: none !important;
+	transform: none !important;
+	align-items: center !important;
+}
+
+/* --- Radii: every corner is `rounded-control` ---------------------------- */
+
+.nova-pay div#mysr .rounded-lg,
+.nova-pay div#mysr .rounded-md {
+	border-radius: var(--radius-control, 0.625rem) !important;
+}
+
+.nova-pay div#mysr .rounded-t-lg {
+	border-start-start-radius: var(--radius-control, 0.625rem) !important;
+	border-start-end-radius: var(--radius-control, 0.625rem) !important;
+}
+
+.nova-pay div#mysr .rounded-bl-lg,
+.nova-pay div#mysr .md\:rounded-b-lg {
+	border-bottom-left-radius: var(--radius-control, 0.625rem) !important;
+}
+
+.nova-pay div#mysr .rounded-br-lg,
+.nova-pay div#mysr .md\:rounded-b-lg {
+	border-bottom-right-radius: var(--radius-control, 0.625rem) !important;
+}
+
+.nova-pay div#mysr .shadow {
+	box-shadow: var(--nv-shadow-card) !important;
+}
+
+/* --- The pay button: `Button variant="primary"` -------------------------- */
+
+.nova-pay div#mysr .bg-primary {
+	background-color: #e11d48 !important;
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.15),
+		0 1px 2px rgb(190 18 60 / 0.3) !important;
+	font-weight: 600 !important;
+	transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.nova-pay div#mysr button.bg-primary:hover:not(:disabled) {
+	background-color: #be123c !important;
+}
+
+.nova-pay div#mysr button.bg-primary:focus-visible {
+	outline: 2px solid #f43f5e !important;
+	outline-offset: 2px !important;
+}
+
+/* --- Errors: `fieldError` ------------------------------------------------- */
+
+.nova-pay div#mysr .text-error,
+.nova-pay div#mysr .text-red-600 {
+	color: #dc2626 !important;
+}
+
+.nova-pay div#mysr .border-error {
+	border-color: #f87171 !important;
+}
+
+:root.dark .nova-pay div#mysr .text-error,
+:root.dark .nova-pay div#mysr .text-red-600 {
+	color: #f87171 !important;
+}
+
+:root.dark .nova-pay div#mysr .bg-red-100 {
+	background-color: rgb(127 29 29 / 0.35) !important;
+}

@@ -91,3 +91,63 @@ async def test_redis_keeps_the_last_turns_and_forgets_them_in_time():
     finally:
         await client.delete(key.storage_key())
         await client.aclose()
+
+
+async def test_forgetting_a_person_removes_their_conversations_everywhere_and_no_one_elses():
+    store = InMemoryConversationStore()
+    me = uuid4()
+    at_a_salon = _key(principal_id=me)
+    at_the_marketplace = _key(tenant_id=None, principal_id=me, session_id="market-1")
+    someone_else = _key(tenant_id=at_a_salon.tenant_id, session_id=at_a_salon.session_id)
+    for key in (at_a_salon, at_the_marketplace, someone_else):
+        await store.append(key, b"turn")
+    await store.save_offers(at_a_salon, b"offers", ttl_seconds=60)
+
+    assert await store.forget_principal(me) == 3
+
+    assert await store.load(at_a_salon) == []
+    assert await store.load(at_the_marketplace) == []
+    assert await store.load_offers(at_a_salon) is None
+    assert await store.load(someone_else) == [b"turn"]
+
+
+async def test_forgetting_without_redis_raises_rather_than_reporting_nothing_to_forget():
+    """A turn may start fresh without Redis; a "forget me" must not answer done."""
+    store = RedisConversationStore(None, ttl_seconds=60, max_turns=3)
+    with pytest.raises(ConnectionError):
+        await store.forget_principal(uuid4())
+
+    unreachable = RedisConversationStore.from_url(
+        "redis://127.0.0.1:1/0", ttl_seconds=60, max_turns=3
+    )
+    with pytest.raises(Exception):  # noqa: B017 - whatever the client raises
+        await unreachable.forget_principal(uuid4())
+
+
+async def test_redis_forgets_one_person_at_every_business_and_keeps_everyone_else():
+    from redis.asyncio import Redis
+
+    client = Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    try:
+        await client.ping()
+    except Exception:
+        await client.aclose()
+        pytest.skip("Redis is not reachable here")
+
+    store = RedisConversationStore(client, ttl_seconds=60, max_turns=3)
+    me = uuid4()
+    mine = [_key(principal_id=me), _key(tenant_id=None, principal_id=me)]
+    theirs = _key()
+    try:
+        for key in [*mine, theirs]:
+            await store.append(key, b"turn")
+        await store.save_offers(mine[0], b"offers", ttl_seconds=60)
+
+        assert await store.forget_principal(me) == 3
+
+        for key in mine:
+            assert await client.exists(key.storage_key(), key.offers_key()) == 0
+        assert await store.load(theirs) == [b"turn"]
+    finally:
+        await client.delete(*(key.storage_key() for key in [*mine, theirs]), mine[0].offers_key())
+        await client.aclose()

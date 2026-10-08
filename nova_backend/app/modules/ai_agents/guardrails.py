@@ -211,6 +211,37 @@ def sanitize_untrusted_text(text: str) -> SanitizedInput:
     return SanitizedInput(text=cleaned, redacted=redacted, injection_detected=injection)
 
 
+#: A line that is only a made-up tag, `<List Branches>` or `</Services>`.
+_PSEUDO_TAG = re.compile(r"</?\s*[A-Za-z][\w \-]{0,40}\s*>")
+
+
+def _plain(text: str) -> str:
+    return " ".join(_FRAME_TAG.sub(" ", text).split()).strip(" .?!؟").casefold()
+
+
+def clean_reply(reply: str, message: str) -> tuple[str, bool]:
+    """A model's reply as a customer may see it, and whether it says nothing.
+
+    Live, qwen3-1.7b answered "Where is your branch located?" with the question
+    itself, wrapped in the `<untrusted_user_text>` frame it had read about in
+    its instructions. The frame is internal: it is removed from every reply.
+    A reply that is then empty, or only the customer's own words back, answers
+    nothing, and the caller replaces it.
+    """
+    lines = [line.strip() for line in _FRAME_TAG.sub("", reply).splitlines()]
+    # Markup a small model invents around a list ("<List Branches>") is noise.
+    lines = [line for line in lines if not _PSEUDO_TAG.fullmatch(line)]
+    # So is the question repeated as a first line, when an answer follows it.
+    content = [line for line in lines if line]
+    if len(content) > 1 and _plain(content[0]) == _plain(message):
+        lines = lines[lines.index(content[0]) + 1 :]
+    cleaned = "\n".join(lines).strip()
+    while "\n\n\n" in cleaned:
+        cleaned = cleaned.replace("\n\n\n", "\n\n")
+    empty = not _plain(cleaned) or _plain(cleaned) == _plain(message)
+    return cleaned, empty
+
+
 def assert_tool_allowed(tool_name: str, allowlist: frozenset[str]) -> None:
     """A tool outside the allowlist does not exist for that agent.
 

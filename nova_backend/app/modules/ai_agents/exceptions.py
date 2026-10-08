@@ -21,4 +21,16 @@ class AiBusyError(DomainError):
     code = "ai_busy"
 
 
-__all__ = ["AiBusyError", "GuardrailError", "GuardrailViolation"]
+class AiMemoryUnavailableError(DomainError):
+    """Conversation memory could not be reached, so nothing was forgotten.
+
+    Only a request to forget raises it. A turn that cannot reach memory starts
+    fresh instead (`history.py`), but a "forget me" must not answer done.
+    """
+
+    status_code = 503
+    code = "ai_memory_unavailable"
+    retryable = True
+
+
+__all__ = ["AiBusyError", "AiMemoryUnavailableError", "GuardrailError", "GuardrailViolation"]

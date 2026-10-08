@@ -43,11 +43,13 @@ Everything else is free.
 
 ## 2. Plans
 
+> **Current, 2026-10-07: no plan is free.** Every plan starts with a 7-day free trial (`TRIAL_DAYS`), once per business, with the plan's features and 10 AI messages across every assistant (`TRIAL_AI_MESSAGES`). Paying at any point activates the plan. A trial that ends unpaid is locked by the hourly `expire_trials` job: the status becomes `pending_payment`, the marketplace listing is hidden, customers' online bookings are refused (`business_unavailable`), the AI answers `subscription_required`, and the dashboard sends everyone to Billing. A business that never chose a plan is locked the same way. Sections below that call Solo free, or say non-payment never removes operations, describe the earlier model.
+
 |                               | **Solo**               | **Studio**                       | **Chain**                        |
 | ----------------------------- | ---------------------- | -------------------------------- | -------------------------------- |
 | For                           | One provider, no staff | Salon or spa, unlimited staff    | Multi-location groups            |
-| Subscription                  | **0 SAR / month**      | **199 SAR / month**              | **449 SAR / month per location** |
-| Annual                        | —                      | 1,990 SAR / year (2 months free) | Negotiated                       |
+| Subscription                  | **400 SAR / month**    | **600 SAR / month**              | **1,200 SAR / month per location** |
+| Annual                        | 4,000 SAR / year (2 months free) | 6,000 SAR / year (2 months free) | 12,000 SAR / year per location (2 months free) |
 | New marketplace client        | 35%                    | 30%                              | 25%                              |
 | Repeat booking                | **0%**                 | **0%**                           | **0%**                           |
 | Direct booking                | **0%**                 | **0%**                           | **0%**                           |

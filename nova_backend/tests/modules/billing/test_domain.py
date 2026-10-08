@@ -14,6 +14,7 @@ from app.core.exceptions import ConflictError, ValidationDomainError
 from app.core.values import Money
 from app.modules.billing.domain import (
     PLANS,
+    TRIAL_AI_MESSAGES,
     VAT_RATE,
     BillingPeriod,
     DowngradeBelowUsageError,
@@ -23,7 +24,9 @@ from app.modules.billing.domain import (
     PlanTier,
     Subscription,
     SubscriptionStatus,
+    TrialAiLimitReachedError,
     build_payout,
+    checkout_for,
     commission_base,
     percentage_of,
     plan_for,
@@ -66,23 +69,23 @@ def make_invoice() -> Invoice:
 class TestThePriceList:
     """docs/11 section 2, read straight off the table."""
 
-    def test_solo_starts_at_zero(self):
+    def test_solo_is_400_a_month_and_two_months_free_a_year(self):
         plan = plan_for(PlanTier.SOLO)
-        assert plan.monthly_price == Decimal("0.00")
-        assert plan.new_client_commission_pct == Decimal("35.00")
+        assert plan.monthly_price == Decimal("400.00")
+        assert plan.annual_price == Decimal("4000.00")
 
-    def test_studio_is_199_a_month_and_30_percent(self):
+    def test_studio_is_600_a_month_and_30_percent(self):
         plan = plan_for(PlanTier.STUDIO)
-        assert plan.monthly_price == Decimal("199.00")
+        assert plan.monthly_price == Decimal("600.00")
         assert plan.new_client_commission_pct == Decimal("30.00")
 
     def test_studio_annual_is_two_months_free(self):
         plan = plan_for(PlanTier.STUDIO)
         assert plan.annual_price == plan.monthly_price * 10
 
-    def test_chain_is_449_per_location_and_25_percent(self):
+    def test_chain_is_1200_per_location_and_25_percent(self):
         plan = plan_for(PlanTier.CHAIN)
-        assert plan.monthly_price == Decimal("449.00")
+        assert plan.monthly_price == Decimal("1200.00")
         assert plan.new_client_commission_pct == Decimal("25.00")
         assert plan.priced_per_location is True
 
@@ -97,11 +100,21 @@ class TestThePriceList:
 
     def test_a_chain_pays_per_branch(self):
         plan = plan_for(PlanTier.CHAIN)
-        assert plan.subscription_amount(locations=3).amount == Decimal("1347.00")
+        assert plan.subscription_amount(locations=3).amount == Decimal("3600.00")
+
+    def test_a_chain_year_is_two_months_free_per_branch(self):
+        plan = plan_for(PlanTier.CHAIN)
+        assert plan.annual_price == plan.monthly_price * 10
+        assert plan.annual_amount(locations=1).amount == Decimal("12000.00")
+        assert plan.annual_amount(locations=3).amount == Decimal("36000.00")
+
+    def test_a_studio_year_is_flat_whatever_its_footprint(self):
+        plan = plan_for(PlanTier.STUDIO)
+        assert plan.annual_amount(locations=3).amount == Decimal("6000.00")
 
     def test_a_studio_pays_the_same_whatever_its_footprint(self):
         plan = plan_for(PlanTier.STUDIO)
-        assert plan.subscription_amount(locations=1).amount == Decimal("199.00")
+        assert plan.subscription_amount(locations=1).amount == Decimal("600.00")
 
 
 class TestCommissionBase:
@@ -165,11 +178,6 @@ class TestSubscriptionPlanChanges:
         subscription = make_subscription(tier=PlanTier.SOLO)
         with pytest.raises(DowngradeBelowUsageError):
             subscription.add_location()
-
-    def test_a_plan_without_an_annual_price_refuses_annual(self):
-        subscription = make_subscription(tier=PlanTier.SOLO)
-        with pytest.raises(ValidationDomainError):
-            subscription.change_plan(PlanTier.CHAIN, annual=True)
 
     def test_a_negotiated_chain_price_overrides_the_list(self):
         subscription = make_subscription(tier=PlanTier.CHAIN, locations=5)
@@ -356,3 +364,85 @@ class TestNoFloatsAnywhere:
 
     def test_vat_is_a_decimal(self):
         assert isinstance(VAT_RATE, Decimal)
+
+
+class TestYearlyCheckout:
+    """What a year paid up front costs, and the months it covers."""
+
+    def test_a_chain_year_is_charged_per_branch(self):
+        subscription = make_subscription(tier=PlanTier.CHAIN, locations=3)
+        subscription.annual = True
+
+        checkout = checkout_for(subscription, today=date(2026, 10, 7), checkout_id=uuid4())
+
+        assert checkout.net.amount == Decimal("36000.00")
+        assert checkout.vat.amount == Decimal("5400.00")
+        assert checkout.total.amount == Decimal("41400.00")
+        assert (checkout.covers_from, checkout.covers_until) == (
+            date(2026, 10, 1),
+            date(2027, 10, 1),
+        )
+
+    def test_a_chain_month_is_charged_per_branch(self):
+        subscription = make_subscription(tier=PlanTier.CHAIN, locations=2)
+
+        checkout = checkout_for(subscription, today=date(2026, 10, 7), checkout_id=uuid4())
+
+        assert checkout.net.amount == Decimal("2400.00")
+        assert checkout.covers_until == date(2026, 11, 1)
+
+    def test_a_chain_can_switch_to_yearly_billing(self):
+        subscription = make_subscription(tier=PlanTier.STUDIO)
+        subscription.change_plan(PlanTier.CHAIN, annual=True)
+        assert subscription.annual is True
+
+
+class TestTrial:
+    """Every plan starts with a free week; then only payment unlocks it."""
+
+    def _trial(self, *, ends: date) -> Subscription:
+        subscription = make_subscription(tier=PlanTier.STUDIO)
+        subscription.status = SubscriptionStatus.TRIALING
+        subscription.trial_ends_at = ends
+        return subscription
+
+    def test_every_plan_costs_money(self):
+        assert all(plan.monthly_price > 0 and plan.annual_price for plan in PLANS.values())
+
+    def test_a_trial_is_open_until_its_end_date(self):
+        trial = self._trial(ends=date(2026, 10, 14))
+        assert not trial.locked_on(date(2026, 10, 13))
+        assert trial.locked_on(date(2026, 10, 14))
+
+    def test_a_trial_charges_nothing(self):
+        assert self._trial(ends=date(2026, 10, 14)).subscription_amount().amount == Decimal("0")
+
+    def test_the_trial_allows_ten_ai_messages(self):
+        trial = self._trial(ends=date(2026, 10, 14))
+        for _ in range(TRIAL_AI_MESSAGES):
+            trial.use_trial_ai_message()
+        assert trial.trial_ai_messages_left == 0
+        with pytest.raises(TrialAiLimitReachedError):
+            trial.use_trial_ai_message()
+
+    def test_a_paid_plan_has_no_ai_allowance_to_spend(self):
+        paid = make_subscription(tier=PlanTier.STUDIO)
+        for _ in range(TRIAL_AI_MESSAGES + 5):
+            paid.use_trial_ai_message()
+        assert paid.trial_ai_messages_used == 0
+
+    def test_locking_hides_the_listing_until_payment(self):
+        trial = self._trial(ends=date(2026, 10, 14))
+        trial.lock()
+        assert trial.status is SubscriptionStatus.PENDING_PAYMENT
+        assert trial.marketplace_listing_hidden
+        assert trial.locked_on(date(2026, 10, 15))
+
+        trial.activate()
+        assert not trial.locked_on(date(2026, 10, 15))
+        assert not trial.marketplace_listing_hidden
+
+    def test_changing_plan_during_the_trial_keeps_the_trial(self):
+        trial = self._trial(ends=date(2026, 10, 14))
+        trial.change_plan(PlanTier.SOLO)
+        assert trial.trialing and trial.trial_ends_at == date(2026, 10, 14)

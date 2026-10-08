@@ -10,7 +10,6 @@
 	import { authStore } from '$lib/stores/auth.svelte.js';
 
 	import Button from '$lib/components/ui/Button.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Container from '$lib/components/marketing/Container.svelte';
 	import Section from '$lib/components/marketing/Section.svelte';
@@ -18,8 +17,12 @@
 	import BentoGrid from '$lib/components/marketing/BentoGrid.svelte';
 	import BentoCard from '$lib/components/marketing/BentoCard.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
+	import HeroPreview from '$lib/components/marketing/HeroPreview.svelte';
 
 	/** @typedef {import('$lib/components/ui/Icon.svelte').IconName} IconName */
+
+	// Split for the word-by-word reveal; Arabic splits on its spaces the same way.
+	let titleWords = $derived(t('Beauty and wellness,').split(' '));
 
 	/** @type {{ icon: IconName, title: string, body: string, span?: 1|2 }[]} */
 	const features = [
@@ -79,41 +82,6 @@
 		}
 	];
 
-	/**
-	 * A static sample of the day sheet, for the hero illustration only.
-	 * @type {{ time: string, name: string, service: string, status: string, tone: 'success'|'info'|'accent'|'warning' }[]}
-	 */
-	const sampleDay = [
-		{
-			time: '10:00',
-			name: m('Noura A.'),
-			service: m('Signature facial'),
-			status: m('Checked in'),
-			tone: 'info'
-		},
-		{
-			time: '10:30',
-			name: m('Sara M.'),
-			service: m('Balayage'),
-			status: m('In service'),
-			tone: 'accent'
-		},
-		{
-			time: '11:15',
-			name: m('Reem K.'),
-			service: m('Hot stone massage'),
-			status: m('Confirmed'),
-			tone: 'success'
-		},
-		{
-			time: '12:00',
-			name: m('Huda S.'),
-			service: m('Laser consultation'),
-			status: m('Deposit due'),
-			tone: 'warning'
-		}
-	];
-
 	/** @type {{ icon: IconName, label: string }[]} */
 	const trust = [
 		{ icon: 'credit-card', label: m('Payments by Moyasar') },
@@ -159,42 +127,48 @@
 	>
 </svelte:head>
 
-<!-- Hero -->
-<section class="relative isolate overflow-hidden">
+<!-- Hero: the whole first screen, below the header (4rem and its 1px border) (`svh`, so a phone's
+     browser bars never push it past the fold). -->
+<section class="relative isolate flex min-h-[calc(100svh-4rem-1px)] items-center overflow-hidden">
 	<GradientBlob variant="hero" />
 	<Container
 		size="xl"
-		class="grid items-center gap-14 pt-16 pb-20 sm:pt-24 lg:grid-cols-[1.05fr_1fr] lg:pb-28"
+		class="grid w-full items-center gap-14 py-16 sm:py-20 lg:grid-cols-[1.05fr_1fr]"
 	>
-		<div class="animate-slide-up">
+		<div>
 			<p
-				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
+				class="hero-badge inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
-				<span class="size-1.5 rounded-full bg-brand-500"></span>
+				<span class="hero-dot relative size-1.5 rounded-full bg-brand-500"></span>
 				{t('Built for salons, spas, massage and beauty clinics in the GCC')}
 			</p>
+			<!-- Each word rises out of its own mask; the gradient phrase lands last. -->
 			<h1 class="mt-6 text-display-2xl font-semibold tracking-tight text-fg">
-				{t('Everything your spa, salon or clinic needs.')}
-				<span
-					class="text-transparent"
-					style="background-image: var(--gradient-hero); -webkit-background-clip: text; background-clip: text;"
+				{#each titleWords as word, i (i)}
+					<span class="word"><span class="word-in" style:--d="{120 + i * 85}ms">{word}</span></span>
+					<!-- A real space, so the heading reads as words: Svelte trims the template's. -->
+					<!-- eslint-disable-next-line svelte/no-useless-mustaches -->
+					{' '}
+				{/each}
+				<span class="word"
+					><span class="word-in ink" style:--d="{180 + titleWords.length * 85}ms"
+						>{t('beautifully run.')}</span
+					></span
 				>
-					{t('One operating system.')}
-				</span>
 			</h1>
-			<p class="mt-6 max-w-xl text-body-lg text-fg-muted">
+			<p class="hero-rise mt-6 max-w-xl text-body-lg text-fg-muted" style:--d="620ms">
 				{t(
 					'Bookings, walk-ins, staff, payments and customer messages — synchronized in one place, in Arabic and English.'
 				)}
 			</p>
-			<div class="mt-9 flex flex-wrap gap-3">
+			<div class="hero-rise mt-9 flex flex-wrap gap-3" style:--d="740ms">
 				{#if authStore.isAuthenticated && authStore.isStaff}
-					<Button size="lg" href={resolve('/app')}>
+					<Button size="lg" href={resolve('/app')} class="sheen">
 						{t('Go to dashboard')}
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
 				{:else}
-					<Button size="lg" href={`${resolve('/register')}?as=business`}>
+					<Button size="lg" href={`${resolve('/register')}?as=business`} class="sheen">
 						{t('Start free trial')}
 						<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
 					</Button>
@@ -204,63 +178,13 @@
 					{t('Book a treatment')}
 				</Button>
 			</div>
-			<p class="mt-5 text-xs text-fg-muted">
-				{t('14-day free trial · No card required · Cancel anytime')}
+			<p class="hero-rise mt-5 text-xs text-fg-muted" style:--d="860ms">
+				{t('7-day free trial · No card required · Cancel anytime')}
 			</p>
 		</div>
 
-		<!-- Illustrative product preview (static sample data) -->
-		<div class="relative animate-slide-up [animation-delay:120ms]" aria-hidden="true">
-			<div
-				class="rounded-panel border border-line bg-surface/90 p-2 shadow-overlay backdrop-blur-xl"
-			>
-				<div
-					class="rounded-[calc(var(--radius-panel)-0.5rem)] border border-line-subtle bg-surface"
-				>
-					<div class="flex items-center justify-between border-b border-line-subtle px-5 py-4">
-						<div>
-							<p class="text-xs text-fg-muted">{t('Today · Olaya branch')}</p>
-							<p class="font-semibold text-fg">{t('Day sheet')}</p>
-						</div>
-						<div class="flex gap-4 text-end">
-							<div>
-								<p class="text-[11px] text-fg-muted">{t('Booked')}</p>
-								<p class="text-lg font-semibold text-fg tabular-nums">24</p>
-							</div>
-							<div>
-								<p class="text-[11px] text-fg-muted">{t('Waiting')}</p>
-								<p class="text-lg font-semibold text-fg tabular-nums">3</p>
-							</div>
-						</div>
-					</div>
-					<ul class="divide-y divide-line-subtle">
-						{#each sampleDay as row (row.time)}
-							<li class="flex items-center gap-4 px-5 py-3">
-								<span class="w-12 text-sm font-semibold text-accent tabular-nums">{row.time}</span>
-								<div class="min-w-0 flex-1">
-									<p class="truncate text-sm font-medium text-fg">{t(row.name)}</p>
-									<p class="truncate text-xs text-fg-muted">{t(row.service)}</p>
-								</div>
-								<Badge tone={row.tone} size="sm" dot>{t(row.status)}</Badge>
-							</li>
-						{/each}
-					</ul>
-				</div>
-			</div>
-			<div
-				class="absolute -end-4 -top-6 hidden items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-raised sm:flex"
-			>
-				<span
-					class="flex size-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
-				>
-					<Icon name="chat-bubble" class="size-4" />
-				</span>
-				<div>
-					<p class="text-xs font-semibold text-fg">{t('Confirmation sent')}</p>
-					<p class="text-[11px] text-fg-muted">{t('WhatsApp · just now')}</p>
-				</div>
-			</div>
-		</div>
+		<!-- Illustrative product preview: a day sheet that runs itself. -->
+		<HeroPreview />
 	</Container>
 </section>
 
@@ -407,3 +331,114 @@
 		</div>
 	</Container>
 </Section>
+
+<style>
+	/*
+	 * The hero's entrance, as one choreography (~1.5s). Every piece reads its
+	 * delay from `--d`, so the order lives in the markup. All of it collapses
+	 * to nothing under `prefers-reduced-motion` (routes/layout.css).
+	 */
+	.hero-badge {
+		animation: badge-in 0.7s var(--ease-out-premium) both;
+	}
+	@keyframes badge-in {
+		from {
+			opacity: 0;
+			transform: translateY(8px) scale(0.94);
+		}
+	}
+	/* The badge's dot breathes, once the page has settled. */
+	.hero-dot::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: 9999px;
+		background: inherit;
+		animation: dot-ping 2.4s cubic-bezier(0, 0, 0.2, 1) 1.6s infinite;
+	}
+	@keyframes dot-ping {
+		70%,
+		100% {
+			transform: scale(3.2);
+			opacity: 0;
+		}
+	}
+
+	/* Each word sits in a mask and rises into it, sharpening as it lands. */
+	.word {
+		display: inline-block;
+		overflow: hidden;
+		/* Room for descenders inside the mask, given back to the line. */
+		padding-block-end: 0.14em;
+		margin-block-end: -0.14em;
+		vertical-align: bottom;
+	}
+	.word-in {
+		display: inline-block;
+		animation: word-rise 1s var(--ease-out-premium) var(--d, 0ms) both;
+	}
+	@keyframes word-rise {
+		from {
+			opacity: 0;
+			transform: translateY(105%) rotate(4deg);
+			filter: blur(8px);
+		}
+	}
+
+	/* The gradient phrase: the brand ink, drifting slowly through its colours. */
+	.ink {
+		color: transparent;
+		background-image: var(--gradient-hero);
+		background-size: 220% 100%;
+		-webkit-background-clip: text;
+		background-clip: text;
+		animation:
+			word-rise 1.1s var(--ease-out-premium) var(--d, 0ms) both,
+			ink-drift 9s ease-in-out 2s infinite alternate;
+	}
+	@keyframes ink-drift {
+		from {
+			background-position: 0% 50%;
+		}
+		to {
+			background-position: 100% 50%;
+		}
+	}
+
+	.hero-rise {
+		animation: rise 0.9s var(--ease-out-premium) var(--d, 0ms) both;
+	}
+	@keyframes rise {
+		from {
+			opacity: 0;
+			transform: translateY(14px);
+			filter: blur(4px);
+		}
+	}
+
+	/* One sheen across the primary button, once everything has landed. */
+	.hero-rise :global(.sheen) {
+		position: relative;
+		overflow: hidden;
+		isolation: isolate;
+	}
+	.hero-rise :global(.sheen)::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(
+			105deg,
+			transparent 30%,
+			rgb(255 255 255 / 0.35) 50%,
+			transparent 70%
+		);
+		transform: translateX(-120%);
+		animation: sheen 1.1s var(--ease-out-premium) 1.7s both;
+		pointer-events: none;
+	}
+	@keyframes sheen {
+		to {
+			transform: translateX(120%);
+		}
+	}
+</style>

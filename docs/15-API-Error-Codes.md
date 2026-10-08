@@ -69,6 +69,7 @@ say so in their description at `/docs`.
 | `http_<status>`              | any  | The framework answered before NOVA's code ran, such as `http_404` for an unknown path or `http_405` for the wrong method. | Check the URL and method.                                        |
 | `internal_error`             | 500  | An unexpected server fault. The details are in the server logs, never in the response.                                    | Retry with backoff. If it persists, report the `correlation_id`. |
 | `integration_not_configured` | 503  | This deployment has no credentials for the service this needs (Moyasar, WhatsApp).                                        | Nothing a client can fix. The operator sets the credentials.     |
+| `geocoding_unavailable`      | 503  | The address lookup (OpenStreetMap) did not answer.                                                                        | Retry in a moment; the pin is kept.                              |
 
 ## Signing in and permissions
 
@@ -127,6 +128,7 @@ say so in their description at `/docs`.
 | `hold_not_found`                 | 404  | No such slot hold.                                                                                                                                                                        | Hold the slot again.                                         |
 | `hold_expired`                   | 409  | The hold ran out before the booking was made.                                                                                                                                             | Check availability and hold again.                           |
 | `hold_limit_reached`             | 409  | You already hold the maximum number of slots at this business.                                                                                                                            | Book or release a held slot first.                           |
+| `business_unavailable`           | 409  | The business isn't taking online bookings: its trial ended unpaid, or its listing is hidden for non-payment. | Book elsewhere, or contact the business. |
 | `provider_location_mismatch`     | 422  | The provider doesn't work at the requested branch.                                                                                                                                        | Pick a provider at that branch.                              |
 | `availability_horizon_too_large` | 422  | The availability window asked for is longer than allowed.                                                                                                                                 | Ask for a shorter range.                                     |
 | `invalid_schedule`               | 422  | Working hours or a date range that don't make sense: a window that ends before it starts, a weekday outside 0–6, or an availability `date_to` before `date_from`. The message says which. | Fix the value the message names.                             |
@@ -182,6 +184,8 @@ These answer Moyasar's webhook calls, not app clients:
 | `checkout_not_found`               | 404  | No such plan checkout in this business.                            | Check the id.                        |
 | `downgrade_below_usage`            | 409  | The new plan allows fewer staff seats or branches than are in use. | Remove the extras, then change plan. |
 | `plan_feature_required`            | 403  | The business's plan doesn't include this feature.                  | Offer an upgrade.                    |
+| `subscription_required`            | 402  | The business's free trial ended unpaid, or it never chose a plan: it is locked. | Send the owner to Billing to pay. |
+| `trial_ai_limit_reached`           | 402  | The free trial's 10 AI messages are used.                          | Pay for the plan to keep using AI.   |
 | `invoice_not_found`                | 404  | No such invoice.                                                   | Check the id.                        |
 | `invoice_already_issued`           | 409  | An issued invoice can't be edited.                                 | Issue a credit note instead.         |
 | `commission_line_not_found`        | 404  | No such commission line.                                           | Check the id.                        |
@@ -207,6 +211,7 @@ These answer Moyasar's webhook calls, not app clients:
 | `report_too_large`      | 422  | Too many rows in the range to report on correctly. The report is refused, not truncated.                 | Choose a shorter period.                        |
 | `insufficient_data`     | 422  | Not enough history for a forecast: it needs several complete weeks. The message says how many.           | Show "not enough data yet".                     |
 | `agent_guardrail`       | 403  | The assistant refused: the agent is not available to you, or the request crosses one of its rules.       | Show the message; don't retry the same request. |
+| `ai_memory_unavailable` | 503  | Conversation memory could not be reached, so nothing was forgotten (`DELETE /ai/conversations`).          | Retry shortly; don't tell the user it is done.  |
 
 ## Rate limits and idempotency
 

@@ -74,6 +74,7 @@ export const ERRORS = {
 	"error.queue_not_found": "لم يتم العثور على قائمة الانتظار.",
 	"error.rate_limit_exceeded": "محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.",
 	"error.ai_busy": "المساعد مشغول بالرد الآن. حاول مرة أخرى بعد لحظات.",
+	"error.ai_memory_unavailable": "تعذّر الوصول إلى سجل المحادثات، فلم يُحذف شيء. حاول مرة أخرى بعد قليل.",
 	"error.refund_exceeds_capture": "مبلغ الاسترداد أكبر من المبلغ المتبقي.",
 	"error.report_too_large": "التقرير كبير جدًا. اختر فترة أقصر.",
 	"error.report_window_invalid": "الفترة المختارة غير صالحة.",
@@ -99,5 +100,9 @@ export const ERRORS = {
 	"error.duplicate_value": "هذه القيمة مستخدمة بالفعل.",
 	"error.integrity_conflict": "الطلب يتعارض مع بيانات موجودة.",
 	"error.invalid_reference": "الطلب يشير إلى سجل غير موجود.",
-	"error.invalid_time_range": "يجب أن يكون وقت انتهاء الحجز بعد وقت بدايته."
+	"error.invalid_time_range": "يجب أن يكون وقت انتهاء الحجز بعد وقت بدايته.",
+	"error.subscription_required": "انتهت الفترة التجريبية المجانية لهذا النشاط. ادفع قيمة الباقة من صفحة الفوترة للمتابعة.",
+	"error.trial_ai_limit_reached": "استخدمت رسائل الذكاء الاصطناعي العشر المتاحة في الفترة التجريبية. ادفع قيمة الباقة لمواصلة استخدام المساعدين.",
+	"error.business_unavailable": "هذا النشاط لا يستقبل حجوزات عبر الإنترنت حاليًا.",
+	"error.geocoding_unavailable": "خدمة تحديد العنوان لا تستجيب حاليًا. حاول مرة أخرى بعد لحظة."
 };

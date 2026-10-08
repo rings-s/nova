@@ -20,7 +20,8 @@ from app.modules.ai_agents.agents import (
 )
 from app.modules.ai_agents.guardrails import OWNER_ONLY_AGENTS
 from app.modules.ai_agents.schemas import InsightOutput, ManagerOutput
-from app.modules.ai_agents.tools import MAX_SHOWN_TEXT, AgentToolkit, _shown
+from app.modules.ai_agents.tools import AgentToolkit
+from app.modules.ai_agents.tools.base import MAX_SHOWN_TEXT, _shown
 from app.modules.analytics.domain import ChartId
 
 LEDGER_CHARTS = {ChartId.PAYOUTS_BREAKDOWN, ChartId.NOVA_CHARGES, ChartId.COMMISSION_BY_CLASS}

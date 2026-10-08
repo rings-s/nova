@@ -43,8 +43,9 @@ class PlanTier(StrEnum):
 
 class SubscriptionStatus(StrEnum):
     TRIALING = "trialing"
-    #: A paid plan chosen but not yet paid for. Billed and gated as Solo until
-    #: Moyasar confirms the first payment (`SubscriptionCheckout`).
+    #: Not paid for: a trial that ran out, or a plan chosen without one. The
+    #: business is locked (`Subscription.locked_on`) until Moyasar confirms a
+    #: payment (`SubscriptionCheckout`).
     PENDING_PAYMENT = "pending_payment"
     ACTIVE = "active"
     PAST_DUE = "past_due"
@@ -126,15 +127,29 @@ class Plan(BaseModel):
     max_locations: int | None = None
     whatsapp_reminders_per_month: int | None = None
 
-    #: Chain is priced "449 SAR / month per location"; the others are flat.
+    #: Chain is priced "1,200 SAR / month per location" (and its yearly price
+    #: per location too); the others are flat.
     priced_per_location: bool = False
     contract_months: int = 0
     included_features: list[str] = Field(default_factory=list)
 
     def subscription_amount(self, *, locations: int) -> Money:
         """What this plan bills per month for the given footprint."""
-        multiplier = Decimal(locations) if self.priced_per_location else Decimal(1)
-        return Money(amount=to_fils(self.monthly_price * multiplier), currency=self.currency)
+        return Money(
+            amount=to_fils(self.monthly_price * self._multiplier(locations)), currency=self.currency
+        )
+
+    def annual_amount(self, *, locations: int) -> Money | None:
+        """What a year paid up front costs for the given footprint, or None
+        when the plan has no yearly price. Per location like the monthly one."""
+        if self.annual_price is None:
+            return None
+        return Money(
+            amount=to_fils(self.annual_price * self._multiplier(locations)), currency=self.currency
+        )
+
+    def _multiplier(self, locations: int) -> Decimal:
+        return Decimal(max(locations, 1)) if self.priced_per_location else Decimal(1)
 
 
 #: The published price list. A dict rather than rows in a table on purpose:
@@ -145,8 +160,9 @@ class Plan(BaseModel):
 PLANS: dict[PlanTier, Plan] = {
     PlanTier.SOLO: Plan(
         tier=PlanTier.SOLO,
-        monthly_price=Decimal("0.00"),
-        annual_price=None,
+        monthly_price=Decimal("400.00"),
+        # Two months free, like every paid plan.
+        annual_price=Decimal("4000.00"),
         new_client_commission_pct=Decimal("35.00"),
         max_seats=1,
         max_locations=1,
@@ -161,9 +177,9 @@ PLANS: dict[PlanTier, Plan] = {
     ),
     PlanTier.STUDIO: Plan(
         tier=PlanTier.STUDIO,
-        monthly_price=Decimal("199.00"),
+        monthly_price=Decimal("600.00"),
         # Two months free, per docs/11 section 2.
-        annual_price=Decimal("1990.00"),
+        annual_price=Decimal("6000.00"),
         new_client_commission_pct=Decimal("30.00"),
         max_seats=None,
         max_locations=1,
@@ -181,9 +197,9 @@ PLANS: dict[PlanTier, Plan] = {
     ),
     PlanTier.CHAIN: Plan(
         tier=PlanTier.CHAIN,
-        monthly_price=Decimal("449.00"),
-        # "Negotiated" — no published annual price.
-        annual_price=None,
+        monthly_price=Decimal("1200.00"),
+        # Per location, like the monthly price: two months free, as on Studio.
+        annual_price=Decimal("12000.00"),
         new_client_commission_pct=Decimal("25.00"),
         max_seats=None,
         max_locations=None,
@@ -204,6 +220,12 @@ PLANS: dict[PlanTier, Plan] = {
         ],
     ),
 }
+
+
+#: Every plan starts with a week free, once per business (no plan is free).
+TRIAL_DAYS = 7
+#: AI messages a business may send during its trial, across every assistant.
+TRIAL_AI_MESSAGES = 10
 
 
 def plan_for(tier: PlanTier) -> Plan:
@@ -257,6 +279,31 @@ class DowngradeBelowUsageError(ConflictError):
         super().__init__(
             f"Cannot move to a plan allowing {requested} {what} while {in_use} are in use. "
             f"Remove the extras first."
+        )
+
+
+class TrialAiLimitReachedError(DomainError):
+    """The trial's AI allowance is spent: pay for the plan to keep using it."""
+
+    status_code = 402
+    code = "trial_ai_limit_reached"
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            f"The free trial includes {limit} AI messages, and they are used. "
+            "Pay for your plan to keep using the assistants."
+        )
+
+
+class SubscriptionRequiredError(DomainError):
+    """The business is locked: its trial ran out, or its plan is unpaid."""
+
+    status_code = 402
+    code = "subscription_required"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This business's free trial has ended. Pay for a plan in Billing to continue."
         )
 
 
@@ -501,25 +548,62 @@ class Subscription:
     cancelled_at: datetime | None = None
     #: A negotiated Chain price. `None` means the published rate applies.
     negotiated_monthly_price: Decimal | None = None
-    #: docs/11 section 7 step 6. Set by dunning at day 21, cleared on payment.
+    #: docs/11 section 7 step 6. Set by dunning at day 21, or when the business
+    #: is locked; cleared on payment.
     marketplace_listing_hidden: bool = False
+    #: AI messages used during the trial, of `TRIAL_AI_MESSAGES`.
+    trial_ai_messages_used: int = 0
 
     @property
     def plan(self) -> Plan:
-        """The terms in force: Solo's while a paid plan waits for its first
-        payment, so nothing a business has not paid for is unlocked or billed."""
-        if self.status is SubscriptionStatus.PENDING_PAYMENT:
-            return plan_for(PlanTier.SOLO)
+        """The chosen plan's terms. Whether the business may use them at all is
+        `locked_on`: a trial gets them for a week, then only payment does."""
         return plan_for(self.tier)
 
     @property
     def awaiting_payment(self) -> bool:
-        return self.status is SubscriptionStatus.PENDING_PAYMENT
+        """Payable now: during the trial, or once it has run out unpaid."""
+        return self.status in (SubscriptionStatus.TRIALING, SubscriptionStatus.PENDING_PAYMENT)
+
+    @property
+    def trialing(self) -> bool:
+        return self.status is SubscriptionStatus.TRIALING
+
+    def trial_over_on(self, day: date) -> bool:
+        return self.trialing and (self.trial_ends_at is None or day >= self.trial_ends_at)
+
+    def locked_on(self, day: date) -> bool:
+        """Whether the business is shut out until it pays: a trial past its
+        week, a plan never paid for, or a cancelled plan past what it paid."""
+        if self.status is SubscriptionStatus.PENDING_PAYMENT:
+            return True
+        if self.trialing:
+            return self.trial_over_on(day)
+        return not self.has_access_on(day)
+
+    @property
+    def trial_ai_messages_left(self) -> int:
+        return max(TRIAL_AI_MESSAGES - self.trial_ai_messages_used, 0)
+
+    def use_trial_ai_message(self) -> None:
+        """Counts one AI message against the trial allowance; refused once spent."""
+        if not self.trialing:
+            return
+        if self.trial_ai_messages_used >= TRIAL_AI_MESSAGES:
+            raise TrialAiLimitReachedError(TRIAL_AI_MESSAGES)
+        self.trial_ai_messages_used += 1
+
+    def lock(self) -> None:
+        """The trial ran out unpaid: nothing works until payment, and the
+        marketplace stops advertising the business."""
+        self.status = SubscriptionStatus.PENDING_PAYMENT
+        self.marketplace_listing_hidden = True
 
     def subscription_amount(self) -> Money:
-        """The recurring charge for the current footprint, under the terms in force."""
+        """The recurring charge for the current footprint: nothing until the
+        plan has been paid for (a trial, or a locked business)."""
         if self.awaiting_payment:
-            return self.plan.subscription_amount(locations=self.locations)
+            return Money(amount=Decimal("0.00"), currency=self.plan.currency)
         return self.chosen_monthly_amount()
 
     def chosen_monthly_amount(self) -> Money:
@@ -533,9 +617,9 @@ class Subscription:
     def first_payment(self) -> Money:
         """The net (pre-VAT) charge that activates the chosen plan: one month,
         or a year for an annual plan that has an annual price."""
-        chosen = plan_for(self.tier)
-        if self.annual and chosen.annual_price is not None:
-            return Money(amount=to_fils(chosen.annual_price), currency=chosen.currency)
+        yearly = plan_for(self.tier).annual_amount(locations=self.locations)
+        if self.annual and yearly is not None:
+            return yearly
         return self.chosen_monthly_amount()
 
     def commission_rate(self, commission_class: CommissionClass) -> Decimal:
@@ -561,13 +645,9 @@ class Subscription:
         if annual and target.annual_price is None:
             raise ValidationDomainError(f"The {tier} plan has no annual price.")
 
-        # Moving from a free plan to a paid one is paid for before it applies;
-        # moving to a free plan needs no payment, so a pending one is dropped.
-        if requires_payment(tier) and (self.awaiting_payment or not requires_payment(self.tier)):
-            self.status = SubscriptionStatus.PENDING_PAYMENT
-        elif not requires_payment(tier) and self.awaiting_payment:
-            self.status = SubscriptionStatus.ACTIVE
-
+        # A trial, or an unpaid plan, stays as it is: the business pays for
+        # whichever plan it has chosen when it pays. A paid plan moves now and
+        # is billed at the new price from the next monthly invoice.
         self.tier = tier
         self.annual = annual
         # Deliberately does NOT touch accrued commission lines. They carry the
@@ -886,6 +966,8 @@ class PlanFeatureRequiredError(DomainError):
 
 __all__ = [
     "PLANS",
+    "TRIAL_AI_MESSAGES",
+    "TRIAL_DAYS",
     "VAT_RATE",
     "BillingPeriod",
     "CheckoutStatus",
@@ -902,7 +984,9 @@ __all__ = [
     "PlanTier",
     "Subscription",
     "SubscriptionCheckout",
+    "SubscriptionRequiredError",
     "SubscriptionStatus",
+    "TrialAiLimitReachedError",
     "build_commission_line",
     "build_payout",
     "build_reversal",
