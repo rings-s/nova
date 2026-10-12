@@ -28,7 +28,8 @@ from fastapi.routing import APIRoute
 from app.core.deps import get_authorized_tenant, get_db_session, get_tenant_context
 from app.core.security import get_principal, require_staff
 from app.core.throttling import write_rate_limit
-from app.modules.identity.dependencies import RequirePermission
+from app.modules.admin.dependencies import get_admin_session
+from app.modules.identity.dependencies import RequirePermission, require_superuser
 from app.modules.identity.domain import StaffPermission
 from app.modules.registry import routers
 
@@ -291,6 +292,23 @@ def test_every_exemption_still_names_a_real_route() -> None:
     assert routes >= SELF_AUTHORIZING_TENANT_ROUTES
     assert routes >= set(ROLE_GATED_ROUTES) | UNGATED_BILLING_ROUTES
     assert any(path.startswith(PUBLIC_PREFIX) for _, path in routes)
+
+
+def test_the_platform_console_is_superuser_only_and_the_only_admin_bypass() -> None:
+    """`/admin/tables` reads every tenant (`get_admin_session` opens
+    `bypass_tenant_scope`), so a route there without `require_superuser` would
+    hand every salon's data to any signed-in account. And the bypass must stay
+    on `/admin/tables`: anywhere else it would be an unaudited one."""
+    console = [(m, p, r) for m, p, r in _routes() if p.startswith("/admin/tables")]
+    assert console, "no console routes found; did the prefix change?"
+    for method, path, route in console:
+        assert _depends_on(route.dependant, require_superuser), f"{method} {path}"
+    bypassing = [
+        f"{method} {path}"
+        for method, path, route in _routes()
+        if _depends_on(route.dependant, get_admin_session) and not path.startswith("/admin/tables")
+    ]
+    assert bypassing == []
 
 
 def test_the_marketplace_assistant_authenticates_although_it_sits_under_discovery() -> None:

@@ -12,14 +12,17 @@
 	 *   offset: number,
 	 *   total?: number|null,
 	 *   itemCount: number,
+	 *   hasNextPage?: boolean,
 	 *   onchange: (offset: number) => void
 	 * }}
 	 */
-	let { limit, offset, total = null, itemCount, onchange } = $props();
+	let { limit, offset, total = null, itemCount, hasNextPage, onchange } = $props();
 
 	let currentPage = $derived(Math.floor(offset / limit) + 1);
 	let totalPages = $derived(total !== null ? Math.max(1, Math.ceil(total / limit)) : null);
-	let hasNext = $derived(total !== null ? offset + limit < total : itemCount === limit);
+	let hasNext = $derived(
+		total !== null ? offset + limit < total : (hasNextPage ?? itemCount === limit)
+	);
 	let hasPrev = $derived(offset > 0);
 </script>
 

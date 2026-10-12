@@ -11,7 +11,7 @@
  *   A computer with no GPS is placed from its Wi-Fi or, failing that, its IP
  *   address, and that can be off by a whole city. A pin on a public map is not
  *   somewhere to guess.
- * - It goes for a quick answer first and then a precise one. A cached or
+ * - It goes for a quick answer first and then a precise one. A fresh
  *   network-derived fix comes back in seconds; a GPS fix, where there is GPS,
  *   takes longer and only ever improves on it.
  */
@@ -78,19 +78,39 @@ function toFix({ coords }) {
 function currentPosition(geolocation, options, signal) {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) return reject(new LocateError('cancelled'));
-		const onabort = () => reject(new LocateError('cancelled'));
+		let settled = false;
+		/** @type {ReturnType<typeof setTimeout> | undefined} */
+		let timer;
+		const cleanup = () => {
+			if (timer !== undefined) clearTimeout(timer);
+			signal?.removeEventListener('abort', onabort);
+		};
+		/** @param {GeolocationPosition} position */
+		const resolveOnce = (position) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			resolve(position);
+		};
+		/** @param {unknown} error */
+		const rejectOnce = (error) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(error);
+		};
+		const onabort = () => rejectOnce(new LocateError('cancelled'));
 		signal?.addEventListener('abort', onabort, { once: true });
-		geolocation.getCurrentPosition(
-			(position) => {
-				signal?.removeEventListener('abort', onabort);
-				resolve(position);
-			},
-			(error) => {
-				signal?.removeEventListener('abort', onabort);
-				reject(error);
-			},
-			options
-		);
+		if (typeof options.timeout === 'number' && Number.isFinite(options.timeout)) {
+			// Some browsers do not start the Geolocation timeout until the
+			// permission prompt is answered. Keep the UI from waiting forever.
+			timer = setTimeout(() => rejectOnce(new LocateError('timeout')), options.timeout);
+		}
+		try {
+			geolocation.getCurrentPosition(resolveOnce, rejectOnce, options);
+		} catch (error) {
+			rejectOnce(error);
+		}
 	});
 }
 
@@ -201,12 +221,12 @@ export async function locate(options) {
 		return failure;
 	};
 
-	// Quick: tolerate a fix a minute old, and do not insist on GPS.
+	// Quick: ask for a fresh fix, without insisting on GPS.
 	try {
 		consider(
 			await currentPosition(
 				geolocation,
-				{ enableHighAccuracy: false, maximumAge: 60_000, timeout: quickTimeoutMs },
+				{ enableHighAccuracy: false, maximumAge: 0, timeout: quickTimeoutMs },
 				signal
 			)
 		);
@@ -303,7 +323,7 @@ export function explainFix(fix, t = plain) {
  * @returns {string}
  */
 export function explainLocateError(error, { origin = '', linux = false } = {}, t = plain) {
-	const instead = t('Click the map, paste coordinates, or type your city instead.');
+	const instead = t('Click the map to place the pin instead.');
 	switch (error.kind) {
 		case 'unsupported':
 			return `${t('This browser cannot share its location.')} ${instead}`;
@@ -318,7 +338,7 @@ export function explainLocateError(error, { origin = '', linux = false } = {}, t
 			)} ${instead}`;
 		case 'timeout':
 			return t(
-				'Your browser did not answer in time. Try again, or click the map, paste coordinates, or type your city instead.'
+				'Your browser did not answer in time. Try again, or click the map to place the pin instead.'
 			);
 		default:
 			return `${t('Your browser could not work out where you are.')}${

@@ -25,6 +25,7 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	/** @type {'loading'|'denied'|'ready'} */
 	let status = $state('loading');
@@ -130,17 +131,13 @@
 
 <Container size="md" class="py-12 sm:py-16">
 	<div class="mx-auto max-w-2xl">
-		<p class="text-xs font-semibold tracking-wider text-accent uppercase">
-			{t('NOVA administration')}
-		</p>
-		<h1 class="mt-2 text-display-md font-semibold tracking-tight text-fg">
-			{t('Service categories')}
-		</h1>
-		<p class="mt-2 text-fg-muted">
-			{t(
+		<PageHeader
+			eyebrow={t('NOVA administration')}
+			title={t('Service categories')}
+			subtitle={t(
 				'Every business files its services under these, and customers filter the marketplace by them. Businesses cannot add their own.'
 			)}
-		</p>
+		/>
 
 		{#if status === 'loading'}
 			<div class="mt-10 flex justify-center"><Spinner /></div>
@@ -153,11 +150,24 @@
 				{#snippet icon()}<Icon name="shield-check" class="size-6" />{/snippet}
 			</EmptyState>
 		{:else}
-			<Card padding="lg" class="mt-8">
+			<Card padding="md" class="mt-2 border-accent/20 shadow-raised">
 				<form class="flex flex-col gap-4" onsubmit={add}>
 					{#if error}
 						<Alert tone="error">{error}</Alert>
 					{/if}
+					<div class="flex items-center gap-3 border-b border-line-subtle pb-3">
+						<span
+							class="flex size-9 items-center justify-center rounded-control bg-accent-soft text-accent"
+						>
+							<Icon name="plus" class="size-4" />
+						</span>
+						<div>
+							<p class="text-sm font-semibold text-fg">{t('Add category')}</p>
+							<p class="mt-0.5 text-xs text-fg-muted">
+								{t('Name (English)')} · {t('Name (Arabic)')}
+							</p>
+						</div>
+					</div>
 					<div class="grid gap-4 sm:grid-cols-2">
 						<Input label={t('Name (English)')} required maxlength="120" bind:value={nameEn} />
 						<Input
@@ -178,10 +188,14 @@
 			{#if categories.length === 0}
 				<EmptyState class="mt-8" title={t('No categories yet')} />
 			{:else}
-				<ul class="mt-8 flex flex-col gap-3">
+				<div class="mt-8 mb-3 flex items-center justify-between">
+					<h2 class="text-sm font-semibold text-fg">{t('Service categories')}</h2>
+					<span class="text-xs text-fg-muted tabular-nums">{categories.length}</span>
+				</div>
+				<ul class="flex flex-col gap-2">
 					{#each categories as category (category.id)}
 						<li>
-							<Card padding="md">
+							<Card padding="md" class="transition-colors hover:border-line-strong">
 								{#if editingId === category.id}
 									<form
 										class="flex flex-col gap-3"

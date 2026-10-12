@@ -99,6 +99,20 @@ test('business sign-up links choose the business account for you', async ({ page
 
 	await expect(page.getByRole('radio', { name: /Business/ })).toBeChecked();
 	await expect(page.getByLabel('Full name')).toBeVisible();
+	await expect(page.getByLabel('Confirm password')).toBeVisible();
+});
+
+test('sign-up requires the confirmed password to match', async ({ page }) => {
+	await page.goto('/register?as=customer');
+
+	await page.getByLabel('Full name').fill('Sam Example');
+	await page.getByLabel('Email').fill('sam@example.com');
+	await page.getByLabel('Phone').fill('0501234567');
+	await page.getByLabel('Password').first().fill('correct-horse-battery');
+	await page.getByLabel('Confirm password').fill('different-password');
+	await page.getByRole('button', { name: 'Create account' }).click();
+
+	await expect(page.getByText('Passwords do not match.')).toBeVisible();
 });
 
 test('a plain sign-up page asks which kind of account, instead of assuming', async ({ page }) => {

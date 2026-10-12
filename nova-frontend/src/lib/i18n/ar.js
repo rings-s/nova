@@ -12,6 +12,7 @@ import { LAYOUT } from './ar/layout.js';
 import { MARKETING } from './ar/marketing.js';
 import { CUSTOMER } from './ar/customer.js';
 import { DASHBOARD } from './ar/dashboard.js';
+import { ADMIN } from './ar/admin.js';
 
 /** @type {Record<string, string | Partial<Record<Intl.LDMLPluralRule, string>>>} */
 export const AR = {
@@ -20,5 +21,6 @@ export const AR = {
 	...LAYOUT,
 	...MARKETING,
 	...CUSTOMER,
-	...DASHBOARD
+	...DASHBOARD,
+	...ADMIN
 };

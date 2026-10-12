@@ -111,6 +111,10 @@ export const authStore = {
 	get isStaff() {
 		return principal?.kind === 'staff' || principal?.kind === 'service';
 	},
+	/** A signed-in customer account: no business pages (pricing) for them. Display only. */
+	get isCustomer() {
+		return principal?.kind === 'customer';
+	},
 	/**
 	 * Whether the API treats this account as a customer at a business: always
 	 * for a customer, and for staff anywhere but where they work (ADR-0016).

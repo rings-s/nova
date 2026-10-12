@@ -104,8 +104,15 @@ async def test_the_app_role_holds_dml_on_every_table_but_migration_state(
         )
     )
     # Default privileges cover a later migration's tables; this catches one
-    # created by some other owner.
-    assert set(rows.scalars()) == {"alembic_version"}
+    # created by some other owner. The console's audit log is append-only
+    # (migration d2e3f4a5b6c7), checked below.
+    assert set(rows.scalars()) == {"alembic_version", "admin_audit_log"}
+    assert await db_session.scalar(
+        text("SELECT has_table_privilege(current_user, 'admin_audit_log', 'SELECT, INSERT')")
+    )
+    assert not await db_session.scalar(
+        text("SELECT has_table_privilege(current_user, 'admin_audit_log', 'UPDATE, DELETE')")
+    )
     # It may read which revision the schema is at (migration b2e3f4a5c6d7, so
     # `alembic check` runs without the owner's password) and nothing more. A
     # privilege list means "any of", so False here means no write of any kind.

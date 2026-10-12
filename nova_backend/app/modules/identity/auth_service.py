@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import DomainError, ValidationDomainError
+from app.core.exceptions import DomainError, NotFoundError, ValidationDomainError
 from app.core.passwords import hash_password, needs_rehash, verify_password
 from app.core.rate_limit import (
     LOGIN_FAILURE_POLICY,
@@ -219,6 +219,24 @@ class AuthService:
         if user is not None:
             user.token_version += 1
             await self.session.flush()
+
+    async def set_account_active(self, user_id: UUID, *, active: bool) -> User:
+        """Suspends or restores an account (the platform console, `admin`).
+
+        Deactivating also bumps `token_version`, so the account's live tokens
+        end with it rather than at their expiry: `get_principal` re-reads both
+        on every request. Restoring leaves `token_version` alone; the owner
+        signs in again.
+        """
+        user = await self.session.get(User, user_id)
+        if user is None:
+            raise NotFoundError(f"No account {user_id}.")
+        if user.is_active != active:
+            user.is_active = active
+            if not active:
+                user.token_version += 1
+            await self.session.flush()
+        return user
 
     # --- the caller's own account -------------------------------------------
 

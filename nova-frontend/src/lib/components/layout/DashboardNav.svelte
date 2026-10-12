@@ -10,8 +10,8 @@
 	import Icon from '../ui/Icon.svelte';
 	import { accessStore } from '../../stores/access.svelte.js';
 
-	/** @type {{ onnavigate?: () => void }} */
-	let { onnavigate } = $props();
+	/** @type {{ onnavigate?: () => void, collapsed?: boolean }} */
+	let { onnavigate, collapsed = false } = $props();
 
 	/**
 	 * @typedef {'/app'|'/app/catalog'|'/app/bookings'|'/app/check-in'|'/app/queue'|'/app/customers'|'/app/reviews'|'/app/analytics'|'/app/ai'|'/app/billing'|'/app/team'} AppHref
@@ -84,13 +84,21 @@
 	}
 </script>
 
-<nav class="flex flex-col gap-6" aria-label={t('Dashboard')}>
+<nav
+	class={['flex flex-col', collapsed ? 'gap-3 lg:gap-4' : 'gap-6'].join(' ')}
+	aria-label={t('Dashboard')}
+>
 	{#each visibleGroups as group (group.label)}
 		<div>
-			<p class="mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">
+			<p
+				class={[
+					'mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase',
+					collapsed && 'lg:sr-only'
+				].join(' ')}
+			>
 				{t(group.label)}
 			</p>
-			<ul class="flex flex-col gap-0.5">
+			<ul class={['flex flex-col gap-0.5', collapsed && 'lg:items-center'].join(' ')}>
 				{#each group.items as item (item.href)}
 					{@const active = isActive(item.href)}
 					<li>
@@ -98,8 +106,11 @@
 							href={resolve(item.href)}
 							onclick={onnavigate}
 							aria-current={active ? 'page' : undefined}
+							aria-label={collapsed ? t(item.label) : undefined}
+							title={collapsed ? t(item.label) : undefined}
 							class={[
 								'group relative flex h-9 items-center gap-3 rounded-control px-3 text-sm font-medium',
+								collapsed && 'lg:size-10 lg:justify-center lg:gap-0 lg:px-0',
 								'focus-ring transition-colors duration-fast',
 								active
 									? 'bg-surface text-fg shadow-card ring-1 ring-line dark:bg-surface-muted/70 dark:ring-white/5'
@@ -116,7 +127,7 @@
 								name={item.icon}
 								class={`size-[18px] shrink-0 ${active ? 'text-accent' : 'text-fg-subtle group-hover:text-fg-muted'}`}
 							/>
-							{t(item.label)}
+							<span class={collapsed ? 'lg:hidden' : ''}>{t(item.label)}</span>
 						</a>
 					</li>
 				{/each}

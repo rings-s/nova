@@ -127,9 +127,8 @@
 	>
 </svelte:head>
 
-<!-- Hero: the whole first screen, below the header (4rem and its 1px border) (`svh`, so a phone's
-     browser bars never push it past the fold). -->
-<section class="relative isolate flex min-h-[calc(100svh-4rem-1px)] items-center overflow-hidden">
+<!-- Hero: a near-screen-height frame, without forcing the next section below the fold. -->
+<section class="relative isolate flex min-h-[calc(100svh-10rem)] items-center overflow-hidden">
 	<GradientBlob variant="hero" />
 	<Container
 		size="xl"
@@ -137,6 +136,7 @@
 	>
 		<div>
 			<p
+				style:--d="0ms"
 				class="hero-badge inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
 			>
 				<span class="hero-dot relative size-1.5 rounded-full bg-brand-500"></span>
@@ -325,9 +325,11 @@
 			<Button size="lg" variant="inverse" href={`${resolve('/register')}?as=business`}
 				>{t('Start free trial')}</Button
 			>
-			<Button size="lg" variant="outline-inverse" href={resolve('/pricing')}
-				>{t('See pricing')}</Button
-			>
+			{#if !authStore.isCustomer}
+				<Button size="lg" variant="outline-inverse" href={resolve('/pricing')}
+					>{t('See pricing')}</Button
+				>
+			{/if}
 		</div>
 	</Container>
 </Section>
@@ -339,27 +341,25 @@
 	 * to nothing under `prefers-reduced-motion` (routes/layout.css).
 	 */
 	.hero-badge {
-		animation: badge-in 0.7s var(--ease-out-premium) both;
+		animation: rise 0.8s var(--ease-out-premium) var(--d, 0ms) both;
 	}
-	@keyframes badge-in {
-		from {
-			opacity: 0;
-			transform: translateY(8px) scale(0.94);
-		}
-	}
-	/* The badge's dot breathes, once the page has settled. */
+	/*
+	 * The badge's dot breathes only once everything has landed (the sheen
+	 * ends at 2.8s): one ring per 3s beat, then a rest, so it reads as calm.
+	 * The preview card's live dot keeps the same beat, half a beat later.
+	 */
 	.hero-dot::after {
 		content: '';
 		position: absolute;
 		inset: 0;
 		border-radius: 9999px;
 		background: inherit;
-		animation: dot-ping 2.4s cubic-bezier(0, 0, 0.2, 1) 1.6s infinite;
+		animation: dot-ping 3s cubic-bezier(0, 0, 0.2, 1) 2.8s infinite;
 	}
 	@keyframes dot-ping {
-		70%,
+		50%,
 		100% {
-			transform: scale(3.2);
+			transform: scale(3);
 			opacity: 0;
 		}
 	}
@@ -388,13 +388,13 @@
 	/* The gradient phrase: the brand ink, drifting slowly through its colours. */
 	.ink {
 		color: transparent;
-		background-image: var(--gradient-hero);
-		background-size: 220% 100%;
+		background-image: var(--gradient-ink);
+		background-size: 200% 100%;
 		-webkit-background-clip: text;
 		background-clip: text;
 		animation:
 			word-rise 1.1s var(--ease-out-premium) var(--d, 0ms) both,
-			ink-drift 9s ease-in-out 2s infinite alternate;
+			ink-drift 12s ease-in-out 2s infinite alternate;
 	}
 	@keyframes ink-drift {
 		from {

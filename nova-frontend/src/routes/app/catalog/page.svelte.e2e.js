@@ -128,6 +128,19 @@ async function signInAndStub(page, existing = []) {
 				manageable_roles: ['manager', 'owner', 'provider', 'receptionist']
 			});
 		}
+		if (method === 'GET' && path === '/discovery/categories') {
+			return respond([
+				{
+					id: 'beauty-clinics-id',
+					slug: 'beauty-clinics',
+					name_en: 'Beauty clinics',
+					name_ar: 'عيادات التجميل'
+				},
+				{ id: 'massage-id', slug: 'massage', name_en: 'Massage', name_ar: 'المساج' },
+				{ id: 'salons-id', slug: 'salons', name_en: 'Salons', name_ar: 'الصالونات' },
+				{ id: 'spa-id', slug: 'spa', name_en: 'Spa', name_ar: 'السبا' }
+			]);
+		}
 		if (method === 'GET' && path === `${catalog}/places/reverse`) {
 			const query = new URL(request.url()).searchParams;
 			const latitude = Number(query.get('latitude'));
@@ -183,6 +196,33 @@ async function signInAndStub(page, existing = []) {
 
 	return state;
 }
+
+test('the service category picker has Spa, Beauty clinics, Massage and Salons, not Hair', async ({
+	page
+}) => {
+	await signInAndStub(page, [branch('location-1', 'Main branch', RIYADH)]);
+	await page.goto('/app/catalog');
+
+	await page.getByRole('tab', { name: 'Services' }).click();
+	await page.getByRole('button', { name: 'Add service' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Add service' });
+	const category = dialog.getByLabel('Category');
+
+	await expect(category.locator('option', { hasText: 'Beauty clinics' })).toHaveAttribute(
+		'value',
+		'beauty-clinics-id'
+	);
+	await expect(category.locator('option', { hasText: 'Spa' })).toHaveAttribute('value', 'spa-id');
+	await expect(category.locator('option', { hasText: 'Massage' })).toHaveAttribute(
+		'value',
+		'massage-id'
+	);
+	await expect(category.locator('option', { hasText: 'Salons' })).toHaveAttribute(
+		'value',
+		'salons-id'
+	);
+	await expect(category.locator('option', { hasText: 'Hair' })).toHaveCount(0);
+});
 
 /** @param {import('@playwright/test').Page} page */
 async function openAddLocation(page) {

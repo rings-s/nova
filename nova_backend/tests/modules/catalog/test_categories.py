@@ -66,6 +66,24 @@ async def test_a_superuser_adds_renames_and_retires_a_category(
     assert category["id"] not in [row["id"] for row in public]
 
 
+async def test_platform_service_categories_are_available_to_businesses(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(PUBLIC)
+
+    assert response.status_code == 200
+    categories = {row["slug"]: row for row in response.json()}
+    assert categories["beauty-clinics"]["name_en"] == "Beauty clinics"
+    assert categories["beauty-clinics"]["name_ar"] == "عيادات التجميل"
+    assert categories["spa"]["name_en"] == "Spa"
+    assert categories["spa"]["name_ar"] == "السبا"
+    assert categories["massage"]["name_en"] == "Massage"
+    assert categories["massage"]["name_ar"] == "المساج"
+    assert categories["salons"]["name_en"] == "Salons"
+    assert categories["salons"]["name_ar"] == "الصالونات"
+    assert "hair" not in categories
+
+
 async def test_a_duplicate_slug_is_refused(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession
 ) -> None:

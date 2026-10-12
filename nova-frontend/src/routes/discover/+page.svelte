@@ -1,6 +1,6 @@
 <script>
 	import { t, tp, m, i18n } from '$lib/i18n/index.svelte.js';
-	import { mapBusinesses, searchBusinesses } from '$lib/api/discovery.js';
+	import { listCategories, mapBusinesses, searchBusinesses } from '$lib/api/discovery.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import { pickBilingual } from '$lib/utils/bilingual.js';
 	import { formatMoney } from '$lib/utils/money.js';
@@ -22,7 +22,6 @@
 	import AssistantLauncher from '$lib/components/ai/AssistantLauncher.svelte';
 
 	let q = $state('');
-	let selectedCity = $state('');
 	let selectedCategory = $state('');
 	let sortBy = $state('recommended');
 	let offset = $state(0);
@@ -30,6 +29,8 @@
 
 	let loading = $state(true);
 	let listings = $state(/** @type {any[]} */ ([]));
+	let hasNextPage = $state(false);
+	let searchTicket = 0;
 
 	// The map runs the same search as the list, but unpaged, so its pins cover
 	// every match and not only the twelve cards on screen.
@@ -50,22 +51,25 @@
 	// Quick View Modal
 	let quickViewSalon = $state(/** @type {any | null} */ (null));
 
-	const cities = [
-		{ id: '', name: m('All Cities') },
-		{ id: 'Riyadh', name: m('Riyadh') },
-		{ id: 'Jeddah', name: m('Jeddah') },
-		{ id: 'Al Khobar', name: m('Al Khobar') }
-	];
+	// Not a filter: registers the city names that a card's badge translates with `t(listing.city)`.
+	m('Riyadh');
+	m('Jeddah');
+	m('Al Khobar');
 
-	/** @type {{ id: string, name: string, icon: import('$lib/components/ui/Icon.svelte').IconName }[]} */
-	const categories = [
-		{ id: '', name: m('All Services'), icon: 'sparkles' },
-		{ id: 'Hair', name: m('Hair & Styling'), icon: 'zap' },
-		{ id: 'Skincare', name: m('Skincare & Facials'), icon: 'sparkles' },
-		{ id: 'Spa', name: m('Hammam & Spa'), icon: 'globe' },
-		{ id: 'Nail', name: m('Nails & Brows'), icon: 'check' },
-		{ id: 'Massage', name: m('Massage & Recovery'), icon: 'users' }
-	];
+	let serviceCategories = $state(/** @type {import('$lib/api/catalog.js').Category[]} */ ([]));
+	let categories = $derived([
+		{ id: '', name: t('All Services'), icon: /** @type {const} */ ('sparkles') },
+		...serviceCategories.map((category) => ({
+			id: category.slug,
+			name: pickBilingual(category, 'name'),
+			icon:
+				category.slug === 'spa'
+					? /** @type {const} */ ('globe')
+					: category.slug === 'beauty-clinics'
+						? /** @type {const} */ ('building')
+						: /** @type {const} */ ('sparkles')
+		}))
+	]);
 
 	/**
 	 * Where the customer is, once they have shared it. Held in memory only —
@@ -171,7 +175,9 @@
 						)
 					: kind === 'insecure'
 						? t('Your browser only shares location on secure (https) pages.')
-						: t("We couldn't find your location. Pick a city instead.");
+						: t(
+								'We couldn\'t find your location. Move the map to your area and press "Search this area" instead.'
+							);
 			return false;
 		} finally {
 			if (locateAbort === controller) {
@@ -192,9 +198,23 @@
 	}
 
 	// Spotlight rows, shown above the results when nothing is being searched.
-	let browsing = $derived(!q && !selectedCity && !selectedCategory && !area && offset === 0);
+	let browsing = $derived(!q && !selectedCategory && !area && offset === 0);
 	let topRated = $state(/** @type {import('$lib/api/discovery.js').ListingCard[]} */ ([]));
 	let nearby = $state(/** @type {import('$lib/api/discovery.js').ListingCard[] | null} */ (null));
+
+	$effect(() => {
+		let cancelled = false;
+		listCategories()
+			.then((items) => {
+				if (!cancelled) serviceCategories = items;
+			})
+			.catch((err) => {
+				if (!cancelled) toastStore.fromError(err);
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	$effect(() => {
 		searchBusinesses({ sort: 'rating', limit: 8 })
@@ -221,22 +241,25 @@
 	});
 
 	async function search() {
+		const ticket = ++searchTicket;
 		loading = true;
 		try {
-			const combinedQ = [q, selectedCategory].filter(Boolean).join(' ');
 			const near = sortBy === 'nearest' ? searchAt : null;
 			const page = await searchBusinesses({
-				q: combinedQ || null,
-				city: selectedCity || null,
+				q: q || null,
+				category: selectedCategory || null,
 				bbox: area,
 				latitude: near?.latitude ?? null,
 				longitude: near?.longitude ?? null,
 				radiusKm: near ? NEAR_RADIUS_KM : null,
 				sort: near ? 'distance' : sortBy === 'rating' ? 'rating' : 'default',
-				limit,
+				limit: limit + 1,
 				offset
 			});
 			let items = page.items || [];
+			if (ticket !== searchTicket) return;
+			hasNextPage = items.length > limit;
+			items = items.slice(0, limit);
 
 			if (sortBy === 'price-low') {
 				items = [...items].sort(
@@ -249,9 +272,9 @@
 			}
 			listings = items;
 		} catch (err) {
-			toastStore.fromError(err);
+			if (ticket === searchTicket) toastStore.fromError(err);
 		} finally {
-			loading = false;
+			if (ticket === searchTicket) loading = false;
 		}
 	}
 
@@ -259,15 +282,15 @@
 
 	/**
 	 * @param {string | null} term
-	 * @param {string | null} city
+	 * @param {string | null} category
 	 * @param {string | null} bbox
 	 */
-	async function loadPins(term, city, bbox) {
+	async function loadPins(term, category, bbox) {
 		// Answers can arrive out of order; only the newest request may land.
 		const ticket = ++pinsTicket;
 		pinsLoading = true;
 		try {
-			const collection = await mapBusinesses({ q: term, city, bbox });
+			const collection = await mapBusinesses({ q: term, category, bbox });
 			if (ticket !== pinsTicket) return;
 			pins = collection.features.map((feature) => feature.properties);
 			pinsTruncated = collection.truncated;
@@ -283,7 +306,6 @@
 
 	$effect(() => {
 		offset;
-		selectedCity;
 		selectedCategory;
 		sortBy;
 		area;
@@ -296,10 +318,10 @@
 	// re-runs the search on every keystroke and the discovery routes share one
 	// 60-requests-a-minute allowance per address.
 	$effect(() => {
-		const term = [q, selectedCategory].filter(Boolean).join(' ') || null;
-		const city = selectedCity || null;
+		const term = q || null;
+		const category = selectedCategory || null;
 		const bbox = area;
-		const timer = setTimeout(() => loadPins(term, city, bbox), 300);
+		const timer = setTimeout(() => loadPins(term, category, bbox), 300);
 		return () => clearTimeout(timer);
 	});
 
@@ -312,7 +334,6 @@
 
 	function resetFilters() {
 		q = '';
-		selectedCity = '';
 		selectedCategory = '';
 		sortBy = 'recommended';
 		area = null;
@@ -376,28 +397,12 @@
 				/>
 			</div>
 			<div class="hidden h-7 w-px bg-line sm:block"></div>
-			<div class="relative sm:w-48">
-				<Icon
-					name="map-pin"
-					class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle"
-				/>
-				<select
-					aria-label={t('City')}
-					bind:value={selectedCity}
-					onchange={() => (area = null)}
-					class="h-12 w-full rounded-card border-0 bg-transparent ps-9 text-sm text-fg-secondary focus:ring-0 focus:outline-none"
-				>
-					{#each cities as c (c.id)}
-						<option value={c.id}>{t(c.name)}</option>
-					{/each}
-				</select>
-			</div>
-			<Button type="submit" size="lg" class="sm:px-7">{t('Search')}</Button>
-		</form>
-		<div class="mt-4 flex justify-center">
+			<!-- Where to search comes from the device (or the map), never from a list of cities. -->
 			<Button
+				type="button"
 				variant="ghost"
-				size="sm"
+				size="lg"
+				class="sm:w-52"
 				loading={locating}
 				onclick={async () => {
 					if (origin) await useMyLocation();
@@ -412,7 +417,8 @@
 						? t('Update my location')
 						: t('Use my location')}
 			</Button>
-		</div>
+			<Button type="submit" size="lg" class="sm:px-7">{t('Search')}</Button>
+		</form>
 		{#if locateMessage || originNote}
 			<p
 				class={[
@@ -610,12 +616,9 @@
 					{t('Searching…')}
 				{:else}
 					{tp(listings.length, '{count} venue', '{count} venues')}
-					{#if selectedCity}{t('in {city}', {
-							city: t(cities.find((c) => c.id === selectedCity)?.name ?? selectedCity)
-						})}{/if}
 				{/if}
 			</p>
-			{#if q || selectedCity || selectedCategory || area}
+			{#if q || selectedCategory || area}
 				<Button size="sm" variant="ghost" onclick={resetFilters}>
 					<Icon name="x" class="size-3.5" />
 					{t('Clear filters')}
@@ -680,7 +683,7 @@
 			{:else if listings.length === 0}
 				<EmptyState
 					title={t('No venues match')}
-					description={t('Try a different search term, category or city.')}
+					description={t('Try a different search term or category, or move the map.')}
 				>
 					{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
 					{#snippet action()}
@@ -778,6 +781,7 @@
 						{limit}
 						{offset}
 						itemCount={listings.length}
+						{hasNextPage}
 						onchange={(next) => (offset = next)}
 					/>
 				</div>

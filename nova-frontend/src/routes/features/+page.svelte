@@ -1,6 +1,7 @@
 <script>
 	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
+	import { authStore } from '$lib/stores/auth.svelte.js';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Container from '$lib/components/marketing/Container.svelte';
@@ -141,7 +142,7 @@
 			{t('One operating system for')}
 			<span
 				class="text-transparent"
-				style="background-image: var(--gradient-hero); -webkit-background-clip: text; background-clip: text;"
+				style="background-image: var(--gradient-ink); -webkit-background-clip: text; background-clip: text;"
 				>{t('your front desk.')}</span
 			>
 		</h1>
@@ -153,10 +154,12 @@
 		<div class="mt-9 flex flex-wrap justify-center gap-3">
 			<Button size="lg" href={`${resolve('/register')}?as=business`}>{t('Start free trial')}</Button
 			>
-			<Button size="lg" variant="outline" href={resolve('/pricing')}>
-				{t('See pricing')}
-				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
-			</Button>
+			{#if !authStore.isCustomer}
+				<Button size="lg" variant="outline" href={resolve('/pricing')}>
+					{t('See pricing')}
+					<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+				</Button>
+			{/if}
 		</div>
 
 		<!-- Section index -->

@@ -95,8 +95,10 @@ async def set_tenant_scope(session: AsyncSession, tenant_id: "UUID | None") -> N
 async def bypass_tenant_scope(session: AsyncSession) -> None:
     """Lets a transaction read across tenants.
 
-    For the outbox dispatcher and admin/maintenance jobs only. Never call this
-    on a request path — it disables the database-level isolation guarantee.
+    For the outbox dispatcher and admin/maintenance jobs. On a request path
+    only where CLAUDE.md sanctions it — login, invite acceptance, and the
+    superuser console (`admin/dependencies.py::get_admin_session`) — because
+    it disables the database-level isolation guarantee.
     """
     await session.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
 

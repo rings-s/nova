@@ -16,6 +16,8 @@ discovery -> catalog, review -> booking/catalog/identity).
 # side effect of registering with Base.metadata so Alembic sees them.
 from app.core import idempotency as _idempotency  # noqa: F401
 from app.db import outbox as _outbox  # noqa: F401
+from app.modules.admin import models as admin_models  # noqa: F401
+from app.modules.admin.router import router as admin_router
 from app.modules.ai_agents.router import marketplace_router as ai_marketplace_router
 from app.modules.ai_agents.router import memory_router as ai_memory_router
 from app.modules.ai_agents.router import router as ai_router
@@ -68,4 +70,5 @@ routers = [
     ai_router,
     ai_marketplace_router,
     ai_memory_router,
+    admin_router,
 ]

@@ -67,6 +67,8 @@
 		};
 	});
 	let drawerOpen = $state(false);
+	let sidebarCollapsed = $state(false);
+	let accountMenuOpen = $state(false);
 
 	// This business's role, from its membership row — not the token's `roles`,
 	// which merges every business the user works at.
@@ -110,7 +112,16 @@
 	$effect(() => {
 		page.url.pathname;
 		drawerOpen = false;
+		accountMenuOpen = false;
 	});
+
+	/** @param {KeyboardEvent} event */
+	function handleShellKeydown(event) {
+		if (event.key === 'Escape') {
+			drawerOpen = false;
+			accountMenuOpen = false;
+		}
+	}
 
 	// A staff principal always has at least one membership (that's what makes
 	// them staff) — this only fills in the id when the switcher hasn't
@@ -185,15 +196,23 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(event) => drawerOpen && event.key === 'Escape' && (drawerOpen = false)}
-/>
+<svelte:window onkeydown={handleShellKeydown} />
 
 {#snippet sidebar()}
 	<div class="flex h-full flex-col">
-		<div class="flex h-16 shrink-0 items-center justify-between px-5">
+		<div
+			class={[
+				'flex h-16 shrink-0 items-center justify-between px-5',
+				sidebarCollapsed && 'lg:justify-center lg:px-0'
+			].join(' ')}
+		>
 			<a href={resolve('/')} class="rounded-control focus-ring" aria-label={t('NOVA home')}>
-				<Logo />
+				{#if sidebarCollapsed}
+					<Logo class="lg:hidden" />
+					<Logo variant="mark" class="hidden lg:inline-flex" />
+				{:else}
+					<Logo />
+				{/if}
 			</a>
 			<button
 				type="button"
@@ -205,7 +224,7 @@
 			</button>
 		</div>
 
-		<div class="px-4 pb-5">
+		<div class={['px-4 pb-5', sidebarCollapsed && 'lg:hidden'].join(' ')}>
 			<p class="mb-1.5 px-1 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">
 				{t('Business')}
 			</p>
@@ -213,36 +232,103 @@
 		</div>
 
 		<div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
-			<DashboardNav onnavigate={() => (drawerOpen = false)} />
+			<DashboardNav
+				collapsed={sidebarCollapsed}
+				onnavigate={() => {
+					drawerOpen = false;
+					accountMenuOpen = false;
+				}}
+			/>
 		</div>
 
-		<div class="shrink-0 border-t border-line p-3">
-			<div class="flex items-center gap-2 rounded-control px-1 py-1.5">
-				<span
-					class="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
+		<div
+			class={['relative shrink-0 border-t border-line p-3', sidebarCollapsed && 'lg:p-2'].join(' ')}
+		>
+			{#if accountMenuOpen}
+				<div
+					id="dashboard-account-menu"
+					class={[
+						'absolute start-3 bottom-[calc(100%+0.5rem)] z-50 w-56 max-w-[calc(100vw-2rem)] rounded-card border border-line bg-surface p-2 shadow-overlay',
+						sidebarCollapsed && 'lg:start-[calc(100%+0.5rem)]'
+					].join(' ')}
+					role="group"
+					aria-label={t('Account menu')}
 				>
-					<Icon name="user" class="size-4" />
-				</span>
-				<div class="min-w-0 flex-1 leading-tight">
-					<p class="truncate text-[13px] font-medium text-fg" title={roleLabel}>{roleLabel}</p>
 					<a
 						href={resolve('/discover')}
-						class="inline-flex items-center gap-0.5 text-xs whitespace-nowrap text-fg-muted hover:text-accent"
+						onclick={() => (accountMenuOpen = false)}
+						class="flex h-10 items-center justify-between rounded-control px-3 text-sm font-medium text-fg-secondary transition-colors hover:bg-surface-muted hover:text-fg"
 					>
 						{t('Marketplace')}
-						<Icon name="arrow-up-right" class="size-3 rtl:-scale-x-100" />
+						<Icon name="arrow-up-right" class="size-4 rtl:-scale-x-100" />
 					</a>
+					<div class="my-2 border-t border-line-subtle"></div>
+					<div class="flex items-center justify-between px-2 py-1">
+						<span class="text-xs font-medium text-fg-muted">{t('Preferences')}</span>
+						<div class="flex items-center gap-1">
+							<LanguageSwitch compact class="size-9 h-9 w-9" />
+							<ThemeToggle />
+						</div>
+					</div>
+					<div class="my-2 border-t border-line-subtle"></div>
+					<button
+						type="button"
+						onclick={signOut}
+						class="flex h-10 w-full items-center gap-2 rounded-control px-3 text-sm font-medium text-fg-secondary transition-colors hover:bg-surface-muted hover:text-fg"
+					>
+						<Icon name="log-out" class="size-4 rtl:rotate-180" />
+						{t('Sign out')}
+					</button>
 				</div>
-				<LanguageSwitch compact class="size-9 h-9 w-9" />
-				<ThemeToggle />
+			{/if}
+
+			<div class={['flex items-center gap-2', sidebarCollapsed && 'lg:flex-col'].join(' ')}>
 				<button
 					type="button"
-					onclick={signOut}
-					class={`${iconButton} size-9`}
-					aria-label={t('Sign out')}
-					title={t('Sign out')}
+					aria-controls="dashboard-account-menu"
+					aria-expanded={accountMenuOpen}
+					aria-label={accountMenuOpen ? t('Close account menu') : t('Open account menu')}
+					title={roleLabel}
+					onclick={() => (accountMenuOpen = !accountMenuOpen)}
+					class={[
+						'flex h-10 min-w-0 flex-1 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-surface-muted',
+						sidebarCollapsed && 'lg:h-10 lg:w-10 lg:flex-none lg:justify-center lg:px-0'
+					].join(' ')}
 				>
-					<Icon name="log-out" class="size-[18px] rtl:rotate-180" />
+					<span
+						class="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
+					>
+						<Icon name="user" class="size-4" />
+					</span>
+					<span
+						class={[
+							'min-w-0 flex-1 truncate text-[13px] font-medium text-fg',
+							sidebarCollapsed && 'lg:hidden'
+						].join(' ')}
+					>
+						{roleLabel}
+					</span>
+					<Icon
+						name="chevron-down"
+						class={[
+							'size-4 shrink-0 text-fg-subtle transition-transform',
+							accountMenuOpen && 'rotate-180',
+							sidebarCollapsed && 'lg:hidden'
+						].join(' ')}
+					/>
+				</button>
+				<button
+					type="button"
+					onclick={() => (sidebarCollapsed = !sidebarCollapsed)}
+					class={`${iconButton} hidden size-9 shrink-0 lg:inline-flex`}
+					aria-label={sidebarCollapsed ? t('Expand sidebar') : t('Collapse sidebar')}
+					title={sidebarCollapsed ? t('Expand sidebar') : t('Collapse sidebar')}
+					aria-pressed={sidebarCollapsed}
+				>
+					<Icon
+						name="panel-left"
+						class={['size-[18px] transition-transform', sidebarCollapsed && 'rotate-180'].join(' ')}
+					/>
 				</button>
 			</div>
 		</div>
@@ -252,10 +338,13 @@
 {#if !authStore.isAuthenticated || !authStore.isStaff || resolvingTenant || resolvingBusiness || !accessStore.loaded}
 	<div class="flex min-h-dvh items-center justify-center"><Spinner size="lg" /></div>
 {:else}
-	<div class="min-h-dvh lg:ps-64">
+	<div class={['min-h-dvh', sidebarCollapsed ? 'lg:ps-20' : 'lg:ps-64'].join(' ')}>
 		<!-- Desktop sidebar -->
 		<aside
-			class="fixed inset-y-0 start-0 z-30 hidden w-64 border-e border-line bg-canvas lg:block dark:bg-slate-950"
+			class={[
+				'fixed inset-y-0 start-0 z-30 hidden border-e border-line bg-canvas lg:block dark:bg-slate-950',
+				sidebarCollapsed ? 'w-20' : 'w-64'
+			].join(' ')}
 		>
 			{@render sidebar()}
 		</aside>

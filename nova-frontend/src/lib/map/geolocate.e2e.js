@@ -81,11 +81,11 @@ test.describe('locate: getting a fix', () => {
 		expect(p.watches).toHaveLength(0);
 	});
 
-	test('the quick request is tolerant: a cached fix is fine and GPS is not demanded', async () => {
+	test('the quick request asks for a fresh fix without demanding GPS', async () => {
 		const p = scriptedProvider();
 		locate({ geolocation: p.geolocation, secure: true, onfix: () => {} });
 
-		expect(p.current[0].options).toMatchObject({ enableHighAccuracy: false, maximumAge: 60_000 });
+		expect(p.current[0].options).toMatchObject({ enableHighAccuracy: false, maximumAge: 0 });
 	});
 
 	test('a rough first fix is refined by a watch for a precise one', async () => {
@@ -235,6 +235,29 @@ test.describe('locate: when there is no fix', () => {
 		p.watches[0].err(failure(3, 'Timeout expired'));
 
 		expect((await done).kind).toBe('timeout');
+	});
+
+	test('a location callback that never arrives times out and does not accept a late fix', async () => {
+		const p = scriptedProvider();
+		/** @type {number[]} */
+		const accuracies = [];
+		const done = failedWith(
+			locate({
+				geolocation: p.geolocation,
+				secure: true,
+				onfix: (fix) => accuracies.push(fix.accuracy),
+				quickTimeoutMs: 10,
+				refineMs: 10
+			})
+		);
+
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(p.watches).toHaveLength(1);
+		p.current[0].ok(position(10));
+
+		expect((await done).kind).toBe('timeout');
+		expect(accuracies).toEqual([]);
+		expect(p.cleared).toEqual([1]);
 	});
 
 	test('an insecure page never asks the browser', async () => {

@@ -9,7 +9,7 @@
 	 *     counters count up, and the WhatsApp toast springs in last.
 	 *  2. A live loop. Every few seconds the day moves on: a client checks in,
 	 *     a treatment starts, a deposit lands, a booking arrives. The badge that
-	 *     changed cross-fades, its row glows once, and the toast reports it. The
+	 *     changed drifts into place, its row glows once, and the toast reports it. The
 	 *     loop pauses while the hero is off screen or the tab is hidden.
 	 *  3. Depth. With a mouse, the card leans toward the pointer on a spring.
 	 *
@@ -18,8 +18,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { Spring, Tween } from 'svelte/motion';
-	import { cubicOut } from 'svelte/easing';
-	import { fade, fly, scale } from 'svelte/transition';
+	import { cubicInOut, cubicOut } from 'svelte/easing';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 
@@ -120,7 +119,27 @@
 			}
 		}
 	];
-	const BEAT_MS = 3400;
+	// Slow enough to read each change before the next one starts.
+	const BEAT_MS = 5000;
+	/** How long the changed row stays lit. */
+	const GLOW_MS = 2200;
+
+	/**
+	 * Every swap in the card (badge, counter, toast) is the same move: the old
+	 * value lifts away as the new one settles in from below, in the same cell,
+	 * so nothing reflows. Opacity and transform only, so it stays on the GPU.
+	 * @param {Element} _node
+	 * @param {{ y?: number, duration?: number, delay?: number, easing?: (t: number) => number }} [options]
+	 */
+	function drift(_node, { y = 6, duration = 520, delay = 0, easing = cubicOut } = {}) {
+		return {
+			delay,
+			duration,
+			easing,
+			css: (/** @type {number} */ t, /** @type {number} */ u) =>
+				`opacity: ${t}; transform: translateY(${(u * y).toFixed(2)}px)`
+		};
+	}
 
 	/** @type {Row[]} */
 	let rows = $state(START.map((row) => ({ ...row })));
@@ -131,7 +150,8 @@
 	let waiting = $state(3);
 
 	const booked = new Tween(24, { duration: 1200, easing: cubicOut });
-	const lean = new Spring({ x: 0, y: 0 }, { stiffness: 0.06, damping: 0.35 });
+	// Damped enough to glide to the pointer and stop, never wobble past it.
+	const lean = new Spring({ x: 0, y: 0 }, { stiffness: 0.05, damping: 0.9 });
 
 	/** @type {HTMLDivElement | undefined} */
 	let root = $state();
@@ -167,7 +187,7 @@
 			toast = { ...next.toast, id: toast.id + 1 };
 			glowing = next.row;
 			clearTimeout(unglow);
-			unglow = setTimeout(() => (glowing = null), 1400);
+			unglow = setTimeout(() => (glowing = null), GLOW_MS);
 		}
 
 		const running = () => onScreen && document.visibilityState === 'visible';
@@ -220,9 +240,7 @@
 
 <div bind:this={root} class="preview relative" aria-hidden="true">
 	<div class="card-tilt" style:transform>
-		<div
-			class="card-in rounded-panel border border-line bg-surface/90 p-2 shadow-overlay backdrop-blur-xl"
-		>
+		<div class="card-in rounded-panel border border-line bg-surface/95 p-2 shadow-overlay">
 			<div class="rounded-[calc(var(--radius-panel)-0.5rem)] border border-line-subtle bg-surface">
 				<div class="flex items-center justify-between border-b border-line-subtle px-5 py-4">
 					<div>
@@ -247,8 +265,8 @@
 								{#key waiting}
 									<span
 										class="block"
-										in:fly={{ y: 14, duration: 380, easing: cubicOut }}
-										out:fly={{ y: -14, duration: 260 }}
+										in:drift={{ y: 14, duration: 560, delay: 80 }}
+										out:drift={{ y: -14, duration: 360, easing: cubicInOut }}
 									>
 										{waiting}
 									</span>
@@ -273,8 +291,8 @@
 								{#key row.status}
 									<span
 										class="[grid-area:1/1]"
-										in:scale={{ start: 0.85, duration: 420, easing: cubicOut }}
-										out:fade={{ duration: 200 }}
+										in:drift={{ y: 6, duration: 600, delay: 120 }}
+										out:drift={{ y: -6, duration: 380, easing: cubicInOut }}
 									>
 										<Badge tone={row.tone} size="sm" dot>{t(row.status)}</Badge>
 									</span>
@@ -287,12 +305,13 @@
 		</div>
 	</div>
 
-	<div class="toast-slot absolute -start-6 -bottom-12 hidden sm:block">
+	<!-- A one-cell grid: the outgoing toast and the incoming one overlap, never stack. -->
+	<div class="toast-slot absolute -start-6 -bottom-12 hidden sm:grid">
 		{#key toast.id}
 			<div
-				class="toast flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-raised"
-				in:fly={{ y: 12, duration: 520, easing: cubicOut }}
-				out:fade={{ duration: 180 }}
+				class="toast flex items-center gap-3 self-end rounded-card border border-line bg-surface px-4 py-3 shadow-raised [grid-area:1/1]"
+				in:drift={{ y: 10, duration: 700, delay: 160 }}
+				out:drift={{ y: -6, duration: 420, easing: cubicInOut }}
 			>
 				<span
 					class="flex size-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
@@ -328,7 +347,7 @@
 	.row {
 		animation: row-in 0.6s var(--ease-out-premium) both;
 		animation-delay: calc(0.65s + var(--i) * 90ms);
-		transition: background-color 1.2s var(--ease-out-premium);
+		transition: background-color 1.6s var(--ease-out-premium);
 	}
 	@keyframes row-in {
 		from {
@@ -339,17 +358,17 @@
 	/* The row that just changed glows once, then fades back. */
 	.row.glow {
 		background-color: color-mix(in oklch, var(--color-brand-500) 7%, transparent);
-		transition-duration: 0.2s;
+		transition-duration: 0.5s;
 	}
 
-	/* The first toast springs in last; later ones are Svelte transitions. */
+	/* The first toast settles in last; later ones are Svelte transitions. */
 	.toast-slot {
-		animation: toast-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 1.5s both;
+		animation: toast-in 0.8s var(--ease-out-premium) 1.5s both;
 	}
-	@keyframes toast-pop {
+	@keyframes toast-in {
 		from {
 			opacity: 0;
-			transform: translateY(10px) scale(0.85);
+			transform: translateY(12px);
 		}
 	}
 
@@ -360,10 +379,11 @@
 		inset: 0;
 		border-radius: 9999px;
 		background: var(--color-emerald-500, #10b981);
-		animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+		/* The badge's dot (routes/+page.svelte) shares this 3s beat, half a beat apart. */
+		animation: ping 3s cubic-bezier(0, 0, 0.2, 1) 4.3s infinite;
 	}
 	@keyframes ping {
-		75%,
+		50%,
 		100% {
 			transform: scale(3);
 			opacity: 0;

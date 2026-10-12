@@ -39,5 +39,11 @@ export const LAYOUT = {
 	"Service": "حساب خدمة",
 	"Staff": "الفريق",
 	"Marketplace": "السوق",
-	"Menu": "القائمة"
+	"Menu": "القائمة",
+	"Account menu": "قائمة الحساب",
+	"Open account menu": "فتح قائمة الحساب",
+	"Close account menu": "إغلاق قائمة الحساب",
+	"Preferences": "التفضيلات",
+	"Collapse sidebar": "طي القائمة الجانبية",
+	"Expand sidebar": "توسيع القائمة الجانبية"
 };

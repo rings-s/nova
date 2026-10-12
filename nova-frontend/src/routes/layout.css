@@ -259,16 +259,36 @@
 		var(--color-plum-50) 55%,
 		#ffffff 100%
 	);
-	--gradient-cta: linear-gradient(135deg, var(--color-brand-600) 0%, var(--color-brand-800) 100%);
+	/* A soft top-left light and a plum bottom-right corner over the rose base: depth, not a flat ramp. */
+	--gradient-cta:
+		radial-gradient(120% 90% at 0% 0%, rgb(255 255 255 / 0.16) 0%, transparent 55%),
+		radial-gradient(90% 120% at 100% 100%, var(--color-plum-700) 0%, transparent 70%),
+		linear-gradient(135deg, var(--color-brand-600) 0%, var(--color-brand-700) 100%);
+	/*
+	 * Headline ink: luminous stops only (rose, orchid, rose), so the drift in
+	 * the home hero loops without ever passing through a dark, muddy stop.
+	 */
+	--gradient-ink: linear-gradient(
+		100deg,
+		var(--color-brand-600) 0%,
+		var(--color-plum-500) 50%,
+		var(--color-brand-600) 100%
+	);
+	/*
+	 * Glows reach transparent at `closest-side`, inside their own box, so
+	 * neither the box nor the hero's overflow clip ever shows a hard edge.
+	 */
 	--gradient-glow-1: radial-gradient(
-		circle at 30% 20%,
-		color-mix(in oklch, var(--color-brand-400) 45%, transparent) 0%,
-		transparent 60%
+		closest-side,
+		color-mix(in oklch, var(--color-brand-300) 55%, transparent) 0%,
+		color-mix(in oklch, var(--color-brand-200) 25%, transparent) 45%,
+		transparent 100%
 	);
 	--gradient-glow-2: radial-gradient(
-		circle at 75% 60%,
-		color-mix(in oklch, var(--color-plum-500) 40%, transparent) 0%,
-		transparent 65%
+		closest-side,
+		color-mix(in oklch, var(--color-plum-300) 50%, transparent) 0%,
+		color-mix(in oklch, var(--color-plum-200) 20%, transparent) 45%,
+		transparent 100%
 	);
 }
 
@@ -285,7 +305,28 @@
 		color-mix(in oklch, var(--color-plum-900) 35%, transparent) 55%,
 		transparent 100%
 	);
-	--gradient-cta: linear-gradient(135deg, var(--color-brand-700) 0%, var(--color-brand-900) 100%);
+	--gradient-cta:
+		radial-gradient(120% 90% at 0% 0%, rgb(255 255 255 / 0.08) 0%, transparent 55%),
+		radial-gradient(90% 120% at 100% 100%, var(--color-plum-900) 0%, transparent 70%),
+		linear-gradient(135deg, var(--color-brand-700) 0%, var(--color-brand-900) 100%);
+	--gradient-ink: linear-gradient(
+		100deg,
+		var(--color-brand-400) 0%,
+		var(--color-plum-300) 50%,
+		var(--color-brand-400) 100%
+	);
+	--gradient-glow-1: radial-gradient(
+		closest-side,
+		color-mix(in oklch, var(--color-brand-600) 30%, transparent) 0%,
+		color-mix(in oklch, var(--color-brand-800) 12%, transparent) 50%,
+		transparent 100%
+	);
+	--gradient-glow-2: radial-gradient(
+		closest-side,
+		color-mix(in oklch, var(--color-plum-600) 28%, transparent) 0%,
+		color-mix(in oklch, var(--color-plum-800) 10%, transparent) 50%,
+		transparent 100%
+	);
 }
 
 @layer base {

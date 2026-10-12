@@ -54,6 +54,20 @@ async function stubApi(page) {
 	await page.route('https://tile.openstreetmap.org/**', (route) =>
 		route.fulfill({ contentType: 'image/svg+xml', body: BLANK_TILE })
 	);
+	await page.route('**/api/v1/discovery/categories', (route) =>
+		route.fulfill({
+			headers: cors,
+			json: [
+				{
+					id: 'beauty-clinics-id',
+					slug: 'beauty-clinics',
+					name_en: 'Beauty clinics',
+					name_ar: 'عيادات التجميل'
+				},
+				{ id: 'spa-id', slug: 'spa', name_en: 'Spa', name_ar: 'السبا' }
+			]
+		})
+	);
 	await page.route('**/api/v1/discovery/map**', (route) => {
 		maps.push(new URL(route.request().url()));
 		return route.fulfill({
@@ -93,6 +107,63 @@ test.describe('on a wide screen', () => {
 		await page.getByTitle('Red Sea Salon — Main Branch').click();
 		// Only the Quick View modal has this link; the name itself is also on the card.
 		await expect(page.getByRole('link', { name: 'View Full Menu' })).toBeVisible();
+	});
+
+	test('where to search comes from the device or the map, not a city list', async ({ page }) => {
+		const { lists } = await stubApi(page);
+		await page.goto('/discover');
+
+		const form = page.getByRole('search');
+		await expect(form.getByRole('button', { name: 'Use my location' })).toBeVisible();
+		await expect(form.getByRole('combobox')).toHaveCount(0);
+		await expect.poll(() => lists.length).toBeGreaterThan(0);
+		expect(lists.every((url) => !url.searchParams.has('city'))).toBe(true);
+	});
+
+	test('beauty clinic and spa filters use the platform category slugs', async ({ page }) => {
+		const { maps, lists } = await stubApi(page);
+		await page.goto('/discover');
+
+		await page.getByRole('button', { name: 'Beauty clinics' }).click();
+		await expect.poll(() => lists.at(-1)?.searchParams.get('category')).toBe('beauty-clinics');
+		await expect.poll(() => maps.at(-1)?.searchParams.get('category')).toBe('beauty-clinics');
+
+		await page.getByRole('button', { name: 'Spa', exact: true }).click();
+		await expect.poll(() => lists.at(-1)?.searchParams.get('category')).toBe('spa');
+		await expect.poll(() => maps.at(-1)?.searchParams.get('category')).toBe('spa');
+	});
+
+	test('pagination detects the end when the result count is an exact multiple of a page', async ({
+		page
+	}) => {
+		const { lists } = await stubApi(page);
+		const venues = Array.from({ length: 24 }, (_, index) =>
+			listing(String(index), `Venue ${index}`, 24.7136, 46.6753)
+		);
+		await page.route('**/api/v1/discovery/businesses?**', (route) => {
+			const url = new URL(route.request().url());
+			const requestLimit = Number(url.searchParams.get('limit'));
+			if (requestLimit !== 13) {
+				return route.fulfill({ headers: cors, json: { items: LISTINGS } });
+			}
+			lists.push(url);
+			const offset = Number(url.searchParams.get('offset'));
+			return route.fulfill({
+				headers: cors,
+				json: { items: venues.slice(offset, offset + requestLimit) }
+			});
+		});
+
+		await page.goto('/discover');
+		const pagination = page.getByRole('navigation', { name: 'Pagination' });
+		await expect.poll(() => lists.at(-1)?.searchParams.get('limit')).toBe('13');
+		await expect(page.getByRole('heading', { name: 'Venue 0' })).toBeVisible();
+		await pagination.getByRole('button', { name: 'Next' }).click();
+
+		await expect.poll(() => lists.at(-1)?.searchParams.get('offset')).toBe('12');
+		await expect(page.getByRole('heading', { name: 'Venue 12' })).toBeVisible();
+		await expect(pagination.getByRole('button', { name: 'Next' })).toBeDisabled();
+		await expect(pagination.getByRole('button', { name: 'Previous' })).toBeEnabled();
 	});
 
 	test('a business name is shown as text, never parsed as markup', async ({ page }) => {

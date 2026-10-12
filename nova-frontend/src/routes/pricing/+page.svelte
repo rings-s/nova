@@ -1,6 +1,7 @@
 <script>
 	import { t, m } from '$lib/i18n/index.svelte.js';
 	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { authStore } from '$lib/stores/auth.svelte.js';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -65,6 +66,12 @@
 		authStore.isStaff
 			? `${resolve('/app/billing')}?plan=${tier}`
 			: `${resolve('/register')}?as=business&plan=${tier}`;
+
+	// Plans are for businesses. A signed-in customer reaching this page by URL
+	// is sent to the marketplace instead. Display only: nothing here is secret.
+	$effect(() => {
+		if (authStore.isCustomer) goto(resolve('/discover'), { replaceState: true });
+	});
 
 	const faqs = [
 		{

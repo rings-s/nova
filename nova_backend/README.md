@@ -60,7 +60,8 @@ nova_backend/
 │   │   ├── billing/         ✅ Subscription, CommissionLine, Invoice, Payout
 │   │   ├── analytics/       ✅ owner reports and Plotly charts (pandas, numpy)  ← owns no tables
 │   │   ├── notification/    ✅ Notification
-│   │   └── ai_agents/       ✅ PydanticAI agents (calls services, never the DB)
+│   │   ├── ai_agents/       ✅ PydanticAI agents (calls services, never the DB)
+│   │   └── admin/           ✅ AdminAuditEntry  ← superuser console: reads every table, audited
 │   │
 │   ├── integrations/        outbound adapters (Moyasar, WhatsApp) + images.py, storage/ (photos)
 │   └── worker/              outbox dispatcher + scheduled jobs (ARQ)
@@ -85,6 +86,11 @@ Open any module and you already know your way around it.
 The exception is `analytics`, which owns no tables. It has no `models.py`, `repository.py` or
 `events.py`. It reads other modules' fact projections through their services, and adds
 `metrics.py` (pandas and numpy, the only place they are imported) and `charts.py` (Plotly).
+
+`admin` (the platform console at `/admin`, superusers only) also differs. Its repository reads
+every table generically through `Base.metadata`, never another module's ORM classes, and it owns
+no events. Its only writes are the audit entry and the curated actions in `admin/domain.py`, each
+run through the owning module's service.
 
 | File              | Layer       | Holds                                             |
 | :---------------- | :---------- | :------------------------------------------------ |

@@ -30,13 +30,21 @@
 		if (event.key === 'Escape' && mobileOpen) mobileOpen = false;
 	}
 
-	/** @type {{ href: '/about'|'/features'|'/pricing'|'/discover', label: string }[]} */
+	/** @typedef {'/about'|'/features'|'/pricing'|'/discover'} PublicNavHref */
+
+	/** @type {{ href: PublicNavHref, label: string }[]} */
 	const publicNavLinks = [
 		{ href: '/about', label: m('About') },
 		{ href: '/features', label: m('Features') },
 		{ href: '/pricing', label: m('Pricing') },
 		{ href: '/discover', label: m('Book a treatment') }
 	];
+
+	/** @param {PublicNavHref} href */
+	function isActiveLink(href) {
+		const path = resolve(href);
+		return page.url.pathname === path || page.url.pathname.startsWith(`${path}/`);
+	}
 
 	async function handleSignOut() {
 		authStore.logout();
@@ -50,171 +58,204 @@
 {#if isDashboard}
 	<!-- /app renders its own shell in routes/app/+layout.svelte -->
 {:else if isPublic}
-	<header class="sticky top-0 z-40 border-b border-line/70 bg-surface/85 backdrop-blur-xl">
-		<div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-			<div class="flex min-h-16 items-center justify-between gap-6">
-				<!-- Brand -->
-				<div class="flex min-w-0 items-center gap-6 xl:gap-8">
-					<a
-						href={resolve('/')}
-						class="shrink-0 transition-opacity hover:opacity-80"
-						aria-label={t('NOVA home')}
-					>
-						<Logo />
-					</a>
+	<header class="sticky top-0 z-40 bg-canvas/75 backdrop-blur-xl">
+		<div class="mx-auto max-w-7xl px-3 py-2 sm:px-6 lg:px-8">
+			<div
+				class="overflow-hidden rounded-panel border border-line/70 bg-surface/90 shadow-raised backdrop-blur-xl"
+			>
+				<div
+					class="flex min-h-14 items-center justify-between gap-4 px-3 sm:min-h-16 sm:gap-6 sm:px-4"
+				>
+					<!-- Brand -->
+					<div class="flex min-w-0 items-center gap-6 xl:gap-8">
+						<a
+							href={resolve('/')}
+							class="shrink-0 transition-opacity hover:opacity-80"
+							aria-label={t('NOVA home')}
+						>
+							<Logo />
+						</a>
 
-					<!-- Desktop navigation -->
-					<nav class="hidden items-center gap-5 lg:flex xl:gap-7" aria-label={t('Main navigation')}>
-						{#each publicNavLinks as link (link.href)}
-							<a
-								href={resolve(link.href)}
-								class="relative py-5 text-sm font-medium text-fg-secondary transition-colors hover:text-fg"
-							>
-								{t(link.label)}
-							</a>
-						{/each}
-					</nav>
+						<!-- Desktop navigation -->
+						<nav
+							class="hidden items-center gap-1 rounded-card border border-line-subtle bg-surface-muted/60 p-1 lg:flex"
+							aria-label={t('Main navigation')}
+						>
+							{#each publicNavLinks as link (link.href)}
+								<a
+									href={resolve(link.href)}
+									aria-current={isActiveLink(link.href) ? 'page' : undefined}
+									class={[
+										'rounded-control px-3 py-2 text-[13px] font-medium transition-colors',
+										isActiveLink(link.href)
+											? 'bg-surface text-fg shadow-card'
+											: 'text-fg-secondary hover:bg-surface/70 hover:text-fg'
+									].join(' ')}
+								>
+									{t(link.label)}
+								</a>
+							{/each}
+						</nav>
 
-					<!-- Authenticated shortcuts -->
-					{#if authStore.isAuthenticated}
-						<div class="hidden h-5 w-px bg-line lg:block"></div>
+						<!-- Authenticated shortcuts -->
+						{#if authStore.isAuthenticated}
+							<div class="hidden h-5 w-px bg-line lg:block"></div>
 
-						{#if authStore.isStaff}
-							<a
-								href={resolve('/app')}
-								class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
-							>
-								{t('Dashboard')}
-							</a>
-						{:else}
-							<a
-								href={resolve('/bookings')}
-								class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
-							>
-								{t('My bookings')}
-							</a>
+							{#if authStore.isStaff}
+								<a
+									href={resolve('/app')}
+									class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
+								>
+									{t('Dashboard')}
+								</a>
+							{:else}
+								<a
+									href={resolve('/bookings')}
+									class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
+								>
+									{t('My bookings')}
+								</a>
+							{/if}
 						{/if}
-					{/if}
-				</div>
+					</div>
 
-				<!-- Desktop actions. The page links only fit from `lg`, so everything
+					<!-- Desktop actions. The page links only fit from `lg`, so everything
 				     below that uses the menu; one breakpoint for both, or a band of
 				     widths shows neither. -->
-				<div class="hidden shrink-0 items-center gap-2 lg:flex">
-					<LanguageSwitch />
-					<ThemeToggle />
-
-					<div class="mx-1 h-6 w-px bg-line"></div>
-
-					{#if authStore.isAuthenticated}
-						{#if authStore.isStaff}
-							<div class="w-36 xl:w-44">
-								<TenantSwitcher />
-							</div>
-						{/if}
-
-						<Button variant="ghost" size="sm" onclick={handleSignOut} class="text-fg-secondary">
-							{t('Sign out')}
-						</Button>
-					{:else}
-						<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
-
-						<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
-					{/if}
-				</div>
-
-				<!-- Phone and tablet controls -->
-				<div class="flex shrink-0 items-center gap-2 lg:hidden">
-					{#if !authStore.isAuthenticated}
-						<!-- Room for them from `sm`; below that they are in the menu. The
-						     wrapper hides them: `Button`'s own `inline-flex` would beat a
-						     `hidden` passed to it. -->
-						<div class="hidden items-center gap-2 sm:flex">
-							<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
-							<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
+					<div class="hidden shrink-0 items-center gap-2 lg:flex">
+						<div
+							class="flex items-center rounded-card border border-line-subtle bg-surface-muted/60 p-0.5"
+						>
+							<LanguageSwitch />
+							<ThemeToggle />
 						</div>
-					{/if}
-					<LanguageSwitch compact />
-					<ThemeToggle />
 
-					<button
-						type="button"
-						aria-controls="site-mobile-menu"
-						onclick={() => (mobileOpen = !mobileOpen)}
-						class="inline-flex size-10 items-center justify-center rounded-control border border-line bg-surface text-fg-secondary transition-colors hover:bg-surface-muted"
-						aria-label={mobileOpen ? t('Close menu') : t('Open menu')}
-						aria-expanded={mobileOpen}
-					>
-						<Icon name={mobileOpen ? 'x' : 'menu'} class="size-5" />
-					</button>
-				</div>
-			</div>
+						<div class="mx-1 h-7 w-px bg-line"></div>
 
-			<!-- Phone and tablet navigation -->
-			{#if mobileOpen}
-				<div
-					id="site-mobile-menu"
-					class="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-line/70 py-4 lg:hidden"
-				>
-					<nav class="space-y-1" aria-label={t('Mobile navigation')}>
-						{#each publicNavLinks as link (link.href)}
-							<a
-								href={resolve(link.href)}
-								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary transition-colors hover:bg-surface-muted"
-							>
-								{t(link.label)}
-								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
-							</a>
-						{/each}
-
-						{#if authStore.isAuthenticated && !authStore.isStaff}
-							<a
-								href={resolve('/bookings')}
-								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
-							>
-								{t('My bookings')}
-								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
-							</a>
-						{/if}
-
-						{#if authStore.isStaff}
-							<a
-								href={resolve('/app')}
-								class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
-							>
-								{t('Dashboard')}
-								<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
-							</a>
-						{/if}
-					</nav>
-
-					<div
-						class={[
-							'mt-4 border-t border-line/70 pt-4',
-							// Signed out, its only content is in the bar itself from `sm`.
-							!authStore.isAuthenticated && 'sm:hidden'
-						]}
-					>
 						{#if authStore.isAuthenticated}
 							{#if authStore.isStaff}
-								<div class="mb-3">
+								<div class="w-36 xl:w-44">
 									<TenantSwitcher />
 								</div>
 							{/if}
 
-							<Button variant="outline" size="sm" class="w-full" onclick={handleSignOut}>
+							<Button variant="ghost" size="sm" onclick={handleSignOut} class="text-fg-secondary">
 								{t('Sign out')}
 							</Button>
 						{:else}
-							<div class="grid grid-cols-2 gap-2">
-								<Button variant="outline" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
+							<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
 
+							<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
+						{/if}
+					</div>
+
+					<!-- Phone and tablet controls -->
+					<div class="flex shrink-0 items-center gap-2 lg:hidden">
+						{#if !authStore.isAuthenticated}
+							<!-- Room for them from `sm`; below that they are in the menu. The
+						     wrapper hides them: `Button`'s own `inline-flex` would beat a
+						     `hidden` passed to it. -->
+							<div class="hidden items-center gap-2 sm:flex">
+								<Button variant="ghost" size="sm" href={resolve('/login')}>{t('Sign in')}</Button>
 								<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
 							</div>
 						{/if}
+						<LanguageSwitch compact />
+						<ThemeToggle />
+
+						<button
+							type="button"
+							aria-controls="site-mobile-menu"
+							onclick={() => (mobileOpen = !mobileOpen)}
+							class="inline-flex size-10 items-center justify-center rounded-control border border-line bg-surface text-fg-secondary transition-colors hover:bg-surface-muted"
+							aria-label={mobileOpen ? t('Close menu') : t('Open menu')}
+							aria-expanded={mobileOpen}
+						>
+							<Icon name={mobileOpen ? 'x' : 'menu'} class="size-5" />
+						</button>
 					</div>
 				</div>
-			{/if}
+
+				<!-- Phone and tablet navigation -->
+				{#if mobileOpen}
+					<div
+						id="site-mobile-menu"
+						class="max-h-[calc(100dvh-5rem)] overflow-y-auto border-t border-line/70 px-3 py-3 sm:px-4 lg:hidden"
+					>
+						<nav class="space-y-1" aria-label={t('Mobile navigation')}>
+							{#each publicNavLinks as link (link.href)}
+								<a
+									href={resolve(link.href)}
+									aria-current={isActiveLink(link.href) ? 'page' : undefined}
+									class={[
+										'flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium transition-colors',
+										isActiveLink(link.href)
+											? 'bg-accent-soft text-accent'
+											: 'text-fg-secondary hover:bg-surface-muted hover:text-fg'
+									].join(' ')}
+								>
+									{t(link.label)}
+									<Icon
+										name="arrow-right"
+										class={[
+											'size-4 rtl:rotate-180',
+											isActiveLink(link.href) ? '' : 'opacity-40'
+										].join(' ')}
+									/>
+								</a>
+							{/each}
+
+							{#if authStore.isAuthenticated && !authStore.isStaff}
+								<a
+									href={resolve('/bookings')}
+									class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
+								>
+									{t('My bookings')}
+									<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
+								</a>
+							{/if}
+
+							{#if authStore.isStaff}
+								<a
+									href={resolve('/app')}
+									class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
+								>
+									{t('Dashboard')}
+									<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
+								</a>
+							{/if}
+						</nav>
+
+						<div
+							class={[
+								'mt-4 border-t border-line/70 pt-4',
+								// Signed out, its only content is in the bar itself from `sm`.
+								!authStore.isAuthenticated && 'sm:hidden'
+							]}
+						>
+							{#if authStore.isAuthenticated}
+								{#if authStore.isStaff}
+									<div class="mb-3">
+										<TenantSwitcher />
+									</div>
+								{/if}
+
+								<Button variant="outline" size="sm" class="w-full" onclick={handleSignOut}>
+									{t('Sign out')}
+								</Button>
+							{:else}
+								<div class="grid grid-cols-2 gap-2">
+									<Button variant="outline" size="sm" href={resolve('/login')}
+										>{t('Sign in')}</Button
+									>
+
+									<Button size="sm" href={resolve('/register')}>{t('Get started')}</Button>
+								</div>
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
 		</div>
 	</header>
 {:else}

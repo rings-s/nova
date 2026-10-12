@@ -78,6 +78,7 @@
 	let email = $state('');
 	let phone = $state('');
 	let password = $state('');
+	let passwordConfirmation = $state('');
 	let businessNameEn = $state('');
 	let businessNameAr = $state('');
 	let businessPhone = $state('');
@@ -89,11 +90,24 @@
 		return fullName.trim() !== '' && email.trim() !== '' && password.trim() !== '';
 	}
 
-	function goToBusinessStep() {
+	function validateAccountStep() {
 		if (!isAccountStepValid()) {
 			error = t('Fill in your name, email and password first.');
-			return;
+			return false;
 		}
+		if (!passwordConfirmation) {
+			error = t('Confirm your password first.');
+			return false;
+		}
+		if (password !== passwordConfirmation) {
+			error = t('Passwords do not match.');
+			return false;
+		}
+		return true;
+	}
+
+	function goToBusinessStep() {
+		if (!validateAccountStep()) return;
 		error = null;
 		businessSubTab = 'business';
 	}
@@ -107,12 +121,11 @@
 			error = t('Choose whether this is a customer or a business account.');
 			return;
 		}
+		if (!validateAccountStep()) {
+			if (intent === 'business_owner') businessSubTab = 'account';
+			return;
+		}
 		if (intent === 'business_owner') {
-			if (!isAccountStepValid()) {
-				businessSubTab = 'account';
-				error = t('Fill in your name, email and password first.');
-				return;
-			}
 			if (!businessNameEn.trim() || !businessNameAr.trim() || !businessPhone.trim()) {
 				businessSubTab = 'business';
 				error = t("Fill in your business's name and phone.");
@@ -219,6 +232,13 @@
 			autocomplete="new-password"
 			bind:value={password}
 		/>
+		<Input
+			type="password"
+			label={t('Confirm password')}
+			required
+			autocomplete="new-password"
+			bind:value={passwordConfirmation}
+		/>
 
 		<Button type="submit" {loading} fullWidth>{t('Create account')}</Button>
 	{:else if intent === 'business_owner'}
@@ -270,6 +290,13 @@
 					hint={t('At least 12 characters.')}
 					autocomplete="new-password"
 					bind:value={password}
+				/>
+				<Input
+					type="password"
+					label={t('Confirm password')}
+					required
+					autocomplete="new-password"
+					bind:value={passwordConfirmation}
 				/>
 				<Button type="button" variant="outline" fullWidth onclick={goToBusinessStep}>
 					{t('Continue to your business')}
