@@ -6,9 +6,9 @@
  * `is_superuser` only decides what to show. Every `/admin` route checks it for
  * itself (`require_superuser`).
  */
-import { me } from '$lib/api/auth.js';
 import { listTables } from '$lib/api/admin.js';
 import { m } from '$lib/i18n/index.svelte.js';
+import { superuserStore } from '$lib/stores/superuser.svelte.js';
 
 export const consoleState = $state({
 	/** @type {'loading'|'denied'|'ready'} */
@@ -18,12 +18,21 @@ export const consoleState = $state({
 });
 
 let loading = /** @type {Promise<void>|null} */ (null);
+/** @type {string|null} */
+let loadedFor = null;
 
-/** Checks the account and loads the tables, once per page load. */
-export function loadConsole() {
-	loading ??= me()
-		.then(async (account) => {
-			if (!account.is_superuser) {
+/**
+ * Checks the account and loads the tables, once per account: signing in as
+ * someone else in the same tab asks again.
+ * @param {string} userId
+ */
+export function loadConsole(userId) {
+	if (loadedFor !== userId) resetConsole();
+	loadedFor = userId;
+	loading ??= superuserStore
+		.load(userId)
+		.then(async (isSuperuser) => {
+			if (!isSuperuser) {
 				consoleState.status = 'denied';
 				return;
 			}

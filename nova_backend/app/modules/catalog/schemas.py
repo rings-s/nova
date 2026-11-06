@@ -265,3 +265,10 @@ class ProviderOut(ApiSchema):
 
 class AssignServiceRequest(ApiSchema):
     service_id: UUID
+
+
+class AssignmentOut(ApiSchema):
+    """One provider qualified for one service."""
+
+    provider_id: UUID
+    service_id: UUID

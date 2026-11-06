@@ -1,5 +1,6 @@
 """analytics · DELIVERY layer — DI providers."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -52,13 +53,13 @@ def build_analytics_service(
 
 
 def get_analytics_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
-    catalog: CatalogService = Depends(get_catalog_service),
-    bookings: BookingService = Depends(get_booking_service),
-    payments: PaymentService = Depends(get_payment_service),
-    queues: QueueService = Depends(get_queue_service),
-    billing: BillingService = Depends(get_billing_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    catalog: Annotated[CatalogService, Depends(get_catalog_service)],
+    bookings: Annotated[BookingService, Depends(get_booking_service)],
+    payments: Annotated[PaymentService, Depends(get_payment_service)],
+    queues: Annotated[QueueService, Depends(get_queue_service)],
+    billing: Annotated[BillingService, Depends(get_billing_service)],
 ) -> AnalyticsService:
     """Tenant-scoped through `get_tenant_context`, like every other module."""
     return build_analytics_service(

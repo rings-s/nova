@@ -139,6 +139,28 @@ async def expire_stale_tickets(ctx: dict) -> int:
     return expired
 
 
+async def cancel_stale_queue_entries(ctx: dict) -> int:
+    """Cancels queue entries that joined more than `QUEUE_ENTRY_MAX_AGE_HOURS`
+    ago and were never served.
+
+    Not cosmetic: the line is ordered by arrival, so a walk-in left waiting at
+    closing time would otherwise be at the head of tomorrow's line.
+    """
+    from app.modules.queue.dependencies import build_queue_sweeper
+
+    session_factory = get_session_factory()
+    cutoff = datetime.now(UTC) - timedelta(hours=get_settings().queue_entry_max_age_hours)
+
+    async with session_factory() as session:
+        await bypass_tenant_scope(session)
+        cancelled = await build_queue_sweeper(session).cancel_stale(joined_before=cutoff)
+        await session.commit()
+
+    if cancelled:
+        logger.info("queue_entries_cancelled", extra={"count": cancelled})
+    return cancelled
+
+
 async def purge_expired_slot_holds(ctx: dict) -> int:
     """Deletes slot holds that expired more than a day ago.
 
@@ -409,6 +431,101 @@ async def advance_dunning(ctx: dict) -> int:
     return chased
 
 
+async def place_reminder_calls(ctx: dict) -> int:
+    """Sara rings customers about tomorrow's confirmed bookings (ADR-0017).
+
+    Only a customer who consented to calls, from the business's own line,
+    during the day where the branch is, once per booking (a unique index, so a
+    second sweep cannot ring twice). Without `VOICE_PUBLIC_BASE_URL` Unifonic
+    would have nowhere to send the answer, so nothing is placed. Each booking
+    commits on its own, and its call is committed before it is dialled. A dial
+    that certainly did not ring removes the call, so the next hourly sweep
+    tries again; one that may have rung (a timeout) is never tried again.
+    """
+    from app.modules.booking.dependencies import build_booking_reminder_reader
+    from app.modules.call_center.dependencies import build_call_center_service
+    from app.modules.call_center.service import REMINDER_LEAD
+
+    settings = get_settings()
+    if not settings.voice_public_base_url or not settings.unifonic_voice_api_key:
+        return 0
+    now = datetime.now(UTC)
+    session_factory = get_session_factory()
+
+    async with session_factory() as session:
+        await bypass_tenant_scope(session)
+        due = await build_booking_reminder_reader(session).list_due(
+            start=now + REMINDER_LEAD,
+            end=now + timedelta(hours=settings.voice_reminder_hours_ahead),
+        )
+
+    placed = 0
+    for tenant_id, booking_id in due:
+        try:
+            async with session_factory() as session:
+                await set_tenant_scope(session, tenant_id)
+                service = build_call_center_service(session, tenant_id)
+                plan = await service.prepare_reminder(
+                    booking_id,
+                    base_url=settings.voice_public_base_url,
+                    now=now,
+                    window=(settings.voice_call_window_start, settings.voice_call_window_end),
+                    daily_cap=settings.voice_reminder_daily_cap,
+                )
+                # Committed before it rings: the customer's first keypress must
+                # find the call, and so must the next sweep, whatever the dial does.
+                await session.commit()
+                if plan is None:
+                    continue
+                outcome = await service.dial_reminder(plan, base_url=settings.voice_public_base_url)
+                await set_tenant_scope(session, tenant_id)
+                await service.record_dial(plan, outcome)
+                await session.commit()
+                if outcome.placed:
+                    placed += 1
+        except Exception:
+            logger.exception("reminder_call_failed", extra={"booking_id": str(booking_id)})
+
+    if placed:
+        logger.info("reminder_calls_placed", extra={"count": placed})
+    return placed
+
+
+async def end_abandoned_calls(ctx: dict) -> int:
+    """Ends calls the caller hung up on, once no link they were given still
+    works (ADR-0017). Unifonic sends nothing on a hang-up."""
+    from app.modules.call_center.dependencies import build_call_sweeper
+
+    session_factory = get_session_factory()
+
+    async with session_factory() as session:
+        await bypass_tenant_scope(session)
+        ended = await build_call_sweeper(session).end_abandoned(now=datetime.now(UTC))
+        await session.commit()
+
+    if ended:
+        logger.info("abandoned_calls_ended", extra={"count": ended})
+    return ended
+
+
+async def scrub_old_calls(ctx: dict) -> int:
+    """Clears callers' numbers and Sara's words from calls past
+    `VOICE_CALL_RETENTION_DAYS` (ADR-0017). The calls and their outcomes stay."""
+    from app.modules.call_center.dependencies import build_call_sweeper
+
+    cutoff = datetime.now(UTC) - timedelta(days=get_settings().voice_call_retention_days)
+    session_factory = get_session_factory()
+
+    async with session_factory() as session:
+        await bypass_tenant_scope(session)
+        scrubbed = await build_call_sweeper(session).scrub_started_before(cutoff)
+        await session.commit()
+
+    if scrubbed:
+        logger.info("calls_scrubbed", extra={"count": scrubbed})
+    return scrubbed
+
+
 def encode_job(data: dict[str, Any]) -> bytes:
     """A job, or its result, as JSON rather than ARQ's default pickle.
 
@@ -441,12 +558,16 @@ class WorkerSettings:
         dispatch_outbox,
         deliver_pending_notifications,
         expire_stale_tickets,
+        cancel_stale_queue_entries,
         purge_expired_slot_holds,
         purge_expired_idempotency_keys,
         close_monthly_invoices,
         settle_daily_payouts,
         advance_dunning,
         expire_trials,
+        place_reminder_calls,
+        end_abandoned_calls,
+        scrub_old_calls,
     ]
 
     cron_jobs = [
@@ -461,6 +582,7 @@ class WorkerSettings:
         # cadence rather than next to the nightly sweeps.
         cron(deliver_pending_notifications, second={0, 30}),
         cron(expire_stale_tickets, minute={7, 37}),
+        cron(cancel_stale_queue_entries, minute={9}),
         cron(purge_expired_slot_holds, hour={3}, minute={11}),
         cron(purge_expired_idempotency_keys, hour={3}, minute={21}),
         # docs/11 section 7 step 3: the 1st of each month. 02:00 rather than
@@ -477,6 +599,11 @@ class WorkerSettings:
         cron(advance_dunning, hour={9}, minute={0}),
         # Hourly: a trial ends on a date, and the lock follows within the hour.
         cron(expire_trials, minute={5}),
+        # Hourly, so each branch is reached once its local calling hours open.
+        cron(place_reminder_calls, minute={15}),
+        # Hourly: the call log shows a hung-up call as over within the hour.
+        cron(end_abandoned_calls, minute={45}),
+        cron(scrub_old_calls, hour={3}, minute={31}),
     ]
 
     on_startup = startup

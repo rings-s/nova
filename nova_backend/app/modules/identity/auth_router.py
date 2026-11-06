@@ -4,7 +4,7 @@ Unauthenticated by design (that is the point of logging in), so these carry the
 tightest rate limits in the system.
 """
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,8 +76,8 @@ def _token_out(tokens: TokenPair, response: Response, *, as_cookie: bool) -> Tok
 )
 async def register(
     payload: RegisterRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: AuthService = Depends(get_auth_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserOut:
     """Creates an account. It does not sign you in: call `POST /auth/login` next.
 
@@ -96,8 +96,8 @@ async def register(
 
 @router.get("/me", response_model=UserOut)
 async def me(
-    service: AuthService = Depends(get_auth_service),
-    principal: Principal = Depends(get_principal),
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> UserOut:
     """The signed-in account: who it is, and whether it is a NOVA administrator."""
     user = await service.get_account(principal)
@@ -114,8 +114,8 @@ async def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
-    session: AsyncSession = Depends(get_db_session),
-    service: AuthService = Depends(get_auth_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> TokenOut:
     """Signs in, returning an access token (15 minutes) and a refresh token (30 days).
 
@@ -143,7 +143,7 @@ async def refresh(
     payload: RefreshRequest,
     request: Request,
     response: Response,
-    service: AuthService = Depends(get_auth_service),
+    service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> TokenOut:
     """Exchanges a refresh token for a new access and refresh token.
 
@@ -181,9 +181,9 @@ async def logout(response: Response) -> None:
 )
 async def logout_everywhere(
     response: Response,
-    session: AsyncSession = Depends(get_db_session),
-    service: AuthService = Depends(get_auth_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> None:
     """Revokes every outstanding token for the caller.
 
@@ -202,9 +202,9 @@ async def logout_everywhere(
     dependencies=[Depends(write_rate_limit)],
 )
 async def request_phone_verification(
-    session: AsyncSession = Depends(get_db_session),
-    service: AuthService = Depends(get_auth_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> None:
     """Sends a short-lived, purpose-signed JWT to the account's own phone over
     WhatsApp (docs/14 TM-01).
@@ -224,9 +224,9 @@ async def request_phone_verification(
 )
 async def confirm_phone_verification(
     payload: ConfirmPhoneVerificationRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: AuthService = Depends(get_auth_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> None:
     """Proves the account's phone number with the token that
     `POST /auth/phone/verify/request` sent over WhatsApp.

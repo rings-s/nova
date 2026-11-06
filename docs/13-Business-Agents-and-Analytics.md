@@ -66,6 +66,7 @@ Three decisions frame everything below. Each was put to the product owner and an
 | `accountant_agent`       | staff                | Explain what the business earned, collected, was paid out and was charged. | every plan                            | reasoning | `billing_agent`                |
 | `analyst_agent`          | staff                | Answer a question about the business's numbers with metrics and charts.    | `ai_insights_agent`, Studio and Chain | reasoning | `insights_agent`               |
 | `business_manager_agent` | staff                | Turn the numbers into at most five proposed actions.                       | `ai_insights_agent`, Studio and Chain | reasoning | —                              |
+| `call_center_agent`      | callers (phone)      | Answer the business's phone: book, queue, or the caller's own booking.     | `ai_call_center`, Studio and Chain    | voice     | `sara`                         |
 
 `retention_agent` stays unavailable. It sends campaigns, and NOVA has no approved-campaign sender
 yet (docs/10 §7).
@@ -96,7 +97,7 @@ app/modules/ai_agents/
   tools/           # AgentToolkit: tool functions over application services, one file per agent
   guardrails.py    # owner-only, grounding check, proposal and chart allowlists (pure)
   service.py       # AgentDeps, TurnArtifacts, AiChatService
-  runtime.py       # PydanticAI 2.x + Ollama, fallback matrix
+  runtime.py       # PydanticAI 2.x + vLLM, fallback matrix
   schemas.py       # AgentOutput family, chat request and response, ProposedActionOut
   router.py        # POST /ai/chat, GET /ai/agents
 
@@ -177,6 +178,7 @@ class AgentSpec:
     needs_business: bool = False               # staff agents work on one named business
     prefer_reasoning_model: bool = True
     grounded_numbers: bool = False             # every number in the reply must come from a tool
+                                               # or the facts (all but Sara, section 5.2)
 
 
 @dataclass
@@ -289,8 +291,11 @@ The response adds `agent`, `charts`, `proposed_actions` and `metrics_used`.
 | `get_queue_length(queue_id)`                                | `QueueService.list_queue`                                  | no     |
 | `join_queue(queue_id, service_id, provider_id, party_size)` | `QueueService.join`                                        | yes    |
 | `get_queue_position(entry_id)`                              | `QueueService.assert_entry_visible_to`, then `position_of` | no     |
+| `escalate_to_human(summary)`                                | records a handoff and its summary for the turn             | no     |
 
 - **Guardrails:**
+  - A problem with an existing booking, a payment or a complaint is handed off with
+    `escalate_to_human`, which opens a follow-up for the business (section 4.2).
   - It cannot confirm a booking; a hold is as far as it goes (docs/10 §5). Confirmation stays with
     the verified payment webhook.
   - It holds slots and joins the queue only for the caller: the principal's own customer record,
@@ -310,7 +315,7 @@ person needs.
 | `get_booking_status(booking_id)`           | `BookingService.get_for_principal`              | no     |
 | `get_payment_status(booking_id)`           | `PaymentService.list_for_booking_for_principal` | no     |
 | `request_cancellation(booking_id, reason)` | `BookingService.preview_cancellation`           | no     |
-| `escalate_to_human(summary)`               | records a handoff in `TurnArtifacts`            | no     |
+| `escalate_to_human(summary)`               | records a handoff and its summary for the turn  | no     |
 
 - **Guardrails:**
   - Every booking and payment read is checked against the principal first. A customer who names
@@ -326,6 +331,16 @@ person needs.
     escalation with a summary, and a person decides.
   - A complaint about service quality, or a second failed attempt at the same problem, sets
     `requires_human_handoff`.
+- **Follow-ups (`support`):** a handoff is kept only if a person hears of it. When a signed-in
+  customer's turn at a business ends in a handoff (this agent's, the receptionist's, or the
+  fallback's), `AiChatService` opens a follow-up in that business's inbox
+  (`GET /tenants/{tenant_id}/follow-ups`, `view_customers`): the `escalate_to_human` summary, the
+  customer's last message (PII masked), and their contact, from their customer record or else their
+  account. One per conversation; another handoff updates it, and reopens it if it was resolved. The
+  response's `follow_up_opened` says it happened, and only then does the web app tell the customer
+  someone will get back to them. Staff, the marketplace assistant and a failed follow-up open
+  nothing, and a fallback reply then says the assistant is unavailable instead of promising a
+  person. Sara's call backs open one per call the same way (section 4.6).
 
 ### 4.3 Accountant
 
@@ -404,6 +419,41 @@ reason and the metric behind it. Advise only.
     business.
   - `grounded_numbers` is on, and every proposal cites a metric used in the same turn.
 
+### 4.6 Sara, the call center (ADR-0017)
+
+**Goal:** answer the business's phone, booking, queueing, or telling the caller about their own
+booking, in spoken Saudi Arabic (or English, if the caller uses it).
+
+- **Reached only by phone.** `call_center` runs each call as Unifonic webhook turns and calls
+  `AiChatService.chat(voice=True)`. The chat routes refuse `call_center_agent` (`voice_only`), and the
+  voice path refuses every other agent.
+- **Model:** her own, `VOICE_AI_*` (`build_voice_inference_engine`): one fast model, a 6-second turn.
+- **Tools:** the receptionist's slot, hold, book and queue tools, and customer service's
+  `list_my_bookings`, `get_booking_status`, `request_cancellation` and `escalate_to_human`, plus
+  `verify_caller`.
+
+| Tool              | What it does                                                                          | Write? |
+| ----------------- | ------------------------------------------------------------------------------------- | ------ |
+| `verify_caller()` | Asks `call_center` to send a 4-digit code to the customer's WhatsApp, typed on keypad | no     |
+
+- **Guardrails:**
+  - The caller books by pressing 1, never by saying yes: `call_center` reads the newest offer's hold
+    token itself (`confirm_latest_offer`), as the app sends the button's.
+  - Caller ID finds the customer to book for, and nothing more. The tools that read or offer to
+    change a booking refuse with `caller_not_verified` until the code was typed.
+  - A cancellation is confirmed by pressing 2, by a verified caller, and goes through
+    `BookingService.cancel` under the customer's policy.
+  - A booking she makes is a `draft` until staff confirm it. Its details go to the caller's
+    WhatsApp (`booking_received`), at once if they already consented, else when they press 3,
+    which records their consent.
+  - A turn acts as a service principal, so every tool that names a booking checks it is the
+    customer's own.
+  - Replies are spoken: at most two sentences, no lists, links or ids.
+  - Every "someone from the business will call you" opens a follow-up (`support`) for the call, with
+    the number that called: when she hands off (with her `escalate_to_human` summary and the caller's
+    words), when the WhatsApp code cannot be sent, when a cancellation by keypad is refused, and at
+    the turn cap. The call is logged as `callback_requested`.
+
 ---
 
 ## 5. Guardrails
@@ -442,6 +492,53 @@ retryable:
 
 Grounding is a floor, not a proof. A model can still attach a real number to the wrong metric.
 `metrics_used` and the chart are how a reader checks.
+
+**Customer agents are grounded too** (2026-10-28). The concierge, receptionist, marketplace and
+customer-service agents have `grounded_numbers` on, as the owner agents do: a price, duration,
+opening hour or percentage a customer agent made up is retried once, then handed off. Sara
+(`call_center_agent`) is the one agent without it, because a retry costs a caller seconds of
+silence and her replies are spoken with numbers as words. NOVA's own instructions count as
+grounded, and they are scanned only once they are whole, so the business facts and the open
+offers' local times (below) count too. A number only the customer wrote does not: "is it 50
+riyals?" answered "yes, 50" is the hallucination this check exists to stop.
+
+### 5.3 What a Customer Agent Knows: Retrieval From the Records
+
+The customer agents answer from the database through services, never from the model's memory.
+Anything that changes by the minute (free times, the queue, a customer's own booking or payment)
+is a tool call. What a business's records say about it is read once per turn by
+`app/modules/ai_agents/tools/facts.py::read_catalog` and handed over whole, because a salon's catalogue is a few
+dozen rows: small enough to fit in the instructions, which a small model reads more reliably than
+it chooses a search tool.
+
+| Fact                                                | Read from                                                                           |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Name, description, average rating and review count  | `CatalogService.get_business` (`rating_sum` / `rating_count`)                       |
+| Branches: name, city in the app's language, map URL | `CatalogService.list_locations`                                                     |
+| Opening hours per branch                            | the union of its active providers' `BookingService.get_provider_schedule` windows   |
+| Services: description, duration, price, currency    | `CatalogService.list_services`                                                      |
+| Who performs each service, and whether it is bookable | `CatalogService.list_assignments`, counting only providers with working hours     |
+| Free cancellation window, deposit percentage        | `BookingService.cancellation_policy`, `PaymentService.default_deposit_percent`      |
+
+The same snapshot is rendered twice: as text appended to the receptionist's and Sara's
+instructions (`business_facts`), and as the result of the marketplace's `get_business_details`,
+read in the listing's own tenant, so the two assistants cannot describe a business differently.
+Opening hours are the providers' usual weekly hours, with alike days run together
+(`Sun-Thu 09:00-13:00, 16:00-21:00`); a branch where nobody has hours says "not set yet" rather
+than "closed". Schedule exceptions are not in them; free times are the tool's to say.
+
+Tenant-written prose reaches the model as one line: a name at most 80 characters, a description
+at most 160, and a description that reads as instructions (`guardrails.detect_injection`) not at
+all.
+
+A question nothing in the records answers (parking, products, a provider's experience, a
+discount) has no row to retrieve. The instructions tell the agent to say it does not have that
+information and offer `escalate_to_human`, never to guess, and grounding stops a guessed number.
+
+NOVA has no vector index. The questions customers ask are about structured rows (prices, hours,
+times), which the records answer exactly; similarity search would add a model server and an
+embedding table per tenant to retrieve what one query already returns. It becomes worth it with
+long free text to search, such as review comments or a policy handbook.
 
 ---
 
@@ -685,7 +782,7 @@ every plan; the AI agents that interpret them are on Studio and Chain (docs/11 �
 
 | Condition                    | Behaviour                                                                                                                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Inference engine offline     | Chat returns the static handoff reply (docs/10 §12). `/analytics/*` keeps working, so the dashboard still shows every chart. |
+| Inference engine offline     | Chat returns the static handoff reply (docs/10 §12) and opens a follow-up for a signed-in customer at a business; with no follow-up, it says the assistant is unavailable instead. `/analytics/*` keeps working, so the dashboard still shows every chart. |
 | A tool raises a domain error | The model receives the error message as the tool result and relays it.                                                       |
 | A reply is ungrounded twice  | Handoff, with `degraded: true`.                                                                                              |
 | A usage limit is hit         | Handoff.                                                                                                                     |

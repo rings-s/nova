@@ -77,9 +77,11 @@ class Settings(BaseSettings):
     #: answers for every provider qualified for the service rather than one
     #: named provider, so the same window costs a multiple of it.
     discovery_max_availability_days: int = 14
-    #: Hard cap on slots in one public availability response. The window bounds
-    #: the date dimension; a salon with thirty stylists is the other one.
-    discovery_max_public_slots: int = 500
+    #: Cap on slots in one public availability response. The window bounds the
+    #: date dimension; a salon with thirty stylists is the other one. Over it,
+    #: whole days come off the end and the response says where to resume
+    #: (`more_from`), so 1,500 fits two weeks for a salon of four or five.
+    discovery_max_public_slots: int = 1500
 
     # --- Queue / tickets ---
     #: Virtual tickets expire this long after issue. An indefinitely valid QR
@@ -88,6 +90,10 @@ class Settings(BaseSettings):
     #: How far a walk-in yields to a booked appointment on the shared provider
     #: timeline. See `queue.domain.priority_key` for what this actually means.
     queue_walk_in_penalty_minutes: int = 15
+    #: A queue entry still waiting (or called, or missed) this long after it
+    #: joined is cancelled by the worker. The line is ordered by arrival, so a
+    #: leftover from yesterday would otherwise be first in line tomorrow.
+    queue_entry_max_age_hours: int = 14
 
     # --- Payments ---
     #: The account's *secret* key (`sk_test_…` or `sk_live_…`), from the
@@ -133,22 +139,23 @@ class Settings(BaseSettings):
     quiet_hours_end: int = 8
 
     # --- AI agents (docs/04, docs/10) ---
-    #: Which local model server answers. Both speak the OpenAI chat protocol at
-    #: /v1; the provider only decides the defaults and how replies are read
-    #: (`ai_agents/runtime.py`).
-    ai_provider: Literal["ollama", "lmstudio"] = "ollama"
-    #: OpenAI-compatible endpoint. Ollama exposes one at /v1.
-    ollama_base_url: str = "http://localhost:11434/v1"
-    #: Overrides `ollama_base_url` for any provider, e.g. LM Studio's
-    #: `http://host.docker.internal:1234/v1`.
-    ai_base_url: str | None = None
+    #: The models come from vLLM only: the compose `llm` service (ADR-0019),
+    #: in every environment. Nothing reads this; it is here so a stale
+    #: `llamacpp`, `ollama`, `lmstudio` or `openai_compatible` value stops the
+    #: process at startup instead of being silently ignored.
+    ai_provider: Literal["vllm"] = "vllm"
+    #: vLLM's OpenAI-compatible /v1 URL: the compose `llm` service by default.
+    ai_base_url: str = "http://llm:8000/v1"
     #: Local servers ignore it; set it if the server is started with auth on.
     ai_api_key: str | None = None
-    ai_routing_model: str = "llama3.1:8b"
-    ai_reasoning_model: str = "llama3.1:70b"
+    #: The `llm` service's `--served-model-name` (`LLM_ALIAS`). It must contain
+    #: `qwen3` for thinking to be switched off. Qwen3-4B by default, on a GPU;
+    #: a CPU-only machine serves Qwen3-1.7B instead (`infra/.env`).
+    ai_routing_model: str = "qwen3-4b"
+    ai_reasoning_model: str = "qwen3-4b"
     #: Let a hybrid reasoning model (Qwen3) think before it answers. Off by
     #: default: on a CPU or small GPU thinking multiplies a turn's time (about
-    #: 5x for qwen3-8b in LM Studio) for little gain on these narrow tool tasks.
+    #: 5x for qwen3-8b) for little gain on these narrow tool tasks.
     ai_thinking: bool = False
     #: docs/10 section 12: abort the turn and hand off past this.
     ai_tool_timeout_seconds: float = 5.0
@@ -156,13 +163,83 @@ class Settings(BaseSettings):
     ai_enabled: bool = True
     #: Turns allowed to run at once in this process, and how long a further one
     #: waits for a slot before the caller is told to retry (`ai_busy`). Match the
-    #: model server: `lms load --parallel N` serves N turns at a time.
-    ai_max_concurrent_turns: int = 2
+    #: model server: the `llm` service with `LLM_PARALLEL=N` runs N sequences
+    #: at a time. One, as `LLM_PARALLEL` defaults to: on a CPU, a second turn
+    #: halves the speed of both and competes for the prefix cache.
+    ai_max_concurrent_turns: int = 1
     ai_queue_wait_seconds: float = 15.0
     #: How long a conversation's recent turns are remembered, and how many
     #: (`ai_agents/history.py`). Working memory for the model, not a record.
     ai_history_ttl_seconds: int = 86_400
     ai_history_max_turns: int = 10
+
+    # --- Sara, the call-center agent, on Unifonic Voice (ADR-0017) ---
+    #: The Unifonic Voice API key, for placing outbound calls. Inbound calls need
+    #: none: Unifonic calls the line's URL. Unset, reminder calls are skipped.
+    unifonic_voice_api_key: str | None = None
+    #: To verify against the Unifonic console's API reference before go-live.
+    unifonic_voice_base_url: str = "https://voice.unifonic.com/v1"
+    #: The API's public origin as Unifonic reaches it (`https://api.example.sa`),
+    #: for the absolute URL each reply tells Unifonic to send the caller's answer
+    #: to. Unset, an inbound call uses the origin its own request arrived on,
+    #: and an outbound call is not placed.
+    voice_public_base_url: str | None = None
+    #: The model Sara thinks with: a vLLM server too, at its own URL if a
+    #: faster one is run for her, since a phone call waits on every turn. Each
+    #: unset value falls back to its `AI_*` setting; the provider is a guard
+    #: like `ai_provider`.
+    voice_ai_provider: Literal["vllm"] | None = None
+    voice_ai_base_url: str | None = None
+    voice_ai_api_key: str | None = None
+    voice_ai_model: str | None = None
+    #: Kept under Unifonic's wait for a reply, so a slow model costs the caller
+    #: a "could you say that again" rather than a dropped call.
+    voice_ai_request_timeout_seconds: float = 6.0
+    voice_ai_tool_timeout_seconds: float = 3.0
+    #: Sara's voice: an OpenAI-compatible `/audio/speech` server. NOVA's own is
+    #: the compose `tts` service (`infra/tts`, ADR-0018, `http://tts:8091/v1`),
+    #: serving the Saudi Qwen3-TTS fine-tune (`vadimbelsky/qwen3-TTS-KSA`).
+    #: Unset, Unifonic's own text-to-speech reads her replies.
+    voice_tts_base_url: str | None = None
+    voice_tts_api_key: str | None = None
+    voice_tts_model: str = "vadimbelsky/qwen3-TTS-KSA"
+    voice_tts_voice: str = "ksa_speaker"
+    #: Passed as Qwen3-TTS's `language`. The KSA fine-tune speaks Arabic only, so
+    #: an English reply is read by Unifonic's voice instead.
+    voice_tts_language: str = "Arabic"
+    #: A style prompt (`instructions`), e.g. "Warm and friendly". Empty: none.
+    voice_tts_instructions: str = ""
+    #: A phone line carries 8 kHz audio; Qwen3-TTS makes 8000 or 24000 Hz.
+    voice_tts_sample_rate: int = 8000
+    #: Past this, the reply is read by Unifonic's voice rather than keep the
+    #: caller waiting longer.
+    voice_tts_timeout_seconds: float = 4.0
+    #: The most a caller waits for one answer, from Unifonic's request to ours:
+    #: the model's `VOICE_AI_REQUEST_TIMEOUT_SECONDS` and speech together. Speech
+    #: gets whatever the model left (never more than `VOICE_TTS_TIMEOUT_SECONDS`);
+    #: with too little left, Unifonic reads the text. Keep it under Unifonic's
+    #: own wait for a reply, which is to verify on a live account.
+    voice_turn_budget_seconds: float = Field(default=8.0, gt=0.0)
+    #: How long a generated reply's audio is kept for Unifonic to fetch, and
+    #: for the same words to be said again without generating them twice.
+    voice_tts_cache_seconds: int = 3600
+    #: Caller turns in one call before Sara says goodbye: a cap on what one call
+    #: can cost, in model time and in the plan's AI messages.
+    voice_max_turns_per_call: int = 30
+    #: Speech Unifonic recognised with a lower `confidence` is asked for again
+    #: instead of reaching the model. 0 trusts every transcript. Unifonic's
+    #: scale is to verify on a live account: on a 0-100 scale this lets
+    #: everything through, which fails safe.
+    voice_min_speech_confidence: float = Field(default=0.3, ge=0.0)
+    #: Reminder calls go out this far ahead of a confirmed booking, between
+    #: these local hours, and at most this many a day per business.
+    voice_reminder_hours_ahead: int = 24
+    voice_call_window_start: int = 10
+    voice_call_window_end: int = 21
+    voice_reminder_daily_cap: int = 200
+    #: After this many days a call keeps its outcome but not the caller's number
+    #: or Sara's words (PDPL). The `scrub_old_calls` cron clears them nightly.
+    voice_call_retention_days: int = Field(default=90, ge=1)
 
     # --- Ingress ---
     #: Set when `make tunnel` publishes the stack through Cloudflare, which is

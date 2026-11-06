@@ -151,6 +151,12 @@
 		{#if rows}
 			<Badge tone="neutral">{t('{count} rows', { count: rows.total })}</Badge>
 		{/if}
+		{#if detail?.editable}
+			<Button href={resolve('/admin/tables/[table]/new', { table })}>
+				<Icon name="plus" class="size-4" />
+				{t('Add row')}
+			</Button>
+		{/if}
 	{/snippet}
 </PageHeader>
 

@@ -264,7 +264,13 @@ async def test_the_marketplace_assistant_finds_a_salon_and_books_it_for_the_mark
 
     assert offered.status_code == 200, offered.text
     assert slug in [b["business_slug"] for b in first.tool_returns[0]["businesses"]]
-    assert str(salon["service"].id) in [s["service_id"] for s in first.tool_returns[1]["services"]]
+    details = first.tool_returns[1]
+    [service] = [s for s in details["services"] if s["service_id"] == str(salon["service"].id)]
+    # The receptionist's facts, read from the listing's own tenant.
+    assert service["bookable"] is True
+    assert service["providers"] == [salon["provider"].name_en]
+    assert details["branches"][0]["opening_hours"]
+    assert "cancel free of charge" in details["cancellation"]
     [held] = offered.json()["held_slots"]
     assert held["provider_id"] == slot["provider_id"]
 

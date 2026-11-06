@@ -237,6 +237,9 @@ class Booking:
     Completed --> [*]
 ```
 
+> [!note] As built (2026-10-28)
+> `queue/domain.py` differs from this plan. A missed entry is not terminal: it can be requeued to `waiting` (at the back of the line, ordered from `requeued_at`) or cancelled. `Called --> CheckedIn` happens on a QR scan (`POST /tickets/check-in`) or when staff check in someone standing at the desk (`POST /queues/entries/{id}/check-in`). A late appointment lines up from the later of its booked time and its arrival. An hourly worker job cancels entries that were never served once they are older than `QUEUE_ENTRY_MAX_AGE_HOURS`.
+
 ### Queue Domain Model
 
 ```python

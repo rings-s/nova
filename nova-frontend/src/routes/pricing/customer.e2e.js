@@ -21,6 +21,17 @@ async function signInAs(page, kind) {
 	await page.addInitScript((accessToken) => {
 		localStorage.setItem('nova.auth.v1', JSON.stringify({ accessToken, refreshToken: 'r' }));
 	}, token);
+	// The header asks whether this is a NOVA administrator. `/auth/*` is fetched
+	// with credentials, so the origin is echoed rather than a wildcard.
+	await page.route('**/api/v1/auth/me', (route) =>
+		route.fulfill({
+			headers: {
+				'access-control-allow-origin': 'http://localhost:5173',
+				'access-control-allow-credentials': 'true'
+			},
+			json: { id: 'user-1', email: 'u@example.com', full_name: 'U', is_superuser: false }
+		})
+	);
 }
 
 test.use({ viewport: { width: 1280, height: 900 } });

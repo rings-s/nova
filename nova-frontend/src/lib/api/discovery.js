@@ -137,6 +137,9 @@ import { http } from './client.js';
  * @property {string} price
  * @property {string} currency
  * @property {PublicSlot[]} slots
+ * @property {string|null} [more_from] Set when the response was full: the first
+ *   branch-local day (`YYYY-MM-DD`) left out. Every day in `slots` is complete;
+ *   ask again from this one for the rest.
  */
 
 /**
@@ -157,6 +160,8 @@ export function listCategories() {
 	return http.get('/discovery/categories', { skipAuth: true });
 }
 
+/** @typedef {'default'|'distance'|'rating'|'price_asc'|'price_desc'} SearchSort */
+
 /**
  * Finds bookable branches. The marketplace's front door.
  *
@@ -166,12 +171,13 @@ export function listCategories() {
  * `sort`: `default` is nearest-first when `latitude`/`longitude` are given and
  * by name otherwise; `distance` needs coordinates; `rating` ranks best-rated
  * first by a confidence-weighted score, so one 5-star visit does not outrank
- * hundreds averaging 4.8. Coordinates also limit results to `radiusKm`
+ * hundreds averaging 4.8; `price_asc`/`price_desc` order by the card's "from"
+ * price, with unpriced branches last. Coordinates also limit results to `radiusKm`
  * (default 25).
  * `category` is a category's `slug` (see `listCategories`).
  * @param {{ q?: string|null, city?: string|null, category?: string|null, latitude?: number|null,
  *   longitude?: number|null, radiusKm?: number|null, bbox?: string|null,
- *   sort?: 'default'|'distance'|'rating', limit?: number, offset?: number }} [params]
+ *   sort?: SearchSort, limit?: number, offset?: number }} [params]
  * @returns {Promise<{ items: ListingCard[] }>}
  */
 export function searchBusinesses({

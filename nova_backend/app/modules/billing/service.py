@@ -217,17 +217,31 @@ class BillingService:
             raise SubscriptionRequiredError()
         return subscription
 
-    async def use_ai_message(self, business_id: UUID) -> Subscription:
-        """Counts one AI message for the business, before the model runs.
+    async def require_ai(self, business_id: UUID, *, spends_trial: bool) -> Subscription:
+        """Before the model runs: may this business's assistant answer?
 
-        Locked: 402 `subscription_required`. On trial: one of
-        `TRIAL_AI_MESSAGES`, then 402 `trial_ai_limit_reached`. Paid: free.
+        Locked: 402 `subscription_required`. With `spends_trial` (the owner's
+        own agents), a trial that has used its `TRIAL_AI_MESSAGES` answers 402
+        `trial_ai_limit_reached`. Nothing is counted here: `use_ai_message`
+        does that once a model has actually answered.
         """
         subscription = await self.require_unlocked(business_id)
-        if not subscription.trialing:
-            return subscription
+        if spends_trial:
+            subscription.require_trial_ai_message()
+        return subscription
+
+    async def use_ai_message(self, business_id: UUID) -> None:
+        """Counts one answered AI message against a trial's allowance.
+
+        After the turn, so a refused, busy or unanswered turn costs nothing.
+        Never refuses: the answer is already given, and a turn that raced
+        another to the last message is let through rather than thrown away.
+        """
+        subscription = await self.subscription_or_default(business_id)
+        if not subscription.trialing or subscription.trial_ai_messages_left == 0:
+            return
         subscription.use_trial_ai_message()
-        return await self.subscriptions.save(subscription)
+        await self.subscriptions.save(subscription)
 
     async def expire_trial(self, business_id: UUID, *, now: datetime | None = None) -> bool:
         """Locks a business whose trial ran out unpaid. Returns whether it did.

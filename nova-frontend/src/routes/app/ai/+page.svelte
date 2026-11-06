@@ -218,7 +218,7 @@
 				<p class="font-semibold text-fg">{t('The AI model is offline')}</p>
 				<p class="mt-1 max-w-2xl text-sm text-fg-secondary">
 					{t(
-						'NOVA could not reach its local model server. Start LM Studio (or Ollama) with a model available, then try again. Everything else in the dashboard keeps working.'
+						'NOVA could not reach its model server. Start the llm service (vLLM) and wait for its model to load, then try again. Everything else in the dashboard keeps working.'
 					)}
 				</p>
 				<Button class="mt-4" variant="outline" size="sm" onclick={load} {loading}>

@@ -10,6 +10,7 @@ export const LAYOUT = {
 	"Mobile navigation": "قائمة التنقل",
 	"Dashboard": "لوحة التحكم",
 	"My bookings": "حجوزاتي",
+	"Admin": "الإدارة",
 	"Sign out": "تسجيل الخروج",
 	"Sign in": "تسجيل الدخول",
 	"Get started": "ابدأ الآن",

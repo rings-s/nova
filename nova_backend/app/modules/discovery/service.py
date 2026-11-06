@@ -19,7 +19,7 @@ repository bound to a tenant it has not identified yet.
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -40,6 +40,7 @@ from app.modules.discovery.domain import (
     parse_bbox,
     referral_expiry,
     resolve_search_order,
+    trim_to_whole_days,
     validate_availability_window,
     validate_coordinate_pair,
     validate_radius_km,
@@ -84,6 +85,9 @@ class PublicAvailability:
     business: Any
     service: Any
     slots: list[OfferedSlot]
+    #: The first branch-local day left out by the slot cap; ask again from it.
+    #: None when the response covers the whole window asked for.
+    more_from: date | None = None
 
 
 @dataclass(frozen=True)
@@ -134,7 +138,7 @@ class DiscoveryService:
         session: AsyncSession,
         referral_repository_for: Callable[[UUID], Awaitable[MarketplaceReferralRepository]],
         max_availability_days: int = 14,
-        max_public_slots: int = 500,
+        max_public_slots: int = 1500,
     ) -> None:
         self.catalog = catalog
         self.session = session
@@ -161,7 +165,10 @@ class DiscoveryService:
         """Published branches matching the filters, nearest first when located.
 
         `sort="rating"` ranks by the confidence-weighted rating score instead
-        (`catalog.domain.rating_score`), with or without a position.
+        (`catalog.domain.rating_score`), with or without a position, and
+        `price_asc`/`price_desc` by the card's "from" price, so a page of a
+        price-sorted search is that slice of the whole result, not a page
+        re-sorted on its own.
 
         Geography is a two-step: the database narrows to a bounding box it can
         use an index for, and `distance_km` then trims the corners of that
@@ -198,7 +205,7 @@ class DiscoveryService:
             city=city.strip() if city else None,
             category=category.strip() if category else None,
             bounding_box=box,
-            order="rating" if order == "rating" else "name",
+            order="name" if order == "distance" else order,
             # The database pages the result except under a radius. There the
             # box over-selects, and the corner rows have to be dropped *before*
             # the page is cut or the page comes back short — so over-fetch a
@@ -235,7 +242,7 @@ class DiscoveryService:
 
         # Nearest first: once coordinates are given, distance is the ranking the
         # customer means and alphabetical order stops being useful — unless they
-        # asked for the best-rated, in which case the database's rating order
+        # asked for the best-rated or the cheapest, in which case the database's order
         # survives the corner-trimming above (it is a stable filter) and
         # distance only breaks ties. The id tiebreak keeps the order total, so
         # paging cannot repeat a row.
@@ -372,9 +379,9 @@ class DiscoveryService:
 
         Both bounds below exist because this route is anonymous. The window
         caps the date dimension and the slot cap catches the other one, a salon
-        with a great many stylists. Truncation is chronological, after sorting,
-        so it reads as "the next N available times" rather than dropping one
-        stylist's day.
+        with a great many stylists. Over the cap, whole days are dropped from
+        the end (`trim_to_whole_days`) and `more_from` names the first one, so
+        every day in a response is complete and the caller can ask for the rest.
         """
         validate_availability_window(
             date_from=date_from, date_to=date_to, max_days=self.max_availability_days
@@ -399,8 +406,17 @@ class DiscoveryService:
             )
         ]
 
+        locations = await self.catalog.list_locations(business.id)
+        timezone = next(
+            location.timezone for location in locations if location.id == service.location_id
+        )
+        keep, more_from = trim_to_whole_days(
+            [offer.slot.starts_at for offer in offered],
+            cap=self.max_public_slots,
+            timezone=timezone,
+        )
         return PublicAvailability(
-            business=business, service=service, slots=offered[: self.max_public_slots]
+            business=business, service=service, slots=offered[:keep], more_from=more_from
         )
 
     # --- referral -----------------------------------------------------------

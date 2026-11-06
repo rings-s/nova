@@ -44,13 +44,52 @@ function branch(id, name, at) {
 	};
 }
 
+/** @param {string} id @param {string} name */
+function serviceRow(id, name) {
+	return {
+		id,
+		tenant_id: TENANT,
+		location_id: 'location-1',
+		name_en: name,
+		name_ar: 'خدمة',
+		description_en: null,
+		description_ar: null,
+		category_id: null,
+		category: null,
+		duration_minutes: 30,
+		price: '100.00',
+		currency: 'SAR',
+		is_active: true,
+		created_at: '2026-09-01T00:00:00Z',
+		updated_at: '2026-09-01T00:00:00Z'
+	};
+}
+
+/** @param {string} id @param {string} name @param {boolean} [isActive] */
+function providerRow(id, name, isActive = true) {
+	return {
+		id,
+		tenant_id: TENANT,
+		location_id: 'location-1',
+		name_en: name,
+		name_ar: 'مختص',
+		title_en: null,
+		title_ar: null,
+		image_asset_id: null,
+		is_active: isActive,
+		created_at: '2026-09-01T00:00:00Z',
+		updated_at: '2026-09-01T00:00:00Z'
+	};
+}
+
 /**
  * Signs in as staff of one tenant with one business, and stubs the API. Returns
  * what the page sent, and the tiles it asked OpenStreetMap for.
  * @param {import('@playwright/test').Page} page
  * @param {ReturnType<typeof branch>[]} [existing]
+ * @param {{ services?: any[], providers?: any[], assignments?: { provider_id: string, service_id: string }[] }} [rows]
  */
-async function signInAndStub(page, existing = []) {
+async function signInAndStub(page, existing = [], rows = {}) {
 	const now = Math.floor(Date.now() / 1000);
 	const token = [
 		base64url({ alg: 'HS256', typ: 'JWT' }),
@@ -79,6 +118,11 @@ async function signInAndStub(page, existing = []) {
 		/** @type {any[]} */ positioned: [],
 		/** @type {string[]} */ tiles: [],
 		/** @type {{ latitude: number, longitude: number }[]} */ looked: [],
+		services: [...(rows.services ?? [])],
+		providers: [...(rows.providers ?? [])],
+		assignments: [...(rows.assignments ?? [])],
+		/** @type {{ provider_id: string, service_id: string }[]} */ assigned: [],
+		/** @type {{ provider_id: string, service_id: string }[]} */ unassigned: [],
 		/** What the map service answers: a place, `null` for nowhere, or a status to fail with. */
 		/** @type {(lat: number) => object | number} */
 		place: (lat) =>
@@ -180,6 +224,42 @@ async function signInAndStub(page, existing = []) {
 			};
 			state.locations.push(created);
 			return respond(created, 201);
+		}
+		if (method === 'GET' && /\/locations\/[^/]+\/services$/.test(path)) {
+			return respond({ items: state.services });
+		}
+		if (method === 'GET' && /\/locations\/[^/]+\/providers$/.test(path)) {
+			return respond({ items: state.providers });
+		}
+		if (method === 'GET' && /\/locations\/[^/]+\/assignments$/.test(path)) {
+			return respond({ items: state.assignments });
+		}
+		if (method === 'POST' && path === `${catalog}/services`) {
+			const body = request.postDataJSON();
+			const created = { ...serviceRow(`svc-new-${state.services.length}`, body.name_en), ...body };
+			state.services.push(created);
+			return respond(created, 201);
+		}
+		const serviceEdit = path.match(new RegExp(`^${catalog}/services/([^/]+)$`));
+		if (method === 'PATCH' && serviceEdit) {
+			const found = state.services.find((s) => s.id === serviceEdit[1]);
+			return respond({ ...found, ...request.postDataJSON() });
+		}
+		const assign = path.match(new RegExp(`^${catalog}/providers/([^/]+)/services$`));
+		if (method === 'POST' && assign) {
+			const pair = { provider_id: assign[1], service_id: request.postDataJSON().service_id };
+			state.assigned.push(pair);
+			state.assignments.push(pair);
+			return route.fulfill({ status: 204, headers: cors });
+		}
+		const unassign = path.match(new RegExp(`^${catalog}/providers/([^/]+)/services/([^/]+)$`));
+		if (method === 'DELETE' && unassign) {
+			const pair = { provider_id: unassign[1], service_id: unassign[2] };
+			state.unassigned.push(pair);
+			state.assignments = state.assignments.filter(
+				(a) => a.provider_id !== pair.provider_id || a.service_id !== pair.service_id
+			);
+			return route.fulfill({ status: 204, headers: cors });
 		}
 		const position = path.match(new RegExp(`^${catalog}/locations/([^/]+)/position$`));
 		if (method === 'PATCH' && position) {
@@ -758,5 +838,78 @@ test.describe('finding the device', () => {
 		await expect(pins).toHaveCount(0);
 		await expect(coordinates).toHaveCount(0);
 		await expect(circle(dialog)).toHaveCount(1);
+	});
+});
+
+// A service nobody performs has no bookable time anywhere, so the dashboard
+// says so on its card and picks who performs it in the service dialogs.
+test.describe('who performs a service', () => {
+	test('a service nobody performs says customers cannot book it', async ({ page }) => {
+		await signInAndStub(page, [branch('location-1', 'Main branch', RIYADH)], {
+			services: [serviceRow('svc-1', 'Facial'), serviceRow('svc-2', 'Mask')],
+			providers: [providerRow('prov-1', 'Ahmed')],
+			assignments: [{ provider_id: 'prov-1', service_id: 'svc-2' }]
+		});
+		await page.goto('/app/catalog');
+		await page.getByRole('tab', { name: 'Services' }).click();
+
+		const facial = page.locator('div.rounded-card', { hasText: 'Facial' });
+		const mask = page.locator('div.rounded-card', { hasText: 'Mask' });
+		await expect(facial.getByText("No provider: customers can't book this")).toBeVisible();
+		await expect(mask.getByText('Performed by Ahmed', { exact: true })).toBeVisible();
+		await expect(mask.getByText("No provider: customers can't book this")).toHaveCount(0);
+	});
+
+	test('a new service starts with every active provider ticked, and saving assigns them', async ({
+		page
+	}) => {
+		const state = await signInAndStub(page, [branch('location-1', 'Main branch', RIYADH)], {
+			providers: [
+				providerRow('prov-1', 'Ahmed'),
+				providerRow('prov-2', 'Sara'),
+				providerRow('prov-3', 'Away', false)
+			]
+		});
+		await page.goto('/app/catalog');
+		await page.getByRole('tab', { name: 'Services' }).click();
+		await page.getByRole('button', { name: 'Add service' }).click();
+		const dialog = page.getByRole('dialog', { name: 'Add service' });
+
+		await expect(dialog.getByLabel('Ahmed')).toBeChecked();
+		await expect(dialog.getByLabel('Sara')).toBeChecked();
+		await expect(dialog.getByLabel('Away · Inactive')).not.toBeChecked();
+
+		await dialog.getByLabel('Name (English)').fill('Facial');
+		await dialog.getByLabel('Name (Arabic)').fill('فيشل');
+		await dialog.getByLabel('Price').fill('120');
+		await dialog.getByRole('button', { name: 'Add service' }).click();
+
+		await expect(page.getByText('Performed by Ahmed، Sara', { exact: true })).toBeVisible();
+		expect(state.assigned.map((a) => a.provider_id).sort()).toEqual(['prov-1', 'prov-2']);
+	});
+
+	test('unticking a provider in Edit takes them off the service', async ({ page }) => {
+		const state = await signInAndStub(page, [branch('location-1', 'Main branch', RIYADH)], {
+			services: [serviceRow('svc-1', 'Facial')],
+			providers: [providerRow('prov-1', 'Ahmed'), providerRow('prov-2', 'Sara')],
+			assignments: [
+				{ provider_id: 'prov-1', service_id: 'svc-1' },
+				{ provider_id: 'prov-2', service_id: 'svc-1' }
+			]
+		});
+		await page.goto('/app/catalog');
+		await page.getByRole('tab', { name: 'Services' }).click();
+		await page.getByRole('button', { name: 'Edit' }).click();
+		const dialog = page.getByRole('dialog', { name: 'Edit service' });
+
+		await expect(dialog.getByLabel('Sara')).toBeChecked();
+		await dialog.getByLabel('Sara').uncheck();
+		await dialog.getByRole('button', { name: 'Save changes' }).click();
+
+		await expect(page.getByText('Performed by Ahmed', { exact: true })).toBeVisible();
+		await expect
+			.poll(() => state.unassigned)
+			.toEqual([{ provider_id: 'prov-2', service_id: 'svc-1' }]);
+		expect(state.assigned).toEqual([]);
 	});
 });

@@ -10,6 +10,7 @@ and because "tenant context" is still what it produces — it is simply an
 authorized one now.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -29,8 +30,8 @@ __all__ = [
 
 
 async def get_authorized_tenant(
-    tenant_id: UUID = Depends(require_tenant_access),
-    principal: Principal = Depends(get_principal),
+    tenant_id: Annotated[UUID, Depends(require_tenant_access)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> UUID:
     """The authorized tenant, without opening a transaction.
 
@@ -49,8 +50,8 @@ async def get_authorized_tenant(
 
 
 async def get_tenant_context(
-    tenant_id: UUID = Depends(get_authorized_tenant),
-    session: AsyncSession = Depends(get_db_session),
+    tenant_id: Annotated[UUID, Depends(get_authorized_tenant)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> UUID:
     """The authorized tenant for this request, with its connection scoped for RLS.
 

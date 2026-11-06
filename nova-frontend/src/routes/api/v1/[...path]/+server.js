@@ -1210,6 +1210,7 @@ async function handleRequest(request, params, url, method) {
 					reply: `مرحباً بك! أنا مساعد NOVA الذكي. يسعدني مساعدتك في استفسارك بخصوص: "${userMsg}". جميع خدماتنا وحجوزاتنا جاهزة لك!`,
 					suggested_actions: ['View availability', 'Check top services', 'Review queue status'],
 					requires_human_handoff: false,
+					follow_up_opened: false,
 					related_booking_id: null,
 					related_ticket_url: null,
 					held_slots: [],

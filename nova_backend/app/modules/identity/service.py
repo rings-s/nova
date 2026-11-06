@@ -11,6 +11,7 @@ several service calls into a single atomic unit.
 import hashlib
 import hmac
 import secrets
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -239,6 +240,11 @@ class CustomerService:
             raise CustomerNotFoundError(customer_id)
         return customer
 
+    async def names_for(self, customer_ids: Iterable[UUID]) -> dict[UUID, str]:
+        """Full names by customer id, for a staff screen listing many at once."""
+        customers = await self.repository.list_by_ids(list(set(customer_ids)))
+        return {c.id: c.full_name for c in customers}
+
     async def find_by_phone(self, phone: str) -> Customer | None:
         return await self.repository.get_by_phone(phone)
 
@@ -256,6 +262,7 @@ class CustomerService:
         by: UUID | None,
         marketing_consent: bool | None = None,
         whatsapp_consent: bool | None = None,
+        voice_consent: bool | None = None,
         now: datetime | None = None,
     ) -> Customer:
         """PDPL: consent must be revocable as easily as it was given.
@@ -270,6 +277,7 @@ class CustomerService:
             customer,
             marketing_consent=marketing_consent,
             whatsapp_consent=whatsapp_consent,
+            voice_consent=voice_consent,
             source=source,
             by=by,
             now=now or datetime.now(UTC),
@@ -283,6 +291,7 @@ class CustomerService:
         *,
         marketing_consent: bool | None = None,
         whatsapp_consent: bool | None = None,
+        voice_consent: bool | None = None,
     ) -> Customer:
         """A signed-in customer changing their own consent at this salon.
 
@@ -299,6 +308,7 @@ class CustomerService:
             by=user_id,
             marketing_consent=marketing_consent,
             whatsapp_consent=whatsapp_consent,
+            voice_consent=voice_consent,
         )
 
     @staticmethod
@@ -310,6 +320,7 @@ class CustomerService:
         source: ConsentSource,
         by: UUID | None,
         now: datetime,
+        voice_consent: bool | None = None,
     ) -> None:
         # Checked before either flag is written, so a refused request changes nothing.
         granting_marketing = bool(marketing_consent) and not customer.marketing_consent
@@ -325,6 +336,11 @@ class CustomerService:
             customer.whatsapp_consent_source = source.value
             customer.whatsapp_consent_by = by
             customer.whatsapp_consent_at = now
+        if voice_consent is not None and voice_consent != bool(customer.voice_consent):
+            customer.voice_consent = voice_consent
+            customer.voice_consent_source = source.value
+            customer.voice_consent_by = by
+            customer.voice_consent_at = now
 
     async def resolve_for_booking(self, reference_id: UUID, *, self_service: bool) -> Customer:
         """Turns the authorization decision into an actual customer record.
@@ -359,6 +375,18 @@ class CustomerService:
         "this person has never visited this salon" is an ordinary answer.
         """
         return await self.repository.get_by_user_id(user_id)
+
+    async def account_contact(self, user_id: UUID) -> tuple[str, str | None, str] | None:
+        """A signed-in person's own name, phone and email, from their account.
+
+        For someone who asked this business for help before they ever booked
+        here, so has no customer record to reach them through. Read-only, like
+        `find_for_user`: asking for help provisions nothing.
+        """
+        user = await self.session.get(User, user_id)
+        if user is None:
+            return None
+        return user.full_name, user.phone, user.email
 
     async def ensure_for_user(self, user: User) -> Customer:
         """The customer record for a signed-in person, creating it on first use.

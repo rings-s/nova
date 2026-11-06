@@ -39,6 +39,7 @@
 	let savingConsent = $state(false);
 	let marketingConsent = $state(false);
 	let whatsappConsent = $state(false);
+	let voiceConsent = $state(false);
 
 	async function load() {
 		loading = true;
@@ -52,6 +53,7 @@
 			customer = customerResult;
 			marketingConsent = customerResult.marketing_consent;
 			whatsappConsent = customerResult.whatsapp_consent;
+			voiceConsent = customerResult.voice_consent ?? false;
 			bookings = bookingsResult.items;
 			notifications = notificationsResult.items;
 		} catch (err) {
@@ -83,13 +85,17 @@
 	let whatsappProvenance = $derived(
 		consentProvenance(customer?.whatsapp_consent_source, customer?.whatsapp_consent_at)
 	);
+	let voiceProvenance = $derived(
+		consentProvenance(customer?.voice_consent_source, customer?.voice_consent_at)
+	);
 
 	async function saveConsent() {
 		savingConsent = true;
 		try {
 			customer = await updateCustomerConsent(tenantId, customerId, {
 				marketingConsent,
-				whatsappConsent
+				whatsappConsent,
+				voiceConsent
 			});
 			toastStore.success(t('Consent updated.'));
 		} catch (err) {
@@ -195,6 +201,12 @@
 						<Checkbox label={t('WhatsApp messages')} bind:checked={whatsappConsent} />
 						{#if whatsappProvenance}
 							<p class="mt-1 ps-6.5 text-xs text-fg-muted">{whatsappProvenance}</p>
+						{/if}
+					</div>
+					<div>
+						<Checkbox label={t('Reminder calls from Sara')} bind:checked={voiceConsent} />
+						{#if voiceProvenance}
+							<p class="mt-1 ps-6.5 text-xs text-fg-muted">{voiceProvenance}</p>
 						{/if}
 					</div>
 				</div>

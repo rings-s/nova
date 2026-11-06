@@ -54,6 +54,9 @@ GATED = [
     ("POST", "catalog/providers/{stranger}/services", _CATALOG),
     ("GET", "customers", _CUSTOMERS),
     ("GET", "customers/{stranger}", _CUSTOMERS),
+    ("GET", "follow-ups", _CUSTOMERS),
+    ("GET", "follow-ups/count", _CUSTOMERS),
+    ("POST", "follow-ups/{stranger}/resolve", _CUSTOMERS),
 ]
 
 

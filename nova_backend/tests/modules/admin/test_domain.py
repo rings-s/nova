@@ -13,11 +13,14 @@ from app.modules.admin.domain import (
     action_spec,
     actions_for,
     clean_reason,
+    contains_mask,
     decode_row_id,
     display_value,
     encode_row_id,
     group_of,
+    is_editable_table,
     is_masked_column,
+    self_edit_refusal,
 )
 
 
@@ -100,3 +103,35 @@ def test_a_cancellation_needs_a_reason_and_keeps_it_short() -> None:
     optional = action_spec("users", "revoke_sessions")
     assert optional is not None
     assert clean_reason(optional, None) is None
+
+
+def test_every_table_but_the_audit_log_is_editable() -> None:
+    assert is_editable_table("bookings")
+    assert is_editable_table("users")
+    assert not is_editable_table("admin_audit_log")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [MASK, f"{MASK}cdef", {"payload": {"token": MASK}}, [1, {"a": MASK}]],
+)
+def test_a_value_still_holding_the_mask_is_spotted(value: object) -> None:
+    assert contains_mask(value)
+
+
+def test_ordinary_values_hold_no_mask() -> None:
+    assert not contains_mask("hello")
+    assert not contains_mask({"a": [1, "b"]})
+    assert not contains_mask(None)
+
+
+def test_a_superuser_may_edit_but_not_lock_out_their_own_account() -> None:
+    me = uuid4()
+    refuse = self_edit_refusal
+    assert refuse("users", str(me), me, deleting=True, changes={})
+    assert refuse("users", str(me), me, deleting=False, changes={"is_active": False})
+    assert refuse("users", str(me), me, deleting=False, changes={"is_superuser": False})
+    assert refuse("users", str(me), me, deleting=False, changes={"full_name": "x"}) is None
+    # Someone else's account, or another table, is not the actor's own.
+    assert refuse("users", str(uuid4()), me, deleting=True, changes={}) is None
+    assert refuse("businesses", str(me), me, deleting=True, changes={}) is None

@@ -2,15 +2,12 @@
 	import { queueStatusLabel } from '$lib/i18n/labels.js';
 	import { t } from '$lib/i18n/index.svelte.js';
 	/**
-	 * The live walk-in line for one location. There is deliberately no manual
-	 * "check in" endpoint (queue/router.py) — CALLED only becomes CHECKED_IN by
-	 * redeeming a ticket's QR (docs/09 #8), which the customer's phone or the
-	 * front-desk ticket holds. For a walk-in this page adds itself, the ticket
-	 * is issued immediately and its payload kept in memory just long enough to
-	 * redeem it with one click — a stand-in for a camera scan, not a shortcut
-	 * around the backend's rule (see `ticketsByEntry` below). A queue entry
-	 * this dashboard didn't add gets no such shortcut; staff scan its QR the
-	 * normal way.
+	 * Reception's board for one queue: the line in the order the server says
+	 * people will be seen, then whoever was missed. The order is never decided
+	 * here — after every action the board is reloaded rather than patched, so
+	 * places and order are always the server's (queue/domain.py `order_queue`).
+	 * A called customer standing at the desk is checked in with one click;
+	 * one with a QR ticket can also be scanned at /app/check-in.
 	 */
 	import { tenantStore } from '$lib/stores/tenant.svelte.js';
 	import { businessStore } from '$lib/stores/business.svelte.js';
@@ -32,8 +29,7 @@
 		startQueueService,
 		completeQueueEntry,
 		cancelQueueEntry,
-		issueTicket,
-		checkInWithTicket
+		checkInQueueEntry
 	} from '$lib/api/queue.js';
 
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -162,12 +158,10 @@
 		called: entries.filter((e) => e.status === 'called' || e.status === 'checked_in').length,
 		serving: entries.filter((e) => e.status === 'in_service').length
 	});
-	let loadingEntries = $state(false);
+	/** The queue whose board is on screen; a background poll doesn't flash the spinner. */
+	let loadedQueueId = $state(/** @type {string|null} */ (null));
+	let loadingEntries = $derived(!!selectedQueueId && loadedQueueId !== selectedQueueId);
 	let entriesErrorMessage = $state(/** @type {string|null} */ (null));
-
-	/** Tickets this page itself issued, held only long enough for the one-tap
-	 * check-in described above. @type {Record<string, string>} entryId -> qr_payload */
-	let ticketsByEntry = $state({});
 
 	async function loadEntries() {
 		const queueId = selectedQueueId;
@@ -175,15 +169,16 @@
 			entries = [];
 			return;
 		}
-		loadingEntries = true;
-		entriesErrorMessage = null;
 		try {
-			const page = await listQueueEntries(tenantId, queueId, { limit: 50 });
+			const page = await listQueueEntries(tenantId, queueId, { limit: 100 });
+			// The queue may have changed while this was in flight.
+			if (queueId !== selectedQueueId) return;
 			entries = page.items;
+			entriesErrorMessage = null;
 		} catch (err) {
-			entriesErrorMessage = errorMessage(err);
+			if (queueId === selectedQueueId) entriesErrorMessage = errorMessage(err);
 		} finally {
-			loadingEntries = false;
+			if (queueId === selectedQueueId) loadedQueueId = queueId;
 		}
 	}
 
@@ -198,21 +193,21 @@
 		return () => clearInterval(interval);
 	});
 
-	/** @param {import('$lib/api/queue.js').QueueEntry} updated */
-	function applyEntryUpdate(updated) {
-		entries = entries.map((e) => (e.id === updated.id ? updated : e));
-	}
+	let serviceNames = $derived(new Map(services.map((s) => [s.id, pickBilingual(s, 'name')])));
+	let providerNames = $derived(new Map(providers.map((p) => [p.id, pickBilingual(p, 'name')])));
 
 	let actingId = $state(/** @type {string|null} */ (null));
 
-	/** @param {string} entryId @param {() => Promise<import('$lib/api/queue.js').QueueEntry>} action */
+	/** @param {string} entryId @param {() => Promise<unknown>} action */
 	async function runEntryAction(entryId, action) {
 		actingId = entryId;
 		try {
-			applyEntryUpdate(await action());
+			await action();
 		} catch (err) {
 			toastStore.fromError(err);
 		} finally {
+			// Every action can move other people's places, so take the server's board.
+			await loadEntries();
 			actingId = null;
 		}
 	}
@@ -224,27 +219,13 @@
 		callingNext = true;
 		try {
 			const entry = await callNext(tenantId, selectedQueueId);
-			const exists = entries.some((e) => e.id === entry.id);
-			entries = exists ? entries.map((e) => (e.id === entry.id ? entry : e)) : [...entries, entry];
+			const name = entries.find((e) => e.id === entry.id)?.customer_name;
+			if (name) toastStore.success(t('Calling {name}.', { name }));
 		} catch (err) {
 			toastStore.fromError(err);
 		} finally {
+			await loadEntries();
 			callingNext = false;
-		}
-	}
-
-	/** @param {import('$lib/api/queue.js').QueueEntry} entry */
-	async function handleCheckIn(entry) {
-		const qrPayload = ticketsByEntry[entry.id];
-		if (!qrPayload) return;
-		actingId = entry.id;
-		try {
-			const result = await checkInWithTicket(tenantId, qrPayload);
-			if (result.entry) applyEntryUpdate(result.entry);
-		} catch (err) {
-			toastStore.fromError(err);
-		} finally {
-			actingId = null;
 		}
 	}
 
@@ -325,20 +306,13 @@
 		addError = null;
 		joining = true;
 		try {
-			const entry = await joinQueue(tenantId, selectedQueueId, {
+			await joinQueue(tenantId, selectedQueueId, {
 				serviceId: joinForm.serviceId,
 				providerId: joinForm.providerId || null,
 				partySize: Number(joinForm.partySize),
 				onBehalfOfCustomerId: selectedCustomer.id
 			});
-			entries = [...entries, entry];
-			try {
-				const ticket = await issueTicket(tenantId, { queueEntryId: entry.id });
-				ticketsByEntry = { ...ticketsByEntry, [entry.id]: ticket.qr_payload };
-			} catch {
-				// The entry is still valid without a ticket — staff can issue one
-				// later, or the customer can be checked in by other means.
-			}
+			await loadEntries();
 			addModalOpen = false;
 			toastStore.success(t('{name} added to the queue.', { name: selectedCustomer.full_name }));
 		} catch (err) {
@@ -441,10 +415,11 @@
 						<Icon name="plus" class="size-4" />
 						{t('Add walk-in')}
 					</Button>
+					<!-- Closing a queue stops new joins; people already waiting are still served. -->
 					<Button
 						size="sm"
 						loading={callingNext}
-						disabled={!selectedQueue?.is_open}
+						disabled={counts.waiting === 0}
 						onclick={handleCallNext}
 					>
 						{t('Call next')}
@@ -482,53 +457,73 @@
 				<ul class="divide-y divide-line-subtle">
 					{#each entries as entry (entry.id)}
 						{@const active = ['called', 'checked_in', 'in_service'].includes(entry.status)}
+						{@const name = entry.customer_name || t('Customer')}
+						{@const busy = actingId === entry.id}
 						<li
-							class={`flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5 ${active ? 'bg-accent-soft/50' : ''}`}
+							class={`flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5 ${active ? 'bg-accent-soft/50' : ''} ${entry.status === 'missed' ? 'opacity-75' : ''}`}
 						>
 							<div class="flex min-w-0 items-center gap-4">
-								<span
-									class={`flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums ${active ? 'bg-brand-600 text-white shadow-glow' : 'bg-surface-muted text-fg'}`}
-								>
-									{entry.place_in_line ?? entry.position}
-								</span>
+								{#if entry.place_in_line}
+									<span
+										class="flex size-11 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-semibold text-fg tabular-nums"
+										title={t('#{place} in line', { place: entry.place_in_line })}
+									>
+										{entry.place_in_line}
+									</span>
+								{:else}
+									<Avatar {name} />
+								{/if}
 								<div class="min-w-0">
 									<div class="flex flex-wrap items-center gap-2">
-										<span class="text-sm font-semibold text-fg">
-											{entry.place_in_line
-												? t('#{place} in line', { place: entry.place_in_line })
-												: t('Position {position}', { position: entry.position })}
-										</span>
+										<span class="truncate text-sm font-semibold text-fg">{name}</span>
 										<Badge tone={STATUS_TONE[entry.status] ?? 'neutral'} size="sm" dot>
 											{queueStatusLabel(entry.status)}
 										</Badge>
+										{#if entry.source === 'appointment'}
+											<Badge tone="info" size="sm">{t('Appointment')}</Badge>
+										{/if}
 									</div>
 									<p class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-muted">
+										{#if serviceNames.get(entry.service_id)}
+											<span>{serviceNames.get(entry.service_id)}</span>
+										{/if}
+										{#if entry.provider_id && providerNames.get(entry.provider_id)}
+											<span
+												>{t('with {provider}', {
+													provider: providerNames.get(entry.provider_id)
+												})}</span
+											>
+										{/if}
 										{#if entry.joined_at}
 											<span>{t('Joined {when}', { when: formatRelative(entry.joined_at) })}</span>
 										{/if}
 										{#if entry.party_size > 1}
 											<span>{t('Party of {count}', { count: entry.party_size })}</span>
 										{/if}
+										{#if entry.estimated_wait_minutes != null}
+											<span class="tabular-nums">
+												{entry.estimated_wait_minutes === 0
+													? t('Next up')
+													: t('~{minutes} min wait', { minutes: entry.estimated_wait_minutes })}
+											</span>
+										{/if}
 									</p>
 								</div>
 							</div>
 							<div class="flex flex-wrap items-center gap-2">
 								{#if entry.status === 'called'}
-									{#if ticketsByEntry[entry.id]}
-										<Button
-											size="sm"
-											loading={actingId === entry.id}
-											onclick={() => handleCheckIn(entry)}
-										>
-											{t('Check in')}
-										</Button>
-									{:else}
-										<span class="text-xs text-fg-subtle">{t('Scan their ticket to check in')}</span>
-									{/if}
+									<Button
+										size="sm"
+										loading={busy}
+										onclick={() =>
+											runEntryAction(entry.id, () => checkInQueueEntry(tenantId, entry.id))}
+									>
+										{t('Check in')}
+									</Button>
 									<Button
 										size="sm"
 										variant="outline"
-										loading={actingId === entry.id}
+										disabled={busy}
 										onclick={() => runEntryAction(entry.id, () => markMissed(tenantId, entry.id))}
 									>
 										{t('Missed')}
@@ -537,7 +532,7 @@
 								{#if entry.status === 'checked_in'}
 									<Button
 										size="sm"
-										loading={actingId === entry.id}
+										loading={busy}
 										onclick={() =>
 											runEntryAction(entry.id, () => startQueueService(tenantId, entry.id))}
 									>
@@ -547,7 +542,7 @@
 								{#if entry.status === 'in_service'}
 									<Button
 										size="sm"
-										loading={actingId === entry.id}
+										loading={busy}
 										onclick={() =>
 											runEntryAction(entry.id, () => completeQueueEntry(tenantId, entry.id))}
 									>
@@ -558,17 +553,17 @@
 									<Button
 										size="sm"
 										variant="outline"
-										loading={actingId === entry.id}
+										loading={busy}
 										onclick={() => runEntryAction(entry.id, () => requeue(tenantId, entry.id))}
 									>
 										{t('Requeue')}
 									</Button>
 								{/if}
-								{#if entry.status === 'waiting' || entry.status === 'called'}
+								{#if ['waiting', 'called', 'missed'].includes(entry.status)}
 									<Button
 										size="sm"
 										variant="danger-ghost"
-										loading={actingId === entry.id}
+										disabled={busy}
 										onclick={() =>
 											runEntryAction(entry.id, () => cancelQueueEntry(tenantId, entry.id))}
 									>

@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from app.core.events import publish_event
+from app.core.exceptions import ValidationDomainError
 from app.core.security import Principal
 from app.core.values import TimeRange
 from app.modules.booking.service import BookingService
@@ -36,6 +37,7 @@ from app.modules.queue.domain import (
     next_position,
     order_queue,
     parse_qr_payload,
+    places_in_line,
     verify_qr_token,
 )
 from app.modules.queue.events import (
@@ -56,6 +58,7 @@ from app.modules.queue.repository import (
     QueueEntryRepository,
     QueueRepository,
     TicketRepository,
+    UnscopedQueueEntryRepository,
     UnscopedTicketRepository,
 )
 
@@ -76,6 +79,16 @@ class IssuedTicket:
 
 @dataclass(frozen=True)
 class QueuePosition:
+    entry: QueueEntry
+    #: None unless the entry is still waiting for its turn.
+    place_in_line: int | None
+    estimated_wait_minutes: int | None
+
+
+@dataclass(frozen=True)
+class JoinedQueue:
+    """Where a new entry stands. It has just joined, so it is waiting and has a place."""
+
     entry: QueueEntry
     place_in_line: int
     estimated_wait_minutes: int | None
@@ -165,28 +178,48 @@ class QueueService:
         queue_id: UUID,
         customer_reference_id: UUID,
         self_service: bool,
-        service_id: UUID,
+        service_id: UUID | None = None,
         provider_id: UUID | None = None,
         party_size: int = 1,
         booking_id: UUID | None = None,
         now: datetime | None = None,
-    ) -> QueuePosition:
-        """Adds a walk-in — or an arriving appointment — to the line."""
+    ) -> JoinedQueue:
+        """Adds a walk-in — or an arriving appointment — to the line.
+
+        An appointment (`booking_id`) must be the customer's own, still on the
+        calendar, at this queue's branch: it sorts at its booked time, ahead
+        of walk-ins, so any booking id would otherwise be a way to jump the
+        line. Its service is the booking's when none is given.
+        """
         now = now or datetime.now(UTC)
 
         queue = await self.get_queue(queue_id)
         if not queue.is_open:
             raise QueueClosedError()
 
-        await self.catalog.get_service(service_id)
         if provider_id is not None:
-            provider = await self.catalog.get_provider(provider_id)
-            if provider.location_id != queue.location_id:
-                raise QueueNotFoundError(queue_id)
+            await self._provider_at(queue, provider_id)
 
         customer = await self.customers.resolve_for_booking(
             customer_reference_id, self_service=self_service
         )
+
+        source = QueueEntrySource.WALK_IN
+        scheduled_for: datetime | None = None
+        if booking_id is not None:
+            # An arriving appointment joins the same line rather than a
+            # parallel one — docs/03 section 4 requires one shared timeline.
+            booking = await self.bookings.get_for_customer(
+                booking_id, customer.id, location_id=queue.location_id
+            )
+            source = QueueEntrySource.APPOINTMENT
+            scheduled_for = booking.slot.starts_at
+            provider_id = provider_id or booking.provider_id
+            service_id = service_id or booking.service_id
+
+        if service_id is None:
+            raise ValidationDomainError("A walk-in needs a service_id.")
+        await self.catalog.get_service(service_id)
 
         # Positions are assigned under a lock: two people joining at the same
         # instant would otherwise read the same max and collide on the unique
@@ -198,16 +231,6 @@ class QueueService:
         )
         if existing is not None:
             raise AlreadyInQueueError()
-
-        source = QueueEntrySource.WALK_IN
-        scheduled_for: datetime | None = None
-        if booking_id is not None:
-            # An arriving appointment joins the same line rather than a
-            # parallel one — docs/03 section 4 requires one shared timeline.
-            booking = await self.bookings.get(booking_id)
-            source = QueueEntrySource.APPOINTMENT
-            scheduled_for = booking.slot.starts_at
-            provider_id = provider_id or booking.provider_id
 
         position = next_position([await self.entries.max_position(queue_id)])
 
@@ -230,6 +253,14 @@ class QueueService:
             )
         )
 
+        standing = await self._position_of(queue, entry)
+        if standing.place_in_line is None:  # pragma: no cover - a new entry is waiting
+            raise QueueEntryNotFoundError(entry.id)
+        joined = JoinedQueue(
+            entry=entry,
+            place_in_line=standing.place_in_line,
+            estimated_wait_minutes=standing.estimated_wait_minutes,
+        )
         await publish_event(
             self.session,
             QueueEntryJoined(
@@ -238,9 +269,10 @@ class QueueService:
                 entry_id=entry.id,
                 customer_id=customer.id,
                 source=str(source),
+                place_in_line=joined.place_in_line,
             ),
         )
-        return await self._position_of(queue, entry)
+        return joined
 
     # --- the line ---------------------------------------------------------
 
@@ -249,6 +281,38 @@ class QueueService:
         await self.get_queue(queue_id)
         entries = await self.entries.list_active(queue_id)
         return order_queue(entries, walk_in_penalty_minutes=self.walk_in_penalty_minutes)
+
+    async def list_board(self, queue_id: UUID) -> list[QueuePosition]:
+        """Reception's board: the line in order, then whoever was missed.
+
+        Missed entries are off the line but stay on the board, or nobody could
+        reach them to requeue or remove them.
+        """
+        queue = await self.get_queue(queue_id)
+        ordered = await self.list_queue(queue_id)
+        missed = await self.entries.list_missed(queue_id)
+        places = places_in_line(ordered)
+        active_providers = await self._active_providers(queue)
+        return [
+            QueuePosition(
+                entry=entry,
+                place_in_line=places.get(entry.id),
+                estimated_wait_minutes=estimate_wait_minutes(
+                    ordered,
+                    entry.id,
+                    average_service_minutes=queue.average_service_minutes,
+                    active_providers=active_providers,
+                ),
+            )
+            for entry in ordered
+        ] + [
+            QueuePosition(entry=entry, place_in_line=None, estimated_wait_minutes=None)
+            for entry in missed
+        ]
+
+    async def customer_names(self, customer_ids: Sequence[UUID]) -> dict[UUID, str]:
+        """Who is on the board, for reception. Staff reads only."""
+        return await self.customers.names_for(customer_ids)
 
     async def peek_next(self, queue_id: UUID) -> QueueEntry | None:
         waiting = await self.entries.list_waiting(queue_id)
@@ -265,7 +329,9 @@ class QueueService:
         ordering" (docs/08 section 12) becomes untrue in practice.
         """
         now = now or datetime.now(UTC)
-        await self.get_queue(queue_id)
+        queue = await self.get_queue(queue_id)
+        if provider_id is not None:
+            await self._provider_at(queue, provider_id)
 
         await self.queues.lock_queue(queue_id)
         entry = await self.peek_next(queue_id)
@@ -355,11 +421,11 @@ class QueueService:
         )
         return saved
 
-    async def requeue(self, entry_id: UUID) -> QueueEntry:
+    async def requeue(self, entry_id: UUID, *, now: datetime | None = None) -> QueueEntry:
         """Puts a missed customer back, at the end rather than where they were."""
         entry = await self.get_entry(entry_id)
         await self.queues.lock_queue(entry.queue_id)
-        entry.requeue()
+        entry.requeue(now=now or datetime.now(UTC))
         entry.position = next_position([await self.entries.max_position(entry.queue_id)])
         return await self.entries.save_entry(entry)
 
@@ -402,19 +468,27 @@ class QueueService:
 
     async def _position_of(self, queue: QueueRecord, entry: QueueEntry) -> QueuePosition:
         ordered = await self.list_queue(queue.id)
-        place = next(
-            (i + 1 for i, e in enumerate(ordered) if e.id == entry.id),
-            len(ordered),
-        )
         return QueuePosition(
             entry=entry,
-            place_in_line=place,
+            place_in_line=places_in_line(ordered).get(entry.id),
             estimated_wait_minutes=estimate_wait_minutes(
                 ordered,
                 entry.id,
                 average_service_minutes=queue.average_service_minutes,
+                active_providers=await self._active_providers(queue),
             ),
         )
+
+    async def _active_providers(self, queue: QueueRecord) -> int:
+        """Every working chair at the branch shortens the wait, not just one."""
+        providers = await self.catalog.list_providers(queue.location_id)
+        return sum(1 for p in providers if p.is_active)
+
+    async def _provider_at(self, queue: QueueRecord, provider_id: UUID) -> None:
+        """A provider id named for this queue must work at its branch."""
+        provider = await self.catalog.get_provider(provider_id)
+        if provider.location_id != queue.location_id:
+            raise QueueNotFoundError(queue.id)
 
     # --- tickets ----------------------------------------------------------
 
@@ -486,6 +560,13 @@ class QueueService:
             ticket_page_url=f"{self.public_app_url}/t/{saved.ticket_code}",
         )
 
+    async def ticket_page_for_booking(self, booking_id: UUID) -> str | None:
+        """The page of a booking's active ticket, to send the customer; None if it has none."""
+        ticket = await self.tickets.find_active_for_booking(booking_id)
+        if ticket is None:
+            return None
+        return f"{self.public_app_url}/t/{ticket.ticket_code}"
+
     async def redeem_ticket(
         self, *, qr_payload: str, now: datetime | None = None
     ) -> tuple[Ticket, QueueEntry | None]:
@@ -537,6 +618,11 @@ class QueueService:
             entry = await self.check_in_entry(ticket.queue_entry_id, now=now)
         elif ticket.booking_id is not None:
             await self.bookings.check_in(ticket.booking_id)
+            # An appointment already called from the line is checked in there
+            # too, or it would sit at "called" after the customer was scanned.
+            queued = await self.entries.find_for_booking(ticket.booking_id)
+            if queued is not None and queued.status is QueueEntryStatus.CALLED:
+                entry = await self.check_in_entry(queued.id, now=now)
 
         return saved_ticket, entry
 
@@ -557,7 +643,36 @@ class QueueService:
         return len(stale)
 
 
-__all__ = ["IssuedTicket", "QueuePosition", "QueueService"]
+__all__ = [
+    "IssuedTicket",
+    "JoinedQueue",
+    "QueuePosition",
+    "QueueService",
+    "QueueSweeper",
+    "TicketSweeper",
+]
+
+
+class QueueSweeper:
+    """The worker's cross-tenant queue housekeeping."""
+
+    def __init__(self, entries: UnscopedQueueEntryRepository) -> None:
+        self.entries = entries
+
+    async def cancel_stale(self, *, joined_before: datetime, limit: int = 500) -> int:
+        """Cancels entries that joined before `joined_before` and were never
+        served, `limit` at a time until none are left. Returns how many.
+
+        Not cosmetic: the line is ordered by arrival, so yesterday's leftovers
+        would otherwise sit at the head of it and be called first the next
+        morning.
+        """
+        total = 0
+        while True:
+            batch = await self.entries.cancel_stale(joined_before=joined_before, limit=limit)
+            total += batch
+            if batch < limit:
+                return total
 
 
 class TicketSweeper:

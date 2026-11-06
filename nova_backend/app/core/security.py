@@ -43,6 +43,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from hashlib import sha256
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, Path, Request, Security
@@ -453,7 +454,7 @@ _bearer = HTTPBearer(
 
 async def get_principal(
     request: Request,
-    token_state: TokenStateLookup = Depends(get_token_state_lookup),
+    token_state: Annotated[TokenStateLookup, Depends(get_token_state_lookup)],
     _documented: HTTPAuthorizationCredentials | None = Security(_bearer),
 ) -> Principal:
     """Authenticates the request. Fails closed.
@@ -492,7 +493,9 @@ async def get_principal(
     return principal_at_tenant(principal, _path_tenant_id(request))
 
 
-async def get_customer_principal(principal: Principal = Depends(get_principal)) -> Principal:
+async def get_customer_principal(
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> Principal:
     """For routes that act only as a customer, with no tenant in the path (the
     marketplace assistant): a staff account is a customer there (ADR-0016)."""
     if principal.kind is PrincipalKind.STAFF:
@@ -501,8 +504,8 @@ async def get_customer_principal(principal: Principal = Depends(get_principal)) 
 
 
 async def require_tenant_access(
-    tenant_id: UUID = Path(...),
-    principal: Principal = Depends(get_principal),
+    tenant_id: Annotated[UUID, Path()],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> UUID:
     """Resolves the active tenant AND proves the caller may act on it.
 
@@ -516,7 +519,7 @@ async def require_tenant_access(
     return tenant_id
 
 
-async def require_staff(principal: Principal = Depends(get_principal)) -> Principal:
+async def require_staff(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
     if not principal.is_staff:
         raise AuthorizationError("This action requires staff access.")
     return principal

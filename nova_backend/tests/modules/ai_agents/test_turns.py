@@ -1,4 +1,4 @@
-"""Whole agent turns over HTTP, with PydanticAI's FunctionModel standing in for Ollama.
+"""Whole agent turns over HTTP, with PydanticAI's FunctionModel standing in for vLLM.
 
 Needs Postgres. No network and no GPU: the model is a script, so each test pins
 exactly what a model does and checks what NOVA does about it (docs/13 section 12).
@@ -47,6 +47,7 @@ from app.modules.booking.models import BookingRecord
 from app.modules.catalog.service import CatalogService
 from app.modules.identity.models import User
 from app.modules.queue.models import QueueEntryRecord
+from app.modules.queue.service import QueueService
 
 FINAL = "final"
 #: The model itself fails, as an unreachable or overloaded one would.
@@ -183,8 +184,9 @@ async def chat(
     message: str = "How is business?",
     session_id: str = "turn-test",
     confirm_hold_token: str | None = None,
+    locale: str = "en",
 ) -> Response:
-    body: dict[str, Any] = {"session_id": session_id, "message": message, "locale": "en"}
+    body: dict[str, Any] = {"session_id": session_id, "message": message, "locale": locale}
     if confirm_hold_token is not None:
         body["confirm_hold_token"] = confirm_hold_token
     if with_business:
@@ -432,6 +434,34 @@ async def test_a_stalled_tool_hands_off_and_leaves_nothing_broken(
     assert business.status_code == 200, business.text
 
 
+async def test_a_write_that_timed_out_is_not_tried_again(
+    app: FastAPI, client: AsyncClient, salon, monkeypatch
+):
+    """A write tool cancelled by its timeout may have committed as it was cut
+    off, so the retry on the routing model, which would write again, is skipped."""
+
+    async def stalled(self, *args, **kwargs):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(QueueService, "join", stalled)
+    join = ("join_queue", {"queue_id": str(uuid4()), "service_id": str(salon["service"].id)})
+    script = Script(join, join, (FINAL, {"reply": "You are in line."}))
+    use_model(app, script, tool_timeout_seconds=0.05)
+
+    response = await chat(
+        client,
+        salon,
+        "receptionist_agent",
+        with_business=False,
+        customer_id=salon["customer"].id,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["requires_human_handoff"] is True
+    # The routing model never ran: its moves are still unplayed.
+    assert len(script.moves) == 2
+
+
 async def test_a_place_in_the_queue_is_kept_returned_and_not_taken_twice_when_the_model_fails(
     app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
 ):
@@ -522,6 +552,64 @@ async def test_a_held_slot_reaches_the_client_with_its_token_and_the_model_never
 # --- conversation memory ----------------------------------------------------
 
 
+class Replies:
+    """A model that answers with the given replies in turn, noting its instructions."""
+
+    def __init__(self, *replies: str) -> None:
+        self.replies = list(replies)
+        self.instructions: list[str] = []
+
+    async def respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        self.instructions.append(messages[0].instructions or "")
+        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"reply": reply})]
+        )
+
+
+async def test_an_arabic_app_gets_an_arabic_reply_to_an_english_question(
+    app: FastAPI, client: AsyncClient, salon
+):
+    model = Replies("Yes, we offer keratin treatments.", "نعم، نقدم علاج الكيراتين.")
+    use_model(app, model)
+
+    response = await chat(
+        client,
+        salon,
+        "concierge_agent",
+        with_business=False,
+        message="Do you do keratin?",
+        locale="ar",
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["reply"] == "نعم، نقدم علاج الكيراتين."
+    # The English answer went back to the model to be written again.
+    assert len(model.instructions) == 2
+    assert "the app is set to Arabic" in model.instructions[0]
+
+
+async def test_a_reply_that_stays_in_the_wrong_language_is_never_shown(
+    app: FastAPI, client: AsyncClient, salon
+):
+    use_model(app, Replies("نعم، نقدم علاج الكيراتين في جميع الفروع."))
+
+    response = await chat(
+        client,
+        salon,
+        "concierge_agent",
+        with_business=False,
+        message="هل لديكم كيراتين؟",
+        locale="en",
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["requires_human_handoff"] is True
+    assert "الكيراتين" not in body["reply"]
+    assert body["reply"].isascii()
+
+
 async def test_a_conversation_remembers_its_own_earlier_turns_and_nobody_elses(
     app: FastAPI, client: AsyncClient, salon
 ):
@@ -578,7 +666,9 @@ async def test_a_figure_a_tool_returned_in_an_earlier_turn_is_still_grounded(
 #: Every agent a tenant's chat route serves, which business it is told about,
 #: and whether each plan unlocks it — read from the roster and the price list,
 #: so a plan or agent added later is covered without editing this file.
-TENANT_AGENTS = sorted(name for name, spec in AGENTS.items() if not spec.marketplace)
+TENANT_AGENTS = sorted(
+    name for name, spec in AGENTS.items() if not (spec.marketplace or spec.voice_only)
+)
 
 
 async def subscribe(client: AsyncClient, salon: dict, tier: PlanTier, **extra: Any) -> None:
@@ -640,6 +730,47 @@ async def test_the_trial_allows_ten_ai_messages(app: FastAPI, client: AsyncClien
 
     assert refused.status_code == 402
     assert refused.json()["error"]["code"] == "trial_ai_limit_reached"
+
+
+async def _trial_messages_used(db_session: AsyncSession, salon: dict) -> int:
+    await set_tenant_scope(db_session, salon["tenant"].id)
+    return int(
+        await db_session.scalar(
+            select(SubscriptionRecord.trial_ai_messages_used).where(
+                SubscriptionRecord.business_id == salon["business"].id
+            )
+        )
+        or 0
+    )
+
+
+async def test_customers_never_spend_the_owners_trial(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
+):
+    """The trial's ten messages are the owner's: a storefront visitor sending
+    more than ten leaves the owner's own agents answering."""
+    await subscribe(client, salon, PlanTier.STUDIO)
+    use_model(app, Recorder())
+
+    for _ in range(TRIAL_AI_MESSAGES + 1):
+        assert (await chat(client, salon, "receptionist_agent")).status_code == 200
+
+    assert await _trial_messages_used(db_session, salon) == 0
+    assert (await chat(client, salon, "accountant_agent")).status_code == 200
+
+
+async def test_an_unanswered_turn_costs_the_trial_nothing(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
+):
+    await subscribe(client, salon, PlanTier.STUDIO)
+    # Both models fail: the reasoning model, then its retry on the routing one.
+    use_model(app, Script((CRASH, {}), (CRASH, {})))
+
+    response = await chat(client, salon, "accountant_agent")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["degraded"] is True
+    assert await _trial_messages_used(db_session, salon) == 0
 
 
 async def test_a_cancelled_plan_stops_unlocking_agents_after_its_paid_period(
@@ -809,4 +940,156 @@ async def test_the_receptionist_starts_with_the_business_facts(
     facts = model.instructions
     assert "Olaya Branch (Riyadh, map: https://www.openstreetmap.org/?mlat=24.690000" in facts
     assert "Hot Stone Massage" in facts and "(not bookable right now)" in facts
-    assert "(bookable)" in facts
+    # Who performs it, and when the branch opens: from the providers' own hours.
+    assert f"(bookable; by {salon['provider'].name_en})" in facts
+    assert "Opening hours: Sun-Sat 09:00-17:00" in facts
+    # A branch where nobody works yet has unknown hours, not "closed".
+    assert "Opening hours: not set yet" in facts
+    assert "cancel free of charge" in facts
+    assert "say you do not have that information" in facts
+
+
+async def test_the_receptionist_quotes_only_the_price_the_records_give(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon, qualify, service_factory
+):
+    """Customer agents are grounded too: a made-up price is sent back once, and
+    the price from the business's facts is what the customer sees."""
+    await subscribe_to_studio(client, salon)
+    await _bookable_salon(db_session, salon, qualify, service_factory)
+    name, price = salon["service"].name_en, salon["service"].price
+    script = Script(
+        (FINAL, {"reply": f"A {name} is SAR 99."}),
+        (FINAL, {"reply": f"A {name} is SAR {price}."}),
+    )
+    use_model(app, script)
+
+    response = await chat(client, salon, "receptionist_agent", message="How much is it?")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reply"] == f"A {name} is SAR {price}."
+    assert body["requires_human_handoff"] is False
+
+
+async def test_a_customer_agent_that_keeps_inventing_a_price_never_shows_it(
+    app: FastAPI, client: AsyncClient, salon
+):
+    await subscribe_to_studio(client, salon)
+    invented = (FINAL, {"reply": "Every service is 35% off today."})
+    use_model(app, Script(invented, invented, invented, invented))
+
+    response = await chat(client, salon, "receptionist_agent", message="Any offers?")
+
+    assert response.status_code == 200, response.text
+    assert "35%" not in response.json()["reply"]
+    assert response.json()["requires_human_handoff"] is True
+
+
+# --- follow-ups ------------------------------------------------------------
+
+
+async def _signed_in_customer(app: FastAPI, db_session: AsyncSession) -> User:
+    """Someone signed in who has never booked here: no customer record yet."""
+    user = User(
+        email=f"customer-{uuid4().hex[:8]}@example.com",
+        phone=f"+96650{uuid4().int % 10_000_000:07d}",
+        full_name="Reem",
+        password_hash="not-a-real-hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        subject_id=user.id, kind=PrincipalKind.CUSTOMER
+    )
+    return user
+
+
+async def _follow_ups(app: FastAPI, client: AsyncClient, salon: dict) -> list[dict]:
+    """The inbox, as staff (the default service principal) read it."""
+    app.dependency_overrides.pop(get_principal, None)
+    response = await client.get(f"/api/v1/tenants/{salon['tenant'].id}/follow-ups")
+    assert response.status_code == 200, response.text
+    return response.json()["items"]
+
+
+async def test_a_customers_handoff_reaches_the_business_once_per_conversation(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
+):
+    """`escalate_to_human` used to keep its summary in memory and drop it, while
+    the widget told the customer a staff member would follow up."""
+    await subscribe_to_studio(client, salon)
+    user = await _signed_in_customer(app, db_session)
+    use_model(
+        app,
+        Script(
+            ("escalate_to_human", {"summary": "Chipped gel nails two days after the visit."}),
+            (FINAL, {"reply": "I'm sorry. Someone from the salon will get back to you."}),
+        ),
+    )
+
+    first = await chat(
+        client, salon, "receptionist_agent", message="My nails chipped, I want them redone"
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["requires_human_handoff"] is True
+    assert first.json()["follow_up_opened"] is True
+
+    # Handing off again in the same conversation adds to its follow-up.
+    use_model(
+        app,
+        Script((FINAL, {"reply": "Someone will call you.", "requires_human_handoff": True})),
+    )
+    second = await chat(client, salon, "receptionist_agent", message="When will they call?")
+    assert second.json()["follow_up_opened"] is True
+
+    [follow_up] = await _follow_ups(app, client, salon)
+    assert follow_up["source"] == "chat"
+    assert follow_up["status"] == "open"
+    assert follow_up["reason"] == "agent_could_not_help"
+    assert follow_up["business_id"] == str(salon["business"].id)
+    assert follow_up["summary"] == "Chipped gel nails two days after the visit."
+    assert follow_up["customer_message"] == "When will they call?"
+    # No customer record here yet: staff reach them through their account.
+    assert follow_up["customer_id"] is None
+    assert follow_up["contact_name"] == "Reem"
+    assert follow_up["contact_phone"] == user.phone
+    assert follow_up["contact_email"] == user.email
+
+
+async def test_a_handoff_no_one_is_told_about_promises_no_person(
+    app: FastAPI, client: AsyncClient, salon
+):
+    """Staff (here the service principal) have no one to hand off to, so no
+    follow-up opens, and the fallback no longer says a person will help."""
+    use_model(app, Script((CRASH, {}), (CRASH, {}), (CRASH, {})))
+
+    response = await chat(client, salon, "concierge_agent", with_business=False)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["degraded"] is True
+    assert body["requires_human_handoff"] is True
+    assert body["follow_up_opened"] is False
+    assert "team" not in body["reply"]
+    assert (
+        body["reply"] == "The assistant can't answer right now. Please try again in a little while."
+    )
+    assert await _follow_ups(app, client, salon) == []
+
+
+async def test_when_no_model_answers_a_customer_the_business_is_told(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, salon
+):
+    await subscribe_to_studio(client, salon)
+    await _signed_in_customer(app, db_session)
+    use_model(app, Script((CRASH, {}), (CRASH, {}), (CRASH, {})))
+
+    response = await chat(client, salon, "receptionist_agent", message="Do you do henna?")
+
+    body = response.json()
+    assert body["degraded"] is True
+    assert body["follow_up_opened"] is True
+    [follow_up] = await _follow_ups(app, client, salon)
+    assert follow_up["reason"] == "assistant_unavailable"
+    assert follow_up["customer_message"] == "Do you do henna?"

@@ -5,7 +5,8 @@ each endpoint actually depends on, which is where these rules live:
 
   - Fail closed (ADR-0006). Every route authenticates a principal, except the
     few that cannot have one: signing in, the signature-verified payment
-    webhook, and the public marketplace (ADR-0010).
+    webhook, the signed voice webhooks (ADR-0017), and the public marketplace
+    (ADR-0010).
   - Tenant routes authorize the path's tenant (ADR-0003, ADR-0006) through
     `get_authorized_tenant`, and scope the request's connection for RLS through
     `get_tenant_context`. The AI routes are the exception to the second half:
@@ -41,6 +42,12 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/auth/refresh"),  # the refresh token itself
         ("POST", "/auth/logout"),  # only deletes the caller's own cookie; per-IP limit
         ("POST", "/webhooks/moyasar"),  # the gateway's signature over the raw body
+        # Unifonic sends no Authorization header (ADR-0017): the line's URL is
+        # HMAC-signed, and each turn's is a short-lived purpose token.
+        ("GET", "/webhooks/voice/{tenant_id}/lines/{line_token}"),
+        ("POST", "/webhooks/voice/{tenant_id}/calls/{call_token}"),
+        # Sara's voice clips: the key is an HMAC, and no database is read.
+        ("GET", "/webhooks/voice/audio/{key}.wav"),
     }
 )
 #: ADR-0010: read-only but for referrals, published rows only, per-IP limits.
@@ -278,6 +285,23 @@ def test_reading_the_customer_book_needs_the_customers_permission() -> None:
     wrong = [
         f"{method} {path}: demands {sorted(_permissions(route.dependant))}"
         for method, path, route in reads
+        if _permissions(route.dependant) != _VIEW_CUSTOMERS
+    ]
+    assert wrong == []
+
+
+def test_the_follow_up_inbox_needs_the_customers_permission() -> None:
+    """A follow-up holds a customer's name, number and own words: the same
+    permission as the customer book and the call log."""
+    routes = [
+        (method, path, route)
+        for method, path, route in _routes()
+        if path.startswith("/tenants/{tenant_id}/follow-ups")
+    ]
+    assert routes, "no follow-up routes found; did the prefix change?"
+    wrong = [
+        f"{method} {path}: demands {sorted(_permissions(route.dependant))}"
+        for method, path, route in routes
         if _permissions(route.dependant) != _VIEW_CUSTOMERS
     ]
     assert wrong == []

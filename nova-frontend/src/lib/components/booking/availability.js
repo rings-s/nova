@@ -40,15 +40,70 @@ export function fetchSlots({
 	// `slug` (public) and `tenantId` (tenant) are each required only for the
 	// branch that uses them — the caller picks one via `source`.
 	return source === 'public'
-		? getPublicAvailability(/** @type {string} */ (slug), serviceId, { dateFrom, dateTo }).then(
-				(r) => r.slots
-			)
+		? fetchPublicSlots(/** @type {string} */ (slug), serviceId, dateFrom, dateTo)
 		: getAvailability(/** @type {string} */ (tenantId), {
 				providerId: /** @type {string} */ (providerId),
 				serviceId,
 				dateFrom,
 				dateTo
 			}).then((r) => r.items);
+}
+
+/** A busy salon's window takes a few responses; each holds at least one day. */
+const MAX_PUBLIC_PAGES = 14;
+
+/**
+ * The public route answers in whole days and, when a response is full, names
+ * the first day it left out (`more_from`). Ask again from there, so a later
+ * day with free times never shows as unavailable.
+ * @param {string} slug @param {string} serviceId @param {string} dateFrom @param {string} dateTo
+ * @returns {Promise<Slot[]>}
+ */
+async function fetchPublicSlots(slug, serviceId, dateFrom, dateTo) {
+	/** @type {Slot[]} */
+	const slots = [];
+	let from = dateFrom;
+	for (let page = 0; page < MAX_PUBLIC_PAGES; page++) {
+		const result = await getPublicAvailability(slug, serviceId, { dateFrom: from, dateTo });
+		slots.push(...result.slots);
+		if (!result.more_from) break;
+		from = startOfDay(result.more_from);
+		if (from >= dateTo) break;
+	}
+	return slots;
+}
+
+/**
+ * Midnight of a `YYYY-MM-DD` day in the salon's clock, as an ISO instant.
+ * @param {string} key @param {string} [timeZone]
+ */
+export function startOfDay(key, timeZone = DEFAULT_TIMEZONE) {
+	const [y, m, d] = key.split('-').map(Number);
+	const guess = Date.UTC(y, m - 1, d);
+	// The zone's offset at that moment: its wall clock read back as UTC, minus the moment.
+	const parts = Object.fromEntries(
+		new Intl.DateTimeFormat('en-US', {
+			timeZone,
+			hourCycle: 'h23',
+			year: 'numeric',
+			month: 'numeric',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: 'numeric',
+			second: 'numeric'
+		})
+			.formatToParts(new Date(guess))
+			.map((p) => [p.type, Number(p.value)])
+	);
+	const wall = Date.UTC(
+		parts.year,
+		parts.month - 1,
+		parts.day,
+		parts.hour,
+		parts.minute,
+		parts.second
+	);
+	return new Date(guess - (wall - guess)).toISOString();
 }
 
 /**

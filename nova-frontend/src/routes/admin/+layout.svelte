@@ -32,7 +32,7 @@
 			});
 			return;
 		}
-		loadConsole().catch((err) => toastStore.fromError(err));
+		loadConsole(String(authStore.principal?.sub ?? '')).catch((err) => toastStore.fromError(err));
 	});
 
 	let groups = $derived(

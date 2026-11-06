@@ -1,8 +1,9 @@
 """admin · DOMAIN layer — what the platform console may show and do.
 
 Pure: no FastAPI, no SQLAlchemy. The repository hands this layer plain Python
-values and column names; the rules about which of them a superuser may see, and
-which curated actions exist, live here so they can be tested without a database.
+values and column names; the rules about which of them a superuser may see,
+which curated actions exist, and which rows the console may add, edit or delete
+live here so they can be tested without a database.
 """
 
 from dataclasses import dataclass
@@ -173,15 +174,59 @@ class AdminAuditKind(StrEnum):
     LIST = "list"
     VIEW = "view"
     ACTION = "action"
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+
+
+# --- direct edits ------------------------------------------------------------
+
+#: Tables the console never writes to directly. The audit log is the record of
+#: what superusers did; the app role cannot update or delete it either
+#: (migration `d2e3f4a5b6c7`), so a superuser cannot tidy away their own trail.
+READ_ONLY_TABLES = frozenset({"admin_audit_log"})
+
+
+def is_editable_table(table: str) -> bool:
+    return table not in READ_ONLY_TABLES
+
+
+def contains_mask(value: Any) -> bool:
+    """Whether a submitted value still holds the console's mask somewhere: a
+    masked field sent back unchanged would overwrite the secret with `••••••`."""
+    if isinstance(value, str):
+        return MASK in value
+    if isinstance(value, dict):
+        return any(contains_mask(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_mask(item) for item in value)
+    return False
+
+
+def self_edit_refusal(
+    table: str, row_id: Any, actor_id: Any, *, deleting: bool, changes: dict[str, Any]
+) -> str | None:
+    """Why a superuser may not make this change to their own account, if they
+    may not: deleting it, deactivating it, or giving up superuser locks them
+    out of the console mid-request, with nobody else necessarily left to undo it."""
+    if table != "users" or actor_id is None or str(row_id) != str(actor_id):
+        return None
+    if deleting:
+        return "You can't delete your own account."
+    if changes.get("is_active") is False:
+        return "You can't deactivate your own account."
+    if changes.get("is_superuser") is False:
+        return "You can't remove your own superuser access."
+    return None
 
 
 # --- curated actions ---------------------------------------------------------
 
 
 class AdminAction(StrEnum):
-    """The only writes the console can make. Each runs through the owning
-    module's service, so state machines, events and policies still apply; there
-    is no generic "edit this row"."""
+    """Writes that run through the owning module's service, so state machines,
+    events and policies still apply. Prefer one of these over a direct edit
+    when it exists: a direct edit changes the row and nothing else."""
 
     DEACTIVATE_USER = "deactivate_user"
     REACTIVATE_USER = "reactivate_user"

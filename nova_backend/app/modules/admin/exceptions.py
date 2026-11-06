@@ -31,3 +31,9 @@ class AdminActionNotFoundError(NotFoundError):
 class AdminActionRefusedError(ConflictError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class AdminValueError(ValidationDomainError):
+    def __init__(self, column: str, problem: str) -> None:
+        super().__init__(f"'{column}' {problem}.")
+        self.column = column

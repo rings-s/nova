@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, Path
@@ -21,28 +22,28 @@ from app.modules.identity.service import CustomerService, MembershipService, Ten
 
 
 def get_tenant_repository(
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> TenantRepository:
     return TenantRepository(session)
 
 
 def get_membership_repository(
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MembershipRepository:
     return MembershipRepository(session)
 
 
 def get_user_repository(
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> UserRepository:
     return UserRepository(session)
 
 
 def get_membership_service(
-    memberships: MembershipRepository = Depends(get_membership_repository),
-    users: UserRepository = Depends(get_user_repository),
-    tenant_id: UUID = Depends(get_tenant_context),
-    session: AsyncSession = Depends(get_db_session),
+    memberships: Annotated[MembershipRepository, Depends(get_membership_repository)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MembershipService:
     """Scoped to the path tenant, which `get_tenant_context` has authorized.
 
@@ -59,8 +60,8 @@ def get_membership_service(
 
 
 def get_membership_service_unauthorized(
-    tenant_id: UUID = Path(...),
-    session: AsyncSession = Depends(get_db_session),
+    tenant_id: Annotated[UUID, Path()],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MembershipService:
     """For `accept_invite` alone: the one route that grants access to a
     tenant the caller does not have yet, so it cannot depend on
@@ -109,16 +110,16 @@ class RequirePermission:
 
     async def __call__(
         self,
-        principal: Principal = Depends(require_staff),
-        memberships: MembershipService = Depends(get_membership_service),
+        principal: Annotated[Principal, Depends(require_staff)],
+        memberships: Annotated[MembershipService, Depends(get_membership_service)],
     ) -> Principal:
         await memberships.require_permission(principal, self.permission)
         return principal
 
 
 def get_tenant_service(
-    repository: TenantRepository = Depends(get_tenant_repository),
-    memberships: MembershipRepository = Depends(get_membership_repository),
+    repository: Annotated[TenantRepository, Depends(get_tenant_repository)],
+    memberships: Annotated[MembershipRepository, Depends(get_membership_repository)],
 ) -> TenantService:
     settings = get_settings()
     return TenantService(
@@ -147,8 +148,8 @@ def build_customer_service(session: AsyncSession, tenant_id: UUID) -> CustomerSe
 
 
 def get_customer_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
 ) -> CustomerService:
     """Tenant-scoped, so one salon's customer list is unreachable from another.
 
@@ -176,8 +177,8 @@ def get_identity_whatsapp_client() -> WhatsAppClient:
 
 
 def get_auth_service(
-    session: AsyncSession = Depends(get_db_session),
-    whatsapp: WhatsAppClient = Depends(get_identity_whatsapp_client),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    whatsapp: Annotated[WhatsAppClient, Depends(get_identity_whatsapp_client)],
 ) -> AuthService:
     """Not tenant-scoped: signing in happens before any tenant is chosen."""
     return AuthService(
@@ -186,8 +187,8 @@ def get_auth_service(
 
 
 async def require_superuser(
-    principal: Principal = Depends(get_principal),
-    auth: AuthService = Depends(get_auth_service),
+    principal: Annotated[Principal, Depends(get_principal)],
+    auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> Principal:
     """A route dependency: a NOVA administrator, not a salon role.
 

@@ -12,8 +12,9 @@ Queue entry state machine (docs/06 section 5):
 
     WAITING ──▶ CALLED ──▶ CHECKED_IN ──▶ IN_SERVICE ──▶ COMPLETED
        │           │
-       │           └──▶ MISSED
-       └──▶ CANCELLED
+       │           └──▶ MISSED ──▶ WAITING (requeued, at the back)
+       │                   │
+       └──▶ CANCELLED ◀────┘
 
 Ticket state machine (docs/06 section 6):
 
@@ -83,8 +84,9 @@ _ALLOWED_ENTRY_TRANSITIONS: dict[QueueEntryStatus, frozenset[QueueEntryStatus]] 
     ),
     QueueEntryStatus.CHECKED_IN: frozenset({QueueEntryStatus.IN_SERVICE}),
     QueueEntryStatus.IN_SERVICE: frozenset({QueueEntryStatus.COMPLETED}),
-    # A missed customer can be put back in line rather than told to start over.
-    QueueEntryStatus.MISSED: frozenset({QueueEntryStatus.WAITING}),
+    # A missed customer can be put back in line rather than told to start over,
+    # or taken off the board for good (by staff, or the stale-entry sweep).
+    QueueEntryStatus.MISSED: frozenset({QueueEntryStatus.WAITING, QueueEntryStatus.CANCELLED}),
     QueueEntryStatus.COMPLETED: frozenset(),
     QueueEntryStatus.CANCELLED: frozenset(),
 }
@@ -178,6 +180,9 @@ class QueueEntry:
     called_at: datetime | None = None
     checked_in_at: datetime | None = None
     completed_at: datetime | None = None
+    #: When a missed customer was put back. Their place is taken from here,
+    #: which is what sends them to the back of the line.
+    requeued_at: datetime | None = None
     pending_events: list[object] = field(default_factory=list, repr=False)
 
     def _transition_to(self, target: QueueEntryStatus) -> None:
@@ -196,14 +201,16 @@ class QueueEntry:
     def miss(self) -> None:
         self._transition_to(QueueEntryStatus.MISSED)
 
-    def requeue(self) -> None:
-        """Puts a missed customer back in line.
+    def requeue(self, *, now: datetime) -> None:
+        """Puts a missed customer back in line, behind everyone already in it.
 
-        Position is reassigned by the service, not here — the entity does not
-        know what else is in the queue.
+        `requeued_at` is what moves them: `priority_key` anchors on it, so they
+        sort as if they had just arrived. (`position` is reassigned by the
+        service for the audit trail, but it does not decide the order.)
         """
         self._transition_to(QueueEntryStatus.WAITING)
         self.called_at = None
+        self.requeued_at = now
 
     def start_service(self) -> None:
         self._transition_to(QueueEntryStatus.IN_SERVICE)
@@ -232,18 +239,27 @@ def priority_key(entry: QueueEntry, *, walk_in_penalty_minutes: int = 15) -> tup
     deterministic. Both are satisfied by mapping every entry onto a single
     instant and sorting by it:
 
-      - an appointment sorts at its booked time. It does not jump the queue at
-        09:00 merely because it is booked for 17:00.
+      - an appointment sorts at its booked time, or at its arrival if the
+        customer came late. It does not jump the queue at 09:00 merely because
+        it is booked for 17:00, and arriving 40 minutes late does not put it
+        ahead of the walk-ins who were there on time.
       - a walk-in sorts at its arrival time plus a penalty, which is what makes
         a booked customer who arrives at the same moment go first. Absent the
         penalty a walk-in standing at the desk would always beat the customer
         who booked ahead, and booking would stop meaning anything.
+      - a requeued entry (missed, then put back) sorts from when it was put
+        back, as if it had just arrived.
 
     Ties break on source (appointments first) and then on the entry id, so the
     order is total and stable — never dependent on the order rows came back
     from the database.
     """
-    anchor = entry.scheduled_for or entry.joined_at
+    if entry.requeued_at is not None:
+        anchor: datetime | None = entry.requeued_at
+    elif entry.scheduled_for is not None and entry.joined_at is not None:
+        anchor = max(entry.scheduled_for, entry.joined_at)
+    else:
+        anchor = entry.scheduled_for or entry.joined_at
     if anchor is None:
         # Nothing to anchor to: sort last rather than crash the whole queue.
         return (float("inf"), 1, str(entry.id))
@@ -265,6 +281,16 @@ def order_queue(
     )
 
 
+def places_in_line(ordered: list[QueueEntry]) -> dict[UUID, int]:
+    """Each WAITING entry's place, as the customer is told it (1 = next).
+
+    Only waiting entries count. Someone already called or in the chair is not
+    "ahead" of anyone any more, and an entry that is not waiting has no place.
+    """
+    waiting = (e for e in ordered if e.status is QueueEntryStatus.WAITING)
+    return {entry.id: place for place, entry in enumerate(waiting, start=1)}
+
+
 def estimate_wait_minutes(
     ordered: list[QueueEntry],
     entry_id: UUID,
@@ -272,19 +298,18 @@ def estimate_wait_minutes(
     average_service_minutes: int,
     active_providers: int = 1,
 ) -> int | None:
-    """Rough minutes until this entry is called.
+    """Rough minutes until this entry is called; None unless it is waiting.
 
-    Deliberately crude — people ahead, times the average service length,
-    divided by how many chairs are working. A precise estimate would need
-    per-service durations and live progress, and would still be wrong the
+    Deliberately crude — waiting people ahead, times the average service
+    length, divided by how many chairs are working. A precise estimate would
+    need per-service durations and live progress, and would still be wrong the
     moment someone runs long; an honest approximation the customer can see is
     worth more than a precise-looking number that lies.
     """
-    providers = max(1, active_providers)
-    for index, entry in enumerate(ordered):
-        if entry.id == entry_id:
-            return int(index * average_service_minutes / providers)
-    return None
+    place = places_in_line(ordered).get(entry_id)
+    if place is None:
+        return None
+    return int((place - 1) * average_service_minutes / max(1, active_providers))
 
 
 def next_position(existing_positions: list[int]) -> int:

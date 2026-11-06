@@ -24,6 +24,7 @@ export const ERRORS = {
 	"error.duplicate_membership": "هذا الشخص عضو في الفريق بالفعل.",
 	"error.duplicate_slug": "هذا الرابط مستخدم بالفعل. اختر رابطًا آخر.",
 	"error.email_already_registered": "هذا البريد الإلكتروني مسجّل بالفعل.",
+	"error.follow_up_not_found": "لم نجد هذه المتابعة. حدّث القائمة.",
 	"error.forbidden": "ليست لديك صلاحية لتنفيذ هذا الإجراء.",
 	"error.gallery_full": "المعرض ممتلئ. احذف صورة قبل إضافة أخرى.",
 	"error.hold_expired": "انتهت مدة حجز الموعد المؤقت. اختر موعدًا آخر.",
@@ -104,5 +105,11 @@ export const ERRORS = {
 	"error.subscription_required": "انتهت الفترة التجريبية المجانية لهذا النشاط. ادفع قيمة الباقة من صفحة الفوترة للمتابعة.",
 	"error.trial_ai_limit_reached": "استخدمت رسائل الذكاء الاصطناعي العشر المتاحة في الفترة التجريبية. ادفع قيمة الباقة لمواصلة استخدام المساعدين.",
 	"error.business_unavailable": "هذا النشاط لا يستقبل حجوزات عبر الإنترنت حاليًا.",
-	"error.geocoding_unavailable": "خدمة تحديد العنوان لا تستجيب حاليًا. حاول مرة أخرى بعد لحظة."
+	"error.geocoding_unavailable": "خدمة تحديد العنوان لا تستجيب حاليًا. حاول مرة أخرى بعد لحظة.",
+	"error.phone_line_not_found": "لم يتم العثور على خط الهاتف هذا.",
+	"error.phone_number_taken": "هذا الرقم مستخدم بالفعل كخط هاتف في NOVA.",
+	"error.call_not_found": "لم يتم العثور على هذه المكالمة.",
+	"error.call_ended": "انتهت هذه المكالمة.",
+	"error.audio_not_found": "هذا المقطع الصوتي غير موجود أو انتهت صلاحيته.",
+	"error.voice_gateway_error": "تعذّر على مزوّد الاتصال إجراء المكالمة. حاول مرة أخرى."
 };

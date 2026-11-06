@@ -5,6 +5,7 @@
 	import { resolve } from '$app/paths';
 
 	import { authStore } from '../../stores/auth.svelte.js';
+	import { superuserStore } from '../../stores/superuser.svelte.js';
 	import { toastStore } from '../../stores/toast.svelte.js';
 	import { isPublicChromeRoute } from '../../utils/routeChrome.js';
 
@@ -24,6 +25,14 @@
 		page.url.pathname;
 		mobileOpen = false;
 	});
+
+	// The console link is for NOVA administrators only; `/admin` checks again.
+	$effect(() => {
+		if (authStore.isAuthenticated) {
+			superuserStore.load(String(authStore.principal?.sub ?? '')).catch(() => {});
+		}
+	});
+	let showAdmin = $derived(authStore.isAuthenticated && superuserStore.isSuperuser);
 
 	/** Escape closes the menu, as it would any disclosure. @param {KeyboardEvent} event */
 	function onKeydown(event) {
@@ -114,6 +123,16 @@
 									class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg lg:block"
 								>
 									{t('My bookings')}
+								</a>
+							{/if}
+
+							{#if showAdmin}
+								<a
+									href={resolve('/admin')}
+									aria-current={page.url.pathname.startsWith('/admin') ? 'page' : undefined}
+									class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg aria-[current=page]:text-accent lg:block"
+								>
+									{t('Admin')}
 								</a>
 							{/if}
 						{/if}
@@ -224,6 +243,16 @@
 									<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
 								</a>
 							{/if}
+
+							{#if showAdmin}
+								<a
+									href={resolve('/admin')}
+									class="flex items-center justify-between rounded-card px-3 py-3 text-sm font-medium text-fg-secondary hover:bg-surface-muted"
+								>
+									{t('Admin')}
+									<Icon name="arrow-right" class="size-4 opacity-40 rtl:rotate-180" />
+								</a>
+							{/if}
 						</nav>
 
 						<div
@@ -297,6 +326,15 @@
 						class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg sm:block"
 					>
 						{t('Dashboard')}
+					</a>
+				{/if}
+
+				{#if showAdmin}
+					<a
+						href={resolve('/admin')}
+						class="hidden text-sm font-semibold text-fg-secondary transition-colors hover:text-fg sm:block"
+					>
+						{t('Admin')}
 					</a>
 				{/if}
 			</div>

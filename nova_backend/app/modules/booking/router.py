@@ -8,7 +8,7 @@ API surface rather than caught later in the domain.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -80,11 +80,11 @@ def _as_out(b: Booking) -> dict:
 )
 async def get_availability(
     tenant_id: UUID,
-    provider_id: UUID = Query(...),
-    service_id: UUID = Query(...),
-    date_from: datetime = Query(...),
-    date_to: datetime = Query(...),
-    service: BookingService = Depends(get_booking_service),
+    provider_id: Annotated[UUID, Query()],
+    service_id: Annotated[UUID, Query()],
+    date_from: Annotated[datetime, Query()],
+    date_to: Annotated[datetime, Query()],
+    service: Annotated[BookingService, Depends(get_booking_service)],
 ) -> Page[AvailableSlotOut]:
     """Bookable slots, generated from the provider's schedule.
 
@@ -122,9 +122,9 @@ async def get_availability(
 async def hold_slot(
     tenant_id: UUID,
     payload: HoldSlotRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> HoldSlotResult:
     """Reserves a slot for a few minutes while checkout completes.
 
@@ -152,8 +152,8 @@ async def hold_slot(
 async def release_slot_hold(
     tenant_id: UUID,
     hold_token: str,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
 ) -> None:
     """Abandoned checkout: give the slot back rather than waiting for expiry."""
     await service.release_hold(hold_token)
@@ -176,8 +176,8 @@ async def set_provider_schedule(
     tenant_id: UUID,
     provider_id: UUID,
     payload: SetScheduleRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
 ) -> ScheduleOut:
     """Replaces a provider's weekly working hours. Staff only.
 
@@ -207,7 +207,7 @@ async def set_provider_schedule(
 async def get_provider_schedule(
     tenant_id: UUID,
     provider_id: UUID,
-    service: BookingService = Depends(get_booking_service),
+    service: Annotated[BookingService, Depends(get_booking_service)],
 ) -> ScheduleOut:
     """A provider's weekly working hours. Staff only: customers see free slots, not the rota."""
     windows = await service.get_provider_schedule(provider_id)
@@ -230,8 +230,8 @@ async def add_schedule_exception(
     tenant_id: UUID,
     provider_id: UUID,
     payload: ScheduleExceptionRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
 ) -> ScheduleExceptionOut:
     """Eid, a holiday, or one stylist's afternoon off."""
     record = await service.add_schedule_exception(provider_id=provider_id, **payload.model_dump())
@@ -251,10 +251,10 @@ async def add_schedule_exception(
 async def create_booking(
     tenant_id: UUID,
     payload: CreateBookingRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    principal: Principal = Depends(get_principal),
-    guard: IdempotencyGuard = Depends(idempotency_guard("POST /bookings")),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
+    guard: Annotated[IdempotencyGuard, Depends(idempotency_guard("POST /bookings"))],
 ) -> Any:
     """Creates a booking.
 
@@ -296,8 +296,8 @@ async def create_booking(
 async def get_booking(
     tenant_id: UUID,
     booking_id: UUID,
-    service: BookingService = Depends(get_booking_service),
-    principal: Principal = Depends(get_principal),
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> dict:
     """One booking, if it is the caller's.
 
@@ -310,12 +310,13 @@ async def get_booking(
 @router.get("", response_model=Page[BookingOut])
 async def list_customer_bookings(
     tenant_id: UUID,
-    customer_id: UUID | None = Query(
-        default=None, description="Staff only. Defaults to the authenticated customer."
-    ),
-    params: PageParams = Depends(),
-    service: BookingService = Depends(get_booking_service),
-    principal: Principal = Depends(get_principal),
+    *,
+    customer_id: Annotated[
+        UUID | None, Query(description="Staff only. Defaults to the authenticated customer.")
+    ] = None,
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Page[BookingOut]:
     """Bookings at this business. A customer gets their own; staff pass
     `customer_id` to read one customer's."""
@@ -340,9 +341,9 @@ async def list_customer_bookings(
 async def list_provider_calendar(
     tenant_id: UUID,
     provider_id: UUID,
-    date_from: datetime = Query(...),
-    date_to: datetime = Query(...),
-    service: BookingService = Depends(get_booking_service),
+    date_from: Annotated[datetime, Query()],
+    date_to: Annotated[datetime, Query()],
+    service: Annotated[BookingService, Depends(get_booking_service)],
 ) -> Page[BookingOut]:
     """The day sheet. Staff-only — it exposes every customer at that branch."""
     bookings = await service.list_for_provider(provider_id, date_from=date_from, date_to=date_to)
@@ -357,9 +358,9 @@ async def list_provider_calendar(
 async def confirm_booking(
     tenant_id: UUID,
     booking_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    _: Principal = Depends(require_staff),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    _: Annotated[Principal, Depends(require_staff)],
 ) -> dict:
     """Manual confirmation, for a salon not taking deposits.
 
@@ -380,10 +381,11 @@ async def cancel_booking(
     tenant_id: UUID,
     booking_id: UUID,
     payload: CancelBookingRequest,
-    by_staff: bool = Query(default=False),
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    principal: Principal = Depends(get_principal),
+    *,
+    by_staff: Annotated[bool, Query()] = False,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> dict:
     """Cancels a booking: a customer their own, staff any.
 
@@ -412,9 +414,9 @@ async def reschedule_booking(
     tenant_id: UUID,
     booking_id: UUID,
     payload: RescheduleBookingRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> dict:
     """Moves a booking, keeping its id — and therefore the customer's ticket.
 
@@ -440,9 +442,9 @@ async def reschedule_booking(
 async def check_in_booking(
     tenant_id: UUID,
     booking_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    _: Principal = Depends(require_staff),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    _: Annotated[Principal, Depends(require_staff)],
 ) -> dict:
     """Marks a confirmed booking's customer as arrived. Staff only.
 
@@ -460,9 +462,9 @@ async def check_in_booking(
 async def start_booking_service(
     tenant_id: UUID,
     booking_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    _: Principal = Depends(require_staff),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    _: Annotated[Principal, Depends(require_staff)],
 ) -> dict:
     """Starts the service for a checked-in booking. Staff only."""
     booking = await service.start_service(booking_id)
@@ -478,9 +480,9 @@ async def start_booking_service(
 async def complete_booking(
     tenant_id: UUID,
     booking_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    _: Principal = Depends(require_staff),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    _: Annotated[Principal, Depends(require_staff)],
 ) -> dict:
     """Completes a booking that is in service. Staff only.
 
@@ -499,9 +501,9 @@ async def complete_booking(
 async def mark_booking_no_show(
     tenant_id: UUID,
     booking_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: BookingService = Depends(get_booking_service),
-    _: Principal = Depends(require_staff),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BookingService, Depends(get_booking_service)],
+    _: Annotated[Principal, Depends(require_staff)],
 ) -> dict:
     """Marks a confirmed booking whose customer never came. Staff only."""
     booking = await service.mark_no_show(booking_id)

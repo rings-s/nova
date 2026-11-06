@@ -11,6 +11,7 @@ modules' own factories, and commits when the block completes.
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -45,6 +46,7 @@ from app.modules.discovery.service import DiscoveryService
 from app.modules.identity.dependencies import build_customer_service, build_membership_service
 from app.modules.payment.dependencies import build_payment_service, get_payment_gateway
 from app.modules.queue.dependencies import build_queue_service
+from app.modules.support.dependencies import build_support_service
 
 #: Opens a transaction and yields its session: committed on a clean exit,
 #: rolled back when the block raises.
@@ -91,6 +93,7 @@ def _build_services(
         billing=billing,
         analytics=analytics,
         memberships=build_membership_service(session, tenant_id),
+        support=build_support_service(session, tenant_id, customers=customers),
     )
 
 
@@ -155,7 +158,7 @@ def get_conversation_store() -> ConversationStore:
 
 
 def get_conversation_memory_service(
-    history: ConversationStore = Depends(get_conversation_store),
+    history: Annotated[ConversationStore, Depends(get_conversation_store)],
 ) -> ConversationMemoryService:
     return ConversationMemoryService(history)
 
@@ -164,7 +167,7 @@ def get_inference_engine() -> InferenceEngine:
     return build_inference_engine(get_settings())
 
 
-def _gate_factory() -> InferenceGate:
+def turn_gate() -> InferenceGate:
     """The turn limiter for this process and event loop, from settings."""
     settings = get_settings()
     return get_inference_gate(
@@ -174,11 +177,11 @@ def _gate_factory() -> InferenceGate:
 
 
 def get_ai_chat_service(
-    tenant_id: UUID = Depends(get_authorized_tenant),
-    engine: InferenceEngine = Depends(get_inference_engine),
-    transaction: Transaction = Depends(get_agent_transaction),
-    gateway: PaymentGateway = Depends(get_payment_gateway),
-    history: ConversationStore = Depends(get_conversation_store),
+    tenant_id: Annotated[UUID, Depends(get_authorized_tenant)],
+    engine: Annotated[InferenceEngine, Depends(get_inference_engine)],
+    transaction: Annotated[Transaction, Depends(get_agent_transaction)],
+    gateway: Annotated[PaymentGateway, Depends(get_payment_gateway)],
+    history: Annotated[ConversationStore, Depends(get_conversation_store)],
 ) -> AiChatService:
     """Note what is NOT here: no request session, and no service built on one.
 
@@ -192,16 +195,16 @@ def get_ai_chat_service(
         services=TenantServiceScope(tenant_id, transaction=transaction, gateway=gateway),
         tenant_id=tenant_id,
         history=history,
-        gate_factory=_gate_factory,
+        gate_factory=turn_gate,
     )
 
 
 def get_marketplace_chat_service(
-    principal: Principal = Depends(get_customer_principal),
-    engine: InferenceEngine = Depends(get_inference_engine),
-    transaction: Transaction = Depends(get_agent_transaction),
-    gateway: PaymentGateway = Depends(get_payment_gateway),
-    history: ConversationStore = Depends(get_conversation_store),
+    principal: Annotated[Principal, Depends(get_customer_principal)],
+    engine: Annotated[InferenceEngine, Depends(get_inference_engine)],
+    transaction: Annotated[Transaction, Depends(get_agent_transaction)],
+    gateway: Annotated[PaymentGateway, Depends(get_payment_gateway)],
+    history: Annotated[ConversationStore, Depends(get_conversation_store)],
 ) -> AiChatService:
     """The marketplace assistant: no tenant until a customer picks a listing.
 
@@ -221,5 +224,5 @@ def get_marketplace_chat_service(
         services_for=lambda tenant_id: TenantServiceScope(
             tenant_id, transaction=transaction, gateway=gateway
         ),
-        gate_factory=_gate_factory,
+        gate_factory=turn_gate,
     )

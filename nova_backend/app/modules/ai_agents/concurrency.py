@@ -26,8 +26,11 @@ class InferenceGate:
         self._callers: set[str] = set()
 
     @asynccontextmanager
-    async def slot(self, caller: str) -> AsyncIterator[None]:
-        """Holds one slot for the caller's turn, or raises `AiBusyError`."""
+    async def slot(self, caller: str, wait_seconds: float | None = None) -> AsyncIterator[None]:
+        """Holds one slot for the caller's turn, or raises `AiBusyError`.
+
+        `wait_seconds` shortens the queue for a caller who cannot wait the
+        usual `queue_wait_seconds`: a phone turn has a few seconds in all."""
         if caller in self._callers:
             # One turn at a time each: a second tab or a retry loop must wait for
             # the answer it already asked for.
@@ -35,7 +38,8 @@ class InferenceGate:
         self._callers.add(caller)
         try:
             try:
-                await asyncio.wait_for(self._slots.acquire(), self.queue_wait_seconds)
+                wait = self.queue_wait_seconds if wait_seconds is None else wait_seconds
+                await asyncio.wait_for(self._slots.acquire(), wait)
             except TimeoutError:
                 raise AiBusyError("The assistant is busy. Try again in a moment.") from None
             try:

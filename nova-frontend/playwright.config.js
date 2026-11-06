@@ -14,5 +14,7 @@ export default defineConfig({
 	testMatch: '**/*.e2e.{ts,js}',
 	outputDir: path.join(os.tmpdir(), 'nova-playwright-results'),
 	workers: 2,
-	use: { baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173' }
+	// Service workers blocked: `page.route` cannot see a request a worker
+	// handles, and the specs stub the API that way.
+	use: { baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173', serviceWorkers: 'block' }
 });

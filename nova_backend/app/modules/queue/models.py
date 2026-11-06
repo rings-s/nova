@@ -98,6 +98,8 @@ class QueueEntryRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):
     called_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: When a missed customer was put back; their place in line counts from here.
+    requeued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TicketRecord(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin):

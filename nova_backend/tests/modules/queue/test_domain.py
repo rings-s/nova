@@ -27,6 +27,7 @@ from app.modules.queue.domain import (
     next_position,
     order_queue,
     parse_qr_payload,
+    places_in_line,
     verify_qr_token,
 )
 
@@ -86,9 +87,17 @@ class TestQueueEntryLifecycle:
         entry = make_entry()
         entry.call(now=NOW)
         entry.miss()
-        entry.requeue()
+        entry.requeue(now=NOW)
         assert entry.status is QueueEntryStatus.WAITING
         assert entry.called_at is None
+        assert entry.requeued_at == NOW
+
+    def test_a_missed_customer_can_be_taken_off_the_board(self):
+        entry = make_entry()
+        entry.call(now=NOW)
+        entry.miss()
+        entry.cancel()
+        assert entry.status is QueueEntryStatus.CANCELLED
 
     def test_terminal_states_are_final(self):
         entry = make_entry()
@@ -141,6 +150,25 @@ class TestSharedTimelineOrdering:
         )
         assert order_queue([appointment, walk_in])[0] is walk_in
 
+    def test_a_late_appointment_lines_up_from_when_it_arrived(self):
+        # Booked for 09:00, arrived 09:40: the walk-in who came at 09:10 and
+        # waited goes first.
+        walk_in = make_entry(joined_at=NOW + timedelta(minutes=10))
+        late = make_entry(
+            source=QueueEntrySource.APPOINTMENT,
+            joined_at=NOW + timedelta(minutes=40),
+            scheduled_for=NOW,
+        )
+        assert order_queue([late, walk_in])[0] is walk_in
+
+    def test_a_requeued_customer_goes_behind_people_who_joined_after_them(self):
+        missed = make_entry(position=1, joined_at=NOW)
+        later = make_entry(position=2, joined_at=NOW + timedelta(minutes=5))
+        missed.call(now=NOW + timedelta(minutes=10))
+        missed.miss()
+        missed.requeue(now=NOW + timedelta(minutes=20))
+        assert order_queue([missed, later]) == [later, missed]
+
     def test_ordering_is_total_and_stable(self):
         # Identical timestamps must still produce one definite order, not one
         # that depends on how the rows came back from the database.
@@ -177,6 +205,20 @@ class TestWaitEstimate:
 
     def test_an_unknown_entry_has_no_estimate(self):
         assert estimate_wait_minutes([], uuid4(), average_service_minutes=30) is None
+
+    def test_people_already_called_or_in_the_chair_are_not_ahead(self):
+        serving = make_entry(position=1, joined_at=NOW, status=QueueEntryStatus.IN_SERVICE)
+        called = make_entry(
+            position=2, joined_at=NOW + timedelta(minutes=1), status=QueueEntryStatus.CALLED
+        )
+        waiting = make_entry(position=3, joined_at=NOW + timedelta(minutes=2))
+        ordered = order_queue([serving, called, waiting])
+        assert places_in_line(ordered) == {waiting.id: 1}
+        assert estimate_wait_minutes(ordered, waiting.id, average_service_minutes=30) == 0
+
+    def test_an_entry_that_is_not_waiting_has_no_estimate(self):
+        called = make_entry(status=QueueEntryStatus.CALLED)
+        assert estimate_wait_minutes([called], called.id, average_service_minutes=30) is None
 
 
 class TestTicketSecurity:

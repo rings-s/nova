@@ -99,9 +99,13 @@ test.describe('on a wide screen', () => {
 	test('every listing is a pin, and a pin opens its Quick View', async ({ page }) => {
 		await stubApi(page);
 		await page.goto('/discover');
-
+		// The map is a view of the results at every width, not a panel beside them.
+		await expect(
+			page.getByRole('region', { name: 'Map of spas, salons and clinics' })
+		).toBeHidden();
 		const pins = page.locator('.leaflet-marker-icon');
 		await expect(pins).toHaveCount(LISTINGS.length);
+		await page.getByRole('button', { name: 'Map', exact: true }).click();
 
 		// Jeddah's pin, because the Riyadh ones stack on each other at country zoom.
 		await page.getByTitle('Red Sea Salon — Main Branch').click();
@@ -166,6 +170,59 @@ test.describe('on a wide screen', () => {
 		await expect(pagination.getByRole('button', { name: 'Previous' })).toBeEnabled();
 	});
 
+	test("a price sort is the server's, and starts again at page one", async ({ page }) => {
+		const { lists } = await stubApi(page);
+		await page.route('**/api/v1/discovery/businesses?**', (route) => {
+			const url = new URL(route.request().url());
+			lists.push(url);
+			// Always a full page and one more, so there is always a next page.
+			const items = Array.from({ length: 13 }, (_, index) =>
+				listing(`${url.searchParams.get('offset')}-${index}`, `Venue ${index}`, 24.7, 46.7)
+			);
+			return route.fulfill({ headers: cors, json: { items } });
+		});
+
+		await page.goto('/discover');
+		const pagination = page.getByRole('navigation', { name: 'Pagination' });
+		await pagination.getByRole('button', { name: 'Next' }).click();
+		await expect.poll(() => lists.at(-1)?.searchParams.get('offset')).toBe('12');
+		await expect(pagination.getByText('Page 2')).toBeVisible();
+
+		await page.getByLabel('Sort by').selectOption('price-low');
+		await expect.poll(() => lists.at(-1)?.searchParams.get('sort')).toBe('price_asc');
+		expect(lists.at(-1)?.searchParams.get('offset')).toBe('0');
+
+		await pagination.getByRole('button', { name: 'Next' }).click();
+		await expect.poll(() => lists.at(-1)?.searchParams.get('offset')).toBe('12');
+		expect(lists.at(-1)?.searchParams.get('sort')).toBe('price_asc');
+	});
+
+	test('a new search term starts again at page one, once typing pauses', async ({ page }) => {
+		const { lists } = await stubApi(page);
+		await page.route('**/api/v1/discovery/businesses?**', (route) => {
+			const url = new URL(route.request().url());
+			lists.push(url);
+			const items = Array.from({ length: 13 }, (_, index) =>
+				listing(`${url.searchParams.get('offset')}-${index}`, `Venue ${index}`, 24.7, 46.7)
+			);
+			return route.fulfill({ headers: cors, json: { items } });
+		});
+
+		await page.goto('/discover');
+		await page
+			.getByRole('navigation', { name: 'Pagination' })
+			.getByRole('button', { name: 'Next' })
+			.click();
+		await expect.poll(() => lists.at(-1)?.searchParams.get('offset')).toBe('12');
+
+		const before = lists.length;
+		await page.getByRole('searchbox', { name: 'Search venues or services' }).fill('massage');
+		await expect.poll(() => lists.at(-1)?.searchParams.get('q')).toBe('massage');
+		expect(lists.at(-1)?.searchParams.get('offset')).toBe('0');
+		// One search for the whole word, not one per keystroke.
+		expect(lists.length - before).toBe(1);
+	});
+
 	test('a business name is shown as text, never parsed as markup', async ({ page }) => {
 		await stubApi(page);
 		await page.goto('/discover');
@@ -181,6 +238,7 @@ test.describe('on a wide screen', () => {
 		const { maps, lists } = await stubApi(page);
 		await page.goto('/discover');
 		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
+		await page.getByRole('button', { name: 'Map', exact: true }).click();
 		expect(maps.at(-1)?.searchParams.has('bbox')).toBe(false);
 
 		await page.getByRole('button', { name: 'Search this area' }).click();
@@ -219,7 +277,7 @@ test.describe('on a phone', () => {
 		// The pins exist (hidden) only once the page's script runs; a toggle
 		// clicked before that lands on server-rendered HTML and does nothing.
 		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
-		await page.getByRole('button', { name: 'map', exact: true }).click();
+		await page.getByRole('button', { name: 'Map', exact: true }).click();
 
 		const region = page.getByRole('region', { name: 'Map of spas, salons and clinics' });
 		await expect(region).toBeVisible();
@@ -228,25 +286,31 @@ test.describe('on a phone', () => {
 
 		// The map was created while hidden. If it had been fitted at zero size,
 		// the pins would sit outside the frame once it was shown.
-		const frame = /** @type {NonNullable<Awaited<ReturnType<typeof region.boundingBox>>>} */ (
-			await region.boundingBox()
-		);
-		for (const pin of await pins.all()) {
-			const at = /** @type {NonNullable<Awaited<ReturnType<typeof pin.boundingBox>>>} */ (
-				await pin.boundingBox()
-			);
-			expect(at.x).toBeGreaterThanOrEqual(frame.x);
-			expect(at.x + at.width).toBeLessThanOrEqual(frame.x + frame.width);
-			expect(at.y).toBeGreaterThanOrEqual(frame.y);
-			expect(at.y + at.height).toBeLessThanOrEqual(frame.y + frame.height);
-		}
+		// Measured together, inside the frame's own coordinates: the page scrolls
+		// the map into view when it is shown, and two separate measurements
+		// could straddle that scroll.
+		const outside = () =>
+			region.evaluate((frame) => {
+				const box = frame.getBoundingClientRect();
+				return [...document.querySelectorAll('.leaflet-marker-icon')]
+					.map((pin) => pin.getBoundingClientRect())
+					.filter(
+						(at) =>
+							at.left < box.left ||
+							at.right > box.right ||
+							at.top < box.top ||
+							at.bottom > box.bottom
+					).length;
+			});
+		// Polled: Leaflet animates the fit, and a pin can be mid-glide.
+		await expect.poll(outside).toBe(0);
 	});
 
 	test('the map does not paint over the Quick View modal', async ({ page }) => {
 		await stubApi(page);
 		await page.goto('/discover');
 		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
-		await page.getByRole('button', { name: 'map', exact: true }).click();
+		await page.getByRole('button', { name: 'Map', exact: true }).click();
 		await expect(page.locator('.leaflet-marker-icon')).toHaveCount(LISTINGS.length);
 		await page.getByTitle('Red Sea Salon — Main Branch').click();
 		await expect(page.getByRole('link', { name: 'View Full Menu' })).toBeVisible();

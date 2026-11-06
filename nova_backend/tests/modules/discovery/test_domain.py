@@ -11,7 +11,7 @@ The referral rules matter more. They decide whether a salon is charged 35%
 in, and these tests are what hold it there.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -29,6 +29,7 @@ from app.modules.discovery.domain import (
     normalize_search_term,
     parse_bbox,
     referral_expiry,
+    trim_to_whole_days,
     validate_availability_window,
     validate_coordinate_pair,
     validate_radius_km,
@@ -358,3 +359,37 @@ class TestThePublicAvailabilityWindow:
         now = datetime.now(UTC)
         with pytest.raises(ValidationDomainError):
             validate_availability_window(date_from=now, date_to=now, max_days=14)
+
+
+class TestTrimToWholeDays:
+    """The public calendar never shows half a day: half would read as a full
+    day, and a missing day as a closed one."""
+
+    @staticmethod
+    def _day(day: int, hours: range) -> list[datetime]:
+        # 06:00 UTC is 09:00 in Riyadh, so 21:00 UTC is already the next day there.
+        return [datetime(2026, 11, day, hour, tzinfo=UTC) for hour in hours]
+
+    def test_under_the_cap_nothing_is_cut(self):
+        starts = self._day(2, range(6, 14))
+        assert trim_to_whole_days(starts, cap=8, timezone="Asia/Riyadh") == (8, None)
+
+    def test_the_cut_falls_between_two_days(self):
+        starts = self._day(2, range(6, 14)) + self._day(3, range(6, 14))
+        keep, more_from = trim_to_whole_days(starts, cap=10, timezone="Asia/Riyadh")
+        assert (keep, more_from) == (8, date(2026, 11, 3))
+
+    def test_the_day_is_the_branch_day_not_the_utc_day(self):
+        # 21:00 and 22:00 UTC on the 2nd are 00:00 and 01:00 on the 3rd in Riyadh.
+        starts = self._day(2, range(6, 9)) + self._day(2, range(21, 23))
+        keep, more_from = trim_to_whole_days(starts, cap=4, timezone="Asia/Riyadh")
+        assert (keep, more_from) == (3, date(2026, 11, 3))
+
+    def test_a_first_day_over_the_cap_is_kept_whole(self):
+        starts = self._day(2, range(6, 14)) + self._day(3, range(6, 8))
+        keep, more_from = trim_to_whole_days(starts, cap=3, timezone="Asia/Riyadh")
+        assert (keep, more_from) == (8, date(2026, 11, 3))
+
+    def test_a_single_day_over_the_cap_is_all_there_is(self):
+        starts = self._day(2, range(6, 14))
+        assert trim_to_whole_days(starts, cap=3, timezone="Asia/Riyadh") == (8, None)

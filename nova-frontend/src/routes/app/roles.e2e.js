@@ -7,7 +7,12 @@ import { expect, test } from '@playwright/test';
 
 const TENANT = 'tenant-roles';
 const BUSINESS = 'business-roles';
-const cors = { 'access-control-allow-origin': '*' };
+// `/auth/*` is fetched with credentials, and a browser refuses a wildcard
+// origin on a credentialed response, so echo the page's own.
+const cors = {
+	'access-control-allow-origin': 'http://localhost:5173',
+	'access-control-allow-credentials': 'true'
+};
 
 /** @param {object} value */
 const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -32,9 +37,10 @@ const ACCESS = {
 /**
  * @param {import('@playwright/test').Page} page
  * @param {keyof typeof ACCESS} role
+ * @param {{ superuser?: boolean }} [options] what `GET /auth/me` says of the account
  * @returns {Promise<string[]>} the API paths the page called
  */
-async function signInAs(page, role) {
+async function signInAs(page, role, { superuser = false } = {}) {
 	const now = Math.floor(Date.now() / 1000);
 	const token = [
 		base64url({ alg: 'HS256', typ: 'JWT' }),
@@ -73,6 +79,12 @@ async function signInAs(page, role) {
 		calls.push(path);
 		if (path === `/tenants/${TENANT}/memberships/me`) {
 			return route.fulfill({ headers: cors, json: ACCESS[role] });
+		}
+		if (path === '/auth/me') {
+			return route.fulfill({
+				headers: cors,
+				json: { id: 'user-1', email: 'u@example.com', full_name: 'U', is_superuser: superuser }
+			});
 		}
 		if (path === '/tenants') {
 			return route.fulfill({
@@ -118,6 +130,33 @@ test('an owner sees every section and can edit the catalog', async ({ page }) =>
 	await expect(nav(page).getByRole('link', { name: 'Billing' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Add location' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Move pin' })).toBeVisible();
+});
+
+test('a NOVA administrator finds the platform console in the dashboard and the header', async ({
+	page
+}) => {
+	await signInAs(page, 'owner', { superuser: true });
+	await page.goto('/app');
+	await expect(nav(page).getByRole('link', { name: 'NOVA administration' })).toHaveAttribute(
+		'href',
+		'/admin'
+	);
+
+	await page.goto('/discover');
+	await expect(
+		page.getByRole('banner').getByRole('link', { name: 'Admin', exact: true })
+	).toBeVisible();
+});
+
+test('anyone else does not see the platform console', async ({ page }) => {
+	await signInAs(page, 'owner');
+	await page.goto('/app');
+	await expect(nav(page).getByRole('link', { name: 'Overview' })).toBeVisible();
+	await expect(nav(page).getByRole('link', { name: 'NOVA administration' })).toHaveCount(0);
+
+	await page.goto('/discover');
+	await expect(page.getByRole('banner').getByRole('link', { name: 'Dashboard' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
 });
 
 test('a provider does not see the customer book', async ({ page }) => {

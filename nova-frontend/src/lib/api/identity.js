@@ -31,6 +31,9 @@ import { http, tenantPath } from './client.js';
  * @property {string|null} [marketing_consent_at]
  * @property {'customer'|'staff'|null} [whatsapp_consent_source]
  * @property {string|null} [whatsapp_consent_at]
+ * @property {boolean} [voice_consent] reminder calls from Sara, the phone agent
+ * @property {'customer'|'staff'|null} [voice_consent_source]
+ * @property {string|null} [voice_consent_at]
  * @property {string|null} notes
  * @property {string} created_at
  * @property {string} updated_at
@@ -151,17 +154,19 @@ export function getCustomer(tenantId, customerId) {
  * WhatsApp consent and withdraw either, but only the customer can opt in to
  * marketing: turning it on here answers 403 `marketing_consent_customer_only`.
  * @param {string} tenantId @param {string} customerId
- * @param {{ marketingConsent?: boolean|null, whatsappConsent?: boolean|null }} params
+ * @param {{ marketingConsent?: boolean|null, whatsappConsent?: boolean|null,
+ *   voiceConsent?: boolean|null }} params
  * @returns {Promise<Customer>}
  */
 export function updateCustomerConsent(
 	tenantId,
 	customerId,
-	{ marketingConsent = null, whatsappConsent = null }
+	{ marketingConsent = null, whatsappConsent = null, voiceConsent = null }
 ) {
 	return http.patch(tenantPath(tenantId, `/customers/${customerId}/consent`), {
 		marketing_consent: marketingConsent,
-		whatsapp_consent: whatsappConsent
+		whatsapp_consent: whatsappConsent,
+		voice_consent: voiceConsent
 	});
 }
 

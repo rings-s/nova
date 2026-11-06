@@ -193,6 +193,7 @@ PLANS: dict[PlanTier, Plan] = {
             "ai_insights_agent",
             "ai_retention_campaigns",
             "pos_and_product_sales",
+            "ai_call_center",
         ],
     ),
     PlanTier.CHAIN: Plan(
@@ -217,6 +218,7 @@ PLANS: dict[PlanTier, Plan] = {
             "pos_and_product_sales",
             "cross_location_reporting",
             "api_access",
+            "ai_call_center",
         ],
     ),
 }
@@ -585,12 +587,16 @@ class Subscription:
     def trial_ai_messages_left(self) -> int:
         return max(TRIAL_AI_MESSAGES - self.trial_ai_messages_used, 0)
 
+    def require_trial_ai_message(self) -> None:
+        """Refuses once a trial has spent its AI messages; a paid plan has no limit."""
+        if self.trialing and self.trial_ai_messages_used >= TRIAL_AI_MESSAGES:
+            raise TrialAiLimitReachedError(TRIAL_AI_MESSAGES)
+
     def use_trial_ai_message(self) -> None:
         """Counts one AI message against the trial allowance; refused once spent."""
         if not self.trialing:
             return
-        if self.trial_ai_messages_used >= TRIAL_AI_MESSAGES:
-            raise TrialAiLimitReachedError(TRIAL_AI_MESSAGES)
+        self.require_trial_ai_message()
         self.trial_ai_messages_used += 1
 
     def lock(self) -> None:

@@ -1,10 +1,15 @@
 """admin · APPLICATION layer — the platform console.
 
 Reads any table across every tenant, masked (`domain.display_value`), and
-records each read in the audit log. Writes only through `run_action`, which
-hands each curated action to the module that owns the row, scoped to the row's
-tenant, so the module's rules and events apply as they would for that tenant's
-own staff.
+records each read in the audit log. Writes two ways:
+
+  - `run_action` hands a curated action to the module that owns the row,
+    scoped to the row's tenant, so the module's rules and events apply as they
+    would for that tenant's own staff.
+  - `create_row`, `update_row` and `delete_row` change any row of any table but
+    the audit log directly: no state machine, event or policy runs, only the
+    database's own constraints. Each is scoped to the row's tenant first, and
+    recorded with the values before and after (masked).
 """
 
 from collections.abc import Callable
@@ -13,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Table
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationDomainError
@@ -25,27 +31,35 @@ from app.modules.admin.domain import (
     action_spec,
     actions_for,
     clean_reason,
+    contains_mask,
     decode_row_id,
     display_value,
     encode_row_id,
     group_of,
+    is_editable_table,
     is_masked_column,
+    self_edit_refusal,
 )
 from app.modules.admin.exceptions import (
     AdminActionNotFoundError,
     AdminActionRefusedError,
     AdminRowNotFoundError,
     AdminTableNotFoundError,
+    AdminValueError,
 )
 from app.modules.admin.models import AdminAuditEntry
 from app.modules.admin.repository import (
     AdminAuditRepository,
     AdminTableRepository,
     all_tables,
+    coerce_value,
     enum_choices,
     find_table,
     is_filterable,
+    is_required,
     is_searchable,
+    is_writable,
+    max_length,
     referenced_by,
     references,
     type_name,
@@ -53,6 +67,13 @@ from app.modules.admin.repository import (
 from app.modules.booking.service import BookingService
 from app.modules.catalog.service import CatalogService
 from app.modules.identity.auth_service import AuthService
+
+_FOREIGN_KEY_VIOLATION = "23503"
+
+
+def _sqlstate(exc: IntegrityError) -> str | None:
+    orig = getattr(exc, "orig", None)
+    return getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,12 +94,18 @@ class ColumnInfo:
     filterable: bool
     references: str | None
     choices: list[str]
+    #: Whether a direct edit may set it, and whether a new row must.
+    writable: bool
+    required: bool
+    max_length: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class TableDescription:
     name: str
     group: str
+    #: Whether rows may be added, edited and deleted directly.
+    editable: bool
     columns: list[ColumnInfo]
     primary_key: list[str]
     actions: list[ActionSpec]
@@ -130,6 +157,7 @@ class AdminService:
         return TableDescription(
             name=table.name,
             group=group_of(table.name),
+            editable=is_editable_table(table.name),
             columns=[
                 ColumnInfo(
                     name=column.name,
@@ -141,6 +169,9 @@ class AdminService:
                     filterable=is_filterable(column),
                     references=references(column),
                     choices=enum_choices(column),
+                    writable=is_writable(column),
+                    required=is_required(column),
+                    max_length=max_length(column),
                 )
                 for column in table.columns
             ],
@@ -255,6 +286,133 @@ class AdminService:
         )
         # Read back after the owning service flushed, through the scope it ran in.
         return self._view(table, await self._fetch(table, row_id), with_actions=True)
+
+    # --- direct edits -------------------------------------------------------
+
+    async def create_row(
+        self, principal: Principal, table_name: str, values: dict[str, Any]
+    ) -> RowView:
+        table = self._editable(table_name)
+        changes = self._changes(table, values, creating=True)
+        missing = [
+            column.name
+            for column in table.columns
+            if is_required(column) and column.name not in changes
+        ]
+        if missing:
+            raise ValidationDomainError(f"A new row needs a value for: {', '.join(missing)}.")
+        tenant_id: UUID | None = changes.get("tenant_id")
+        await self._scope_write(tenant_id)
+        row_id = encode_row_id(await self.tables.insert_row(table, changes))
+        row = await self._fetch(table, row_id)
+        await self._record(
+            principal,
+            AdminAuditKind.CREATE,
+            table.name,
+            row_id=row_id,
+            target_tenant_id=tenant_id,
+            detail={"values": self._shown(row)},
+        )
+        return self._view(table, row, with_actions=True)
+
+    async def update_row(
+        self, principal: Principal, table_name: str, row_id: str, values: dict[str, Any]
+    ) -> RowView:
+        table = self._editable(table_name)
+        before = await self._fetch(table, row_id)
+        changes = self._changes(table, values, creating=False)
+        if not changes:
+            raise ValidationDomainError("There is nothing to change.")
+        refusal = self_edit_refusal(
+            table.name, row_id, principal.subject_id, deleting=False, changes=changes
+        )
+        if refusal:
+            raise AdminActionRefusedError(refusal)
+        tenant_id: UUID | None = before.get("tenant_id")
+        await self._scope_write(tenant_id)
+        await self.tables.update_row(table, self._key(table, row_id), changes)
+        after = await self._fetch(table, row_id)
+        await self._record(
+            principal,
+            AdminAuditKind.UPDATE,
+            table.name,
+            row_id=row_id,
+            target_tenant_id=tenant_id,
+            detail={
+                "before": {name: display_value(name, before[name]) for name in changes},
+                "after": {name: display_value(name, after[name]) for name in changes},
+            },
+        )
+        return self._view(table, after, with_actions=True)
+
+    async def delete_row(self, principal: Principal, table_name: str, row_id: str) -> None:
+        table = self._editable(table_name)
+        row = await self._fetch(table, row_id)
+        refusal = self_edit_refusal(
+            table.name, row_id, principal.subject_id, deleting=True, changes={}
+        )
+        if refusal:
+            raise AdminActionRefusedError(refusal)
+        tenant_id: UUID | None = row.get("tenant_id")
+        await self._scope_write(tenant_id)
+        try:
+            await self.tables.delete_row(table, self._key(table, row_id))
+        except IntegrityError as exc:
+            if _sqlstate(exc) == _FOREIGN_KEY_VIOLATION:
+                raise AdminActionRefusedError(
+                    "Other rows still point at this one. Delete or change them first."
+                ) from exc
+            raise
+        await self._record(
+            principal,
+            AdminAuditKind.DELETE,
+            table.name,
+            row_id=row_id,
+            target_tenant_id=tenant_id,
+            # What was deleted, masked: enough to see what was lost.
+            detail={"values": self._shown(row)},
+        )
+
+    def _editable(self, name: str) -> Table:
+        table = self._table(name)
+        if not is_editable_table(table.name):
+            raise AdminActionRefusedError(f"'{table.name}' can't be changed from the console.")
+        return table
+
+    def _changes(self, table: Table, values: dict[str, Any], *, creating: bool) -> dict[str, Any]:
+        """The submitted values, checked and coerced to each column's type."""
+        changes: dict[str, Any] = {}
+        for name, value in values.items():
+            column = table.columns.get(name)
+            if column is None:
+                raise AdminValueError(name, f"is not a column of '{table.name}'")
+            if not is_writable(column):
+                raise AdminValueError(name, "is computed by the database")
+            if not creating and (column.primary_key or name == "tenant_id"):
+                raise AdminValueError(name, "can't be changed on an existing row")
+            if contains_mask(value):
+                raise AdminValueError(
+                    name, "still holds the masked placeholder; enter a new value or leave it out"
+                )
+            changes[name] = coerce_value(column, value)
+        return changes
+
+    async def _scope_write(self, tenant_id: UUID | None) -> None:
+        """Holds a direct edit to one tenant, as `_scoped` does a curated action:
+        RLS then refuses a row written for any other. A platform table (no
+        `tenant_id`) stays under the console's bypass."""
+        if tenant_id is not None:
+            await set_tenant_scope(self.session, tenant_id)
+
+    def _key(self, table: Table, row_id: str) -> list[str]:
+        key = decode_row_id(row_id, len(table.primary_key.columns))
+        if key is None:
+            raise AdminRowNotFoundError(table.name, row_id)
+        return key
+
+    @staticmethod
+    def _shown(row: dict[str, Any]) -> dict[str, Any]:
+        return {name: display_value(name, value) for name, value in row.items()}
 
     async def _scoped[S](self, tenant_id: UUID | None, build: Callable[[UUID], S]) -> S:
         """The owning module's service for the row's tenant, with the connection

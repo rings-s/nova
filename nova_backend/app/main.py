@@ -2,6 +2,7 @@ import hmac
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -128,7 +129,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready", tags=["ops"])
     async def health_ready(
-        session: AsyncSession = Depends(get_db_session),
+        session: Annotated[AsyncSession, Depends(get_db_session)],
     ) -> dict[str, str]:
         """Readiness: can we actually serve traffic?
 

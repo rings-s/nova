@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import Select, func, select
@@ -220,6 +221,15 @@ class CustomerRepository(TenantScopedRepository[Customer]):
             stmt = self._active(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def list_by_ids(self, ids: Sequence[UUID]) -> list[Customer]:
+        """Several customers in one query, deleted ones included (a name on a
+        record that outlived its customer is still that customer's name)."""
+        if not ids:
+            return []
+        stmt = self._scope(self._base_select().where(Customer.id.in_(tuple(ids))))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def get_by_phone(self, phone: str) -> Customer | None:
         stmt = self._active(self._scope(self._base_select().where(Customer.phone == phone)))

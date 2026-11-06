@@ -11,6 +11,7 @@ the path's tenant without one, and a turn's database work happens in the short
 units of work `dependencies.TenantServiceScope` opens for it.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -54,6 +55,7 @@ def _response(session_id: str, turn: ChatTurn) -> AiChatResponse:
         reply=result.reply,
         suggested_actions=result.suggested_actions,
         requires_human_handoff=result.requires_human_handoff,
+        follow_up_opened=turn.follow_up_opened,
         related_booking_id=turn.related_booking_id,
         held_slots=[
             HoldSlotResult(
@@ -144,12 +146,13 @@ router = APIRouter(prefix="/tenants/{tenant_id}/ai", tags=["ai"])
 async def chat(
     tenant_id: UUID,
     payload: AiChatRequest,
-    agent: str = Query(
-        default="concierge_agent",
-        description="Which agent to route to. The docs/10 names are accepted as aliases.",
-    ),
-    service: AiChatService = Depends(get_ai_chat_service),
-    principal: Principal = Depends(get_principal),
+    *,
+    agent: Annotated[
+        str,
+        Query(description="Which agent to route to. The docs/10 names are accepted as aliases."),
+    ] = "concierge_agent",
+    service: Annotated[AiChatService, Depends(get_ai_chat_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> AiChatResponse:
     """One turn of conversation (docs/13 section 3.4).
 
@@ -187,7 +190,7 @@ async def chat(
 )
 async def list_agents(
     tenant_id: UUID,
-    engine: InferenceEngine = Depends(get_inference_engine),
+    engine: Annotated[InferenceEngine, Depends(get_inference_engine)],
 ) -> AgentCatalogOut:
     """The roster this deployment runs (docs/13 section 2), with the old aliases.
 
@@ -196,7 +199,7 @@ async def list_agents(
     outside the public discovery surface ADR-0010 carves out.
 
     Useful precisely because the answer can be "none that work": PydanticAI is
-    an optional extra and Ollama may be offline, and a client should be able to
+    an optional extra and the model server may be offline, and a client should be able to
     hide the chat entry point rather than discovering it only hands off.
     """
     return AgentCatalogOut(
@@ -231,8 +234,8 @@ marketplace_router = APIRouter(prefix="/discovery/ai", tags=["ai"])
 )
 async def marketplace_chat(
     payload: MarketplaceChatRequest,
-    service: AiChatService = Depends(get_marketplace_chat_service),
-    principal: Principal = Depends(get_customer_principal),
+    service: Annotated[AiChatService, Depends(get_marketplace_chat_service)],
+    principal: Annotated[Principal, Depends(get_customer_principal)],
 ) -> AiChatResponse:
     """One turn with `marketplace_agent`: search any listed business, hold a time
     there, and book it once the customer confirms it (`confirm_hold_token`),
@@ -257,8 +260,8 @@ async def marketplace_chat(
 
 @marketplace_router.get("/status", response_model=MarketplaceAssistantOut)
 async def marketplace_status(
-    principal: Principal = Depends(get_principal),
-    engine: InferenceEngine = Depends(get_inference_engine),
+    principal: Annotated[Principal, Depends(get_principal)],
+    engine: Annotated[InferenceEngine, Depends(get_inference_engine)],
 ) -> MarketplaceAssistantOut:
     """Whether the assistant can answer, so a client can hide its entry point.
 
@@ -279,8 +282,8 @@ memory_router = APIRouter(prefix="/ai", tags=["ai"])
     dependencies=[Depends(write_rate_limit)],
 )
 async def forget_my_conversations(
-    principal: Principal = Depends(get_principal),
-    service: ConversationMemoryService = Depends(get_conversation_memory_service),
+    principal: Annotated[Principal, Depends(get_principal)],
+    service: Annotated[ConversationMemoryService, Depends(get_conversation_memory_service)],
 ) -> ForgottenConversationsOut:
     """Forget every AI conversation the caller has had, at any business.
 

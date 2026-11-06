@@ -12,7 +12,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from app.modules.ai_agents.service import TenantServices
 
 from app.modules.ai_agents.tools.base import (
-    _ASK_TO_CONFIRM,
     BookedTicket,
     HeldSlot,
     Result,
@@ -134,7 +133,7 @@ class ReceptionistTools(SlotTools):
                 "starts_at": hold.starts_at.isoformat(),
                 **{k: v for k, v in details.items() if k != "label"},
                 "expires_at": hold.expires_at.isoformat(),
-                "next_step": _ASK_TO_CONFIRM,
+                "next_step": self._ask_to_confirm(),
             }
 
         result = await self._call("hold_slot", work)
@@ -195,7 +194,8 @@ class ReceptionistTools(SlotTools):
                 "book_held_slot",
                 lambda: _refuse(
                     "not_confirmed_yet" if held_now else "not_offered",
-                    "STOP: do not call book_held_slot again in this reply. " + _ASK_TO_CONFIRM
+                    "STOP: do not call book_held_slot again in this reply. "
+                    + self._ask_to_confirm()
                     if held_now
                     else "That time was not held for this customer. Hold it with a hold tool, "
                     "show it to them, and book it after they confirm.",
@@ -208,7 +208,11 @@ class ReceptionistTools(SlotTools):
                 lambda: _refuse(
                     "not_confirmed",
                     "STOP: nothing was booked. The customer has not confirmed this time. "
-                    'Tell them to press "Yes, book it" under it.',
+                    + (
+                        "Tell them to press 1 to book it."
+                        if self.deps.voice
+                        else 'Tell them to press "Yes, book it" under it.'
+                    ),
                 ),
             )
         booked: list[BookedTicket] = []

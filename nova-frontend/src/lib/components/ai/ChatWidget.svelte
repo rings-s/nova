@@ -14,6 +14,10 @@
 	 *   button just sends that yes. The booking comes back as a QR ticket.
 	 * - No agent cancels: a `pending_cancellations` entry still needs the
 	 *   customer to confirm from their bookings.
+	 * - "Someone will get back to you" is shown only for `follow_up_opened`,
+	 *   when the handoff reached the business's inbox, not for every
+	 *   `requires_human_handoff`: a promise no person was told about is worse
+	 *   than none.
 	 * - Charts and proposed actions are the tools' output, never the model's
 	 *   text, so they are rendered as-is.
 	 * - Local models are slow (a turn can take a minute on a laptop), so the
@@ -262,9 +266,9 @@
 					</div>
 
 					{#if r}
-						{#if r.requires_human_handoff}
+						{#if r.follow_up_opened}
 							<Alert tone="warning" class="max-w-[85%]"
-								>{t('A staff member will follow up on this.')}</Alert
+								>{t('Someone from the business will get back to you about this.')}</Alert
 							>
 						{/if}
 

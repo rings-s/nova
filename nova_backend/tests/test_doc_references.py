@@ -9,8 +9,8 @@ doc's shorthand can be rooted, and the Obsidian-style links between docs.
 
 It runs wherever the files are. CI checks out the whole repository. `make test`
 runs in the `tools` container, which mounts `nova_backend/` at `/app` and
-`docs/` at `/docs` but not the frontend, so there only Python paths are held to
-account.
+`docs/` at `/docs` but not the frontend or `infra/`, so there only the backend's
+Python paths are held to account.
 """
 
 import re
@@ -22,6 +22,7 @@ BACKEND = Path(__file__).resolve().parent.parent
 REPO = BACKEND.parent
 DOCS = REPO / "docs"
 FRONTEND = REPO / "nova-frontend"
+INFRA = REPO / "infra"
 
 #: A reference that is meant not to resolve, and why. Keyed by the document
 #: (relative to the repository root) and the path exactly as written.
@@ -103,7 +104,10 @@ def _paths_in(line: str) -> list[str]:
 
 
 def _checkable(path: str) -> bool:
-    # Without the frontend checked out, only Python paths can be judged.
+    # Without the frontend or infra/ checked out, only the backend's Python
+    # paths can be judged.
+    if path.startswith("infra/"):
+        return INFRA.is_dir()
     return FRONTEND.is_dir() or path.endswith(".py")
 
 

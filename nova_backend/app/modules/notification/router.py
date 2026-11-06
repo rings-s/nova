@@ -8,6 +8,7 @@ send arbitrary messages would bypass the consent and quiet-hours gates that are
 the whole reason the module exists.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -26,8 +27,8 @@ router = APIRouter(prefix="/tenants/{tenant_id}/notifications", tags=["notificat
 async def list_customer_notifications(
     tenant_id: UUID,
     customer_id: UUID,
-    params: PageParams = Depends(),
-    service: NotificationService = Depends(get_notification_service),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> Page[NotificationOut]:
     """The delivery log for one customer — "did they actually get told?"."""
     rows = await service.list_for_customer(customer_id, limit=params.limit, offset=params.offset)

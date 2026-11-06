@@ -16,6 +16,7 @@ genuinely owns: subscribe, change plan, cancel.
 """
 
 from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -153,7 +154,7 @@ def _line_out(line: CommissionLine) -> CommissionLineOut:
 @router.get("/plans", response_model=Page[PlanOut])
 async def list_plans(
     tenant_id: UUID,
-    service: BillingService = Depends(get_billing_service),
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> Page[PlanOut]:
     """The published price list (docs/11 section 2).
 
@@ -178,8 +179,8 @@ async def list_plans(
 async def create_subscription(
     tenant_id: UUID,
     payload: CreateSubscriptionRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BillingService = Depends(get_billing_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> SubscriptionOut:
     """Subscribes a business to a plan. Owners only (`manage_subscription`).
 
@@ -200,7 +201,7 @@ async def create_subscription(
 async def get_subscription(
     tenant_id: UUID,
     business_id: UUID,
-    service: BillingService = Depends(get_billing_service),
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> SubscriptionOut:
     """Owners and managers only. This is commercial terms — plan, price, seat
     and location counts, and `marketplace_listing_hidden`, which says in effect
@@ -220,7 +221,7 @@ async def get_subscription(
 async def get_standing(
     tenant_id: UUID,
     business_id: UUID,
-    service: BillingService = Depends(get_billing_service),
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> StandingOut:
     """Whether the business may use NOVA today. Any staff member.
 
@@ -251,8 +252,8 @@ async def change_plan(
     tenant_id: UUID,
     business_id: UUID,
     payload: ChangePlanRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BillingService = Depends(get_billing_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> SubscriptionOut:
     """Moves plan. A downgrade below current seats or locations is refused by
     the domain with a 409, naming what is in the way.
@@ -275,8 +276,8 @@ async def start_checkout(
     tenant_id: UUID,
     business_id: UUID,
     payload: StartCheckoutRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BillingService = Depends(get_billing_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> CheckoutOut:
     """Opens a Moyasar invoice for a plan waiting on payment. Owners only.
 
@@ -301,8 +302,8 @@ async def start_checkout(
 async def sync_checkout(
     tenant_id: UUID,
     checkout_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: BillingService = Depends(get_billing_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> CheckoutOut:
     """Asks Moyasar how a plan payment went, and activates the plan if it was
     paid. Owners only. Called by the page Moyasar sends the owner back to; the
@@ -322,8 +323,8 @@ async def cancel_subscription(
     tenant_id: UUID,
     business_id: UUID,
     payload: CancelSubscriptionRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: BillingService = Depends(get_billing_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> SubscriptionOut:
     """Cancels a business's subscription. Owners only.
 
@@ -347,8 +348,8 @@ async def cancel_subscription(
 async def list_invoices(
     tenant_id: UUID,
     business_id: UUID,
-    params: PageParams = Depends(),
-    service: BillingService = Depends(get_billing_service),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> Page[InvoiceOut]:
     """A business's monthly invoices from NOVA, newest first. Owners and managers."""
     invoices = await service.list_invoices(business_id, limit=params.limit, offset=params.offset)
@@ -363,7 +364,7 @@ async def list_invoices(
 async def get_invoice(
     tenant_id: UUID,
     invoice_id: UUID,
-    service: BillingService = Depends(get_billing_service),
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> InvoiceOut:
     """One invoice. Owners and managers.
 
@@ -380,7 +381,7 @@ async def get_invoice(
 async def list_invoice_lines(
     tenant_id: UUID,
     invoice_id: UUID,
-    service: BillingService = Depends(get_billing_service),
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> Page[CommissionLineOut]:
     """Every line behind an invoice total.
 
@@ -400,7 +401,7 @@ async def list_invoice_lines(
 async def explain_commission_line(
     tenant_id: UUID,
     line_id: UUID,
-    service: BillingService = Depends(get_billing_service),
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> CommissionExplanationOut:
     """Why this line cost what it cost, in words a salon owner can read."""
     return CommissionExplanationOut.model_validate(await service.explain_commission_line(line_id))
@@ -417,8 +418,8 @@ async def explain_commission_line(
 async def list_payouts(
     tenant_id: UUID,
     business_id: UUID,
-    params: PageParams = Depends(),
-    service: BillingService = Depends(get_billing_service),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[BillingService, Depends(get_billing_service)],
 ) -> Page[PayoutOut]:
     """Daily settlements (docs/11 section 8), newest first."""
     rows = await service.list_payouts(business_id, limit=params.limit, offset=params.offset)

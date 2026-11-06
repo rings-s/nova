@@ -1,5 +1,6 @@
 """booking · DELIVERY layer — DI providers."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -13,9 +14,10 @@ from app.modules.booking.repository import (
     BookingRepository,
     ScheduleRepository,
     SlotHoldRepository,
+    UnscopedBookingReader,
     UnscopedSlotHoldRepository,
 )
-from app.modules.booking.service import BookingService, SlotHoldSweeper
+from app.modules.booking.service import BookingReminderReader, BookingService, SlotHoldSweeper
 from app.modules.catalog.dependencies import build_catalog_service, get_catalog_service
 from app.modules.catalog.service import CatalogService
 from app.modules.discovery.dependencies import build_attribution_service
@@ -62,10 +64,10 @@ def build_booking_service(
 
 
 def get_booking_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
-    catalog: CatalogService = Depends(get_catalog_service),
-    customers: CustomerService = Depends(get_customer_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    catalog: Annotated[CatalogService, Depends(get_catalog_service)],
+    customers: Annotated[CustomerService, Depends(get_customer_service)],
 ) -> BookingService:
     """Composes booking with catalog and identity.
 
@@ -158,3 +160,8 @@ def resolve_booking_source(
 def build_slot_hold_sweeper(session: AsyncSession) -> SlotHoldSweeper:
     """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
     return SlotHoldSweeper(UnscopedSlotHoldRepository(session))
+
+
+def build_booking_reminder_reader(session: AsyncSession) -> BookingReminderReader:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return BookingReminderReader(UnscopedBookingReader(session))

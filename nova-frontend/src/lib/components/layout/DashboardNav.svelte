@@ -9,13 +9,15 @@
 	import { resolve } from '$app/paths';
 	import Icon from '../ui/Icon.svelte';
 	import { accessStore } from '../../stores/access.svelte.js';
+	import { authStore } from '../../stores/auth.svelte.js';
+	import { superuserStore } from '../../stores/superuser.svelte.js';
 
 	/** @type {{ onnavigate?: () => void, collapsed?: boolean }} */
 	let { onnavigate, collapsed = false } = $props();
 
 	/**
-	 * @typedef {'/app'|'/app/catalog'|'/app/bookings'|'/app/check-in'|'/app/queue'|'/app/customers'|'/app/reviews'|'/app/analytics'|'/app/ai'|'/app/billing'|'/app/team'} AppHref
-	 * @type {{ label: string, items: { href: AppHref, label: string, icon: import('../ui/Icon.svelte').IconName, needs?: import('../../api/identity.js').StaffPermission|import('../../api/identity.js').StaffPermission[] }[] }[]}
+	 * @typedef {'/app'|'/app/catalog'|'/app/bookings'|'/app/check-in'|'/app/queue'|'/app/customers'|'/app/calls'|'/app/follow-ups'|'/app/reviews'|'/app/analytics'|'/app/ai'|'/app/billing'|'/app/team'|'/admin'} AppHref
+	 * @type {{ label: string, superuser?: boolean, items: { href: AppHref, label: string, icon: import('../ui/Icon.svelte').IconName, needs?: import('../../api/identity.js').StaffPermission|import('../../api/identity.js').StaffPermission[] }[] }[]}
 	 */
 	const groups = [
 		{
@@ -25,7 +27,16 @@
 				{ href: '/app/bookings', label: m('Bookings'), icon: 'calendar' },
 				{ href: '/app/check-in', label: m('Check-in'), icon: 'shield-check' },
 				{ href: '/app/queue', label: m('Walk-in queue'), icon: 'users' },
-				{ href: '/app/customers', label: m('Customers'), icon: 'user', needs: 'view_customers' }
+				{ href: '/app/customers', label: m('Customers'), icon: 'user', needs: 'view_customers' },
+				// Callers' numbers are customer data, as on the customer pages.
+				{ href: '/app/calls', label: m('Calls'), icon: 'phone', needs: 'view_customers' },
+				// Customers an assistant promised a person would get back to.
+				{
+					href: '/app/follow-ups',
+					label: m('Follow-ups'),
+					icon: 'inbox',
+					needs: 'view_customers'
+				}
 			]
 		},
 		{
@@ -55,24 +66,38 @@
 				},
 				{ href: '/app/team', label: m('Team'), icon: 'user-check' }
 			]
+		},
+		// NOVA administrators only, whichever business they are in.
+		{
+			label: m('Platform'),
+			superuser: true,
+			items: [{ href: '/admin', label: m('NOVA administration'), icon: 'shield-check' }]
 		}
 	];
+
+	$effect(() => {
+		if (authStore.isAuthenticated) {
+			superuserStore.load(String(authStore.principal?.sub ?? '')).catch(() => {});
+		}
+	});
 
 	let current = $derived(page.url.pathname);
 
 	// Only the pages this role can use in this business. A link that can only
 	// ever answer "not allowed" is noise; the server still guards each page.
 	let visibleGroups = $derived(
-		groups.map((group) => ({
-			...group,
-			items: group.items.filter(
-				(item) =>
-					!item.needs ||
-					(Array.isArray(item.needs)
-						? item.needs.some((need) => accessStore.can(need))
-						: accessStore.can(item.needs))
-			)
-		}))
+		groups
+			.filter((group) => !group.superuser || superuserStore.isSuperuser)
+			.map((group) => ({
+				...group,
+				items: group.items.filter(
+					(item) =>
+						!item.needs ||
+						(Array.isArray(item.needs)
+							? item.needs.some((need) => accessStore.can(need))
+							: accessStore.can(item.needs))
+				)
+			}))
 	);
 
 	/**

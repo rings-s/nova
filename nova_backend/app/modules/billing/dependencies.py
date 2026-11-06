@@ -1,5 +1,6 @@
 """billing · DELIVERY layer — DI providers."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -50,9 +51,9 @@ def build_billing_service(
 
 
 def get_billing_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
-    gateway: PaymentGateway = Depends(get_payment_gateway),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    gateway: Annotated[PaymentGateway, Depends(get_payment_gateway)],
 ) -> BillingService:
     return build_billing_service(session, tenant_id, gateway=gateway)
 

@@ -8,7 +8,9 @@ route on `get_admin_session` through `get_admin_service`
 records is the point.
 """
 
-from fastapi import APIRouter, Depends, Query, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Principal
@@ -18,6 +20,7 @@ from app.modules.admin.exceptions import AdminFilterError
 from app.modules.admin.schemas import (
     RowOut,
     RowsPageOut,
+    RowValuesRequest,
     RunActionRequest,
     TableDetailOut,
     TableOut,
@@ -43,7 +46,7 @@ def _parse_filters(raw: list[str]) -> dict[str, str]:
 
 
 @router.get("", response_model=list[TableOut])
-async def admin_list_tables(service: AdminService = Depends(get_admin_service)) -> object:
+async def admin_list_tables(service: Annotated[AdminService, Depends(get_admin_service)]) -> object:
     """Every table in NOVA, grouped by the module that owns it, with an
     estimated row count. NOVA administrators only."""
     return await service.list_tables()
@@ -51,7 +54,7 @@ async def admin_list_tables(service: AdminService = Depends(get_admin_service)) 
 
 @router.get("/{table}", response_model=TableDetailOut)
 async def admin_describe_table(
-    table: str, service: AdminService = Depends(get_admin_service)
+    table: str, service: Annotated[AdminService, Depends(get_admin_service)]
 ) -> TableDetailOut:
     """A table's columns (which are masked, searchable and filterable, and
     where each foreign key points), the tables that point at it, and the
@@ -62,15 +65,16 @@ async def admin_describe_table(
 @router.get("/{table}/rows", response_model=RowsPageOut)
 async def admin_list_rows(
     table: str,
-    q: str | None = Query(default=None, max_length=200),
-    filter_: list[str] = Query(default=[], alias="filter"),
-    order_by: str | None = Query(default=None, max_length=64),
+    *,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    filter_: Annotated[list[str], Query(alias="filter", default_factory=list)],
+    order_by: Annotated[str | None, Query(max_length=64)] = None,
     desc: bool = False,
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    principal: Principal = Depends(require_superuser),
-    session: AsyncSession = Depends(get_admin_session),
-    service: AdminService = Depends(get_admin_service),
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    service: Annotated[AdminService, Depends(get_admin_service)],
 ) -> RowsPageOut:
     """One page of a table's rows, across every tenant. NOVA administrators only.
 
@@ -97,9 +101,9 @@ async def admin_list_rows(
 async def admin_get_row(
     table: str,
     row_id: str,
-    principal: Principal = Depends(require_superuser),
-    session: AsyncSession = Depends(get_admin_session),
-    service: AdminService = Depends(get_admin_service),
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    service: Annotated[AdminService, Depends(get_admin_service)],
 ) -> RowOut:
     """One row, with the actions it offers. Secrets are masked. NOVA
     administrators only; the read is recorded in the audit log."""
@@ -119,15 +123,83 @@ async def admin_run_action(
     row_id: str,
     action: str,
     payload: RunActionRequest,
-    principal: Principal = Depends(require_superuser),
-    session: AsyncSession = Depends(get_admin_session),
-    service: AdminService = Depends(get_admin_service),
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    service: Annotated[AdminService, Depends(get_admin_service)],
 ) -> RowOut:
     """Runs one of the row's curated actions (deactivate an account, hide a
     listing, cancel a booking…) through the module that owns it, scoped to the
     row's tenant. NOVA administrators only; recorded in the audit log.
 
-    There is no generic edit: an action the table doesn't list is a 404."""
+    Prefer an action over a direct edit where one exists: it runs the module's
+    rules and events. An action the table doesn't list is a 404."""
     row = await service.run_action(principal, table, row_id, action, reason=payload.reason)
     await session.commit()
     return RowOut.of(row)
+
+
+@router.post(
+    "/{table}/rows",
+    response_model=RowOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def admin_create_row(
+    table: str,
+    payload: RowValuesRequest,
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    service: Annotated[AdminService, Depends(get_admin_service)],
+) -> RowOut:
+    """Adds a row to any table but the audit log, as given. A column left out
+    takes its default. NOVA administrators only; recorded in the audit log.
+
+    A direct edit: only the database's constraints apply, no module's rules,
+    and no event is published."""
+    row = await service.create_row(principal, table, payload.values)
+    await session.commit()
+    return RowOut.of(row)
+
+
+@router.patch(
+    "/{table}/rows/{row_id}",
+    response_model=RowOut,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def admin_update_row(
+    table: str,
+    row_id: str,
+    payload: RowValuesRequest,
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    service: Annotated[AdminService, Depends(get_admin_service)],
+) -> RowOut:
+    """Changes the given columns of any row but the audit log's. The primary
+    key and `tenant_id` stay as they are. NOVA administrators only; recorded in
+    the audit log with the values before and after.
+
+    A direct edit: only the database's constraints apply, no module's rules,
+    and no event is published."""
+    row = await service.update_row(principal, table, row_id, payload.values)
+    await session.commit()
+    return RowOut.of(row)
+
+
+@router.delete(
+    "/{table}/rows/{row_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(write_rate_limit)],
+)
+async def admin_delete_row(
+    table: str,
+    row_id: str,
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    service: Annotated[AdminService, Depends(get_admin_service)],
+) -> Response:
+    """Deletes any row but the audit log's. Refused with 409 while other rows
+    still point at it (unless their foreign key cascades). NOVA administrators
+    only; the audit log keeps what was deleted, masked."""
+    await service.delete_row(principal, table, row_id)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

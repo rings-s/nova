@@ -63,6 +63,7 @@ from app.modules.booking.repository import (
     BookingRepository,
     ScheduleRepository,
     SlotHoldRepository,
+    UnscopedBookingReader,
     UnscopedSlotHoldRepository,
 )
 from app.modules.catalog.service import CatalogService
@@ -593,6 +594,26 @@ class BookingService:
             raise BookingNotFoundError(booking_id)
         return booking
 
+    async def get_for_customer(
+        self, booking_id: UUID, customer_id: UUID, *, location_id: UUID | None = None
+    ) -> Booking:
+        """This customer's own booking, still on the calendar (and at
+        `location_id`, when given).
+
+        For a caller acting on a customer's behalf (the queue, letting an
+        arriving appointment in ahead of walk-ins). Someone else's booking, one
+        at another branch, or one cancelled, completed or missed answers
+        `BookingNotFoundError` like a booking that does not exist.
+        """
+        booking = await self.get(booking_id)
+        if (
+            booking.customer_id != customer_id
+            or not booking.occupies_calendar
+            or (location_id is not None and booking.location_id != location_id)
+        ):
+            raise BookingNotFoundError(booking_id)
+        return booking
+
     async def assert_visible_to(self, booking_id: UUID, principal: Principal) -> Booking:
         """`get_for_principal` read as a guard. Same rule, clearer at a call site
         that is about to mutate rather than return."""
@@ -893,6 +914,19 @@ class BookingService:
 
 
 __all__ = ["BookingService", "BookingStatus"]
+
+
+class BookingReminderReader:
+    """The worker's cross-tenant read of bookings due a reminder call (ADR-0017)."""
+
+    def __init__(self, bookings: UnscopedBookingReader) -> None:
+        self.bookings = bookings
+
+    async def list_due(
+        self, *, start: datetime, end: datetime, limit: int = 500
+    ) -> list[tuple[UUID, UUID]]:
+        """(tenant_id, booking_id) of confirmed bookings starting in [start, end)."""
+        return await self.bookings.list_confirmed_starting_between(start, end, limit=limit)
 
 
 class SlotHoldSweeper:

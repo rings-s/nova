@@ -1,6 +1,6 @@
 """ai_agents · INFRASTRUCTURE — the inference engine adapter.
 
-PydanticAI and Ollama are reached through this file and nowhere else, for two
+PydanticAI and the model server are reached through this file and nowhere else, for two
 reasons:
 
   1. docs/10 section 12 requires the whole platform to keep working with every
@@ -18,12 +18,16 @@ reply with `requires_human_handoff=True` rather than raising.
 Conversation memory is encoded here as well, as PydanticAI's own message JSON,
 so `history.py` stores bytes and never imports the library either.
 
-Two local servers are supported (`AI_PROVIDER`): Ollama and LM Studio. Both
-speak the OpenAI chat protocol at /v1, so one `OpenAIChatModel` serves either;
-`_chat_model` only picks the provider and where a reasoning model's thinking
-arrives. Nothing outside this file knows which one is running.
+The one model server is vLLM (ADR-0019): the compose `llm` service, in every
+environment, on a GPU where there is one and on vLLM's CPU build otherwise.
+llama.cpp served the models from 2026-10-23 to 2026-10-28 (ADR-0018), and
+Ollama, LM Studio and hosted servers before that; none is supported now. vLLM
+speaks the OpenAI chat protocol at /v1, so `_chat_model` is an
+`OpenAIChatModel` with the model family's profile. Sara's voice model
+(`build_voice_inference_engine`, ADR-0017) is vLLM too, at its own
+`VOICE_AI_BASE_URL` if a faster one is run for her.
 
-PydanticAI 2.x is the target: `OpenAIChatModel` with `OllamaProvider`. Until
+PydanticAI 2.x is the target: `OpenAIChatModel` with `OpenAIProvider`. Until
 ADR-0011 this file imported `OpenAIModel`, which 2.x no longer has; the
 ImportError happened inside the turn, read as an ordinary inference failure,
 and every chat handed off to a human. Tests now inject a `FunctionModel`
@@ -38,7 +42,12 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from app.core import metrics
+
+if TYPE_CHECKING:
+    from pydantic_ai.settings import ModelSettings
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +59,9 @@ _PROBE_TTL_SECONDS = 15.0
 _probe_cache: dict[str, tuple[float, bool]] = {}
 
 #: Model families that take Qwen3's `/no_think` soft switch in the prompt. It
-#: is the one way to turn thinking off that both Ollama and LM Studio honour;
-#: the OpenAI `reasoning_effort` parameter did not finish a turn in LM Studio.
+#: is the one switch every Qwen3 chat template honours; the OpenAI
+#: `reasoning_effort` parameter did not finish a turn in testing. vLLM also
+#: gets the chat template's hard switch (`_model_settings`).
 _NO_THINK_FAMILIES = ("qwen3",)
 
 #: Small models sometimes repeat a structured field in the reply text as markup
@@ -124,7 +134,7 @@ class InferenceResult:
 def fallback_result(*, locale: str = "ar", reason: str = "unavailable") -> InferenceResult:
     """The response when no model can answer.
 
-    docs/10 section 12, first row: "Ollama unreachable -> endpoint returns
+    docs/10 section 12, first row: "model server unreachable -> endpoint returns
     `requires_human_handoff=True` with a static reply."
     """
     logger.info("ai_fallback", extra={"reason": reason})
@@ -146,7 +156,6 @@ class InferenceEngine:
         *,
         base_url: str,
         routing_model: str,
-        provider: str = "ollama",
         api_key: str | None = None,
         thinking: bool = False,
         reasoning_model: str,
@@ -156,7 +165,6 @@ class InferenceEngine:
         model_override: Any | None = None,
     ) -> None:
         self.base_url = base_url
-        self.provider = provider
         self.api_key = api_key
         self.thinking = thinking
         self.routing_model = routing_model
@@ -164,7 +172,7 @@ class InferenceEngine:
         self.request_timeout_seconds = request_timeout_seconds
         self.tool_timeout_seconds = tool_timeout_seconds
         self.enabled = enabled
-        #: A PydanticAI model instance used instead of Ollama. Tests pass a
+        #: A PydanticAI model instance used instead of the model server. Tests pass a
         #: `FunctionModel`; production leaves it None.
         self.model_override = model_override
 
@@ -199,29 +207,54 @@ class InferenceEngine:
         return ok
 
     def _chat_model(self, model: str) -> Any:
-        """The PydanticAI model for this engine's server."""
+        """The PydanticAI model for the vLLM server."""
         from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.ollama import OllamaProvider
-
-        if self.provider == "ollama":
-            return OpenAIChatModel(
-                model, provider=OllamaProvider(base_url=self.base_url, api_key=self.api_key)
-            )
-
         from pydantic_ai.profiles import merge_profile
-        from pydantic_ai.profiles.openai import OpenAIModelProfile
+        from pydantic_ai.profiles.deepseek import deepseek_model_profile
+        from pydantic_ai.profiles.google import google_model_profile
+        from pydantic_ai.profiles.meta import meta_model_profile
+        from pydantic_ai.profiles.mistral import mistral_model_profile
+        from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer, OpenAIModelProfile
+        from pydantic_ai.profiles.qwen import qwen_model_profile
         from pydantic_ai.providers.openai import OpenAIProvider
 
-        # LM Studio names models `publisher/family-size` (`qwen/qwen3-8b`). The
-        # family decides the profile, so reuse Ollama's table on the bare name,
-        # then read a reasoning model's thinking where LM Studio puts it.
-        family = OllamaProvider.model_profile(model.rsplit("/", 1)[-1])
+        # vLLM names the model by its `--served-model-name` (`qwen3-4b`), and the
+        # family decides the profile.
+        families = {
+            "qwen": qwen_model_profile,
+            "llama": meta_model_profile,
+            "gemma": google_model_profile,
+            "deepseek": deepseek_model_profile,
+            "mistral": mistral_model_profile,
+        }
+        name = model.lower()
+        family = next((f(name) for prefix, f in families.items() if name.startswith(prefix)), None)
         profile = merge_profile(
-            family, OpenAIModelProfile(openai_chat_thinking_field="reasoning_content")
+            # A fallback: the family's own transformer wins if it has one.
+            OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer),
+            family,
+            OpenAIModelProfile(
+                # Where vLLM's qwen3 reasoning parser puts the thinking; read
+                # anywhere else, it would be shown as the answer.
+                openai_chat_thinking_field="reasoning_content",
+                openai_supports_strict_tool_definition=False,
+                supports_json_schema_output=True,
+                supports_json_object_output=True,
+            ),
         )
-        # The OpenAI client insists on a key; LM Studio ignores it.
-        provider = OpenAIProvider(base_url=self.base_url, api_key=self.api_key or "lm-studio")
+        # The OpenAI client insists on a key; vLLM ignores it unless
+        # started with one.
+        provider = OpenAIProvider(base_url=self.base_url, api_key=self.api_key or "vllm")
         return OpenAIChatModel(model, provider=provider, profile=profile)
+
+    def _model_settings(self, model: str) -> "ModelSettings":
+        """Per-call settings. A Qwen3 model's thinking is also switched off in
+        its chat template (`enable_thinking`), which writes an empty
+        `<think></think>` rather than asking the model to skip it."""
+        settings: ModelSettings = {"max_tokens": MAX_TOKENS_PER_CALL}
+        if not self.thinking and any(f in model.lower() for f in _NO_THINK_FAMILIES):
+            settings["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        return settings
 
     async def run_turn(
         self,
@@ -238,6 +271,7 @@ class InferenceEngine:
         history: Sequence[bytes] = (),
         before_attempt: Callable[[], None] | None = None,
         retry_is_safe: Callable[[], bool] | None = None,
+        reply_locale: str | None = None,
     ) -> InferenceResult:
         """Attempts one turn, degrading rather than failing.
 
@@ -258,6 +292,10 @@ class InferenceEngine:
 
         `history` is the conversation's earlier turns, each as `new_turn` bytes
         from a previous result.
+
+        `reply_locale`, when given, is the app's language: a reply written in
+        the other one is sent back to the model once to be rewritten, and a
+        second one fails the turn, so it is never shown.
         """
         if not self.available:
             return fallback_result(
@@ -275,6 +313,7 @@ class InferenceEngine:
             "output_type": output_type,
             "grounded": grounded,
             "history": history,
+            "reply_locale": reply_locale,
         }
 
         if before_attempt is not None:
@@ -337,6 +376,7 @@ class InferenceEngine:
         output_type: type | None,
         grounded: bool,
         history: Sequence[bytes],
+        reply_locale: str | None = None,
     ) -> InferenceResult:
         """The one place PydanticAI is actually called."""
         from pydantic_ai import Agent, ModelRetry, RunContext
@@ -346,6 +386,7 @@ class InferenceEngine:
         from app.modules.ai_agents.guardrails import (
             find_ungrounded_numbers,
             grounded_values_in_result,
+            in_wrong_language,
         )
         from app.modules.ai_agents.schemas import AgentOutput
 
@@ -384,6 +425,12 @@ class InferenceEngine:
             retries=1,
         )
 
+        def retry(reason: str, message: str) -> Exception:
+            """A reply sent back to the model, counted: how often a model needs
+            correcting is the first sign a model or prompt change made it worse."""
+            metrics.count("nova_ai_output_retries_total", agent=agent_name, reason=reason)
+            return ModelRetry(message)
+
         @agent.output_validator
         async def readable(ctx: RunContext[Any], output: Any) -> Any:
             """Prose for the customer, never JSON. Live, qwen3-1.7b answered with
@@ -394,8 +441,29 @@ class InferenceEngine:
             if reply is not None:
                 return reply
             if output.strip().lstrip("`").startswith(("{", "[", "json")):
-                raise ModelRetry("Answer the customer in plain sentences, not JSON.")
+                raise retry("json", "Answer the customer in plain sentences, not JSON.")
             return output
+
+        if reply_locale is not None:
+            language = "Arabic" if reply_locale == "ar" else "English"
+
+            @agent.output_validator
+            async def in_app_language(ctx: RunContext[Any], output: Any) -> Any:
+                """The reply is in the app's language, whatever the customer wrote in.
+                Asked for in the instructions; a small model still answered an
+                English question in English in an Arabic app."""
+                texts = [output] if isinstance(output, str) else [output.reply]
+                if not isinstance(output, str):
+                    texts += output.suggested_actions
+                # Judged as the customer will see it: without echoed field
+                # markup (`<chart_ids>…`), which is Latin in any language.
+                if any(in_wrong_language(clean_reply(text), reply_locale) for text in texts):
+                    raise retry(
+                        "language",
+                        f"The app is set to {language}. Write the whole reply again in "
+                        f"{language} only.",
+                    )
+                return output
 
         if grounded:
 
@@ -405,9 +473,10 @@ class InferenceEngine:
                 text = output if isinstance(output, str) else output.reply
                 ungrounded = find_ungrounded_numbers(text, ctx.deps.artifacts.grounded_values)
                 if ungrounded:
-                    raise ModelRetry(
+                    raise retry(
+                        "ungrounded",
                         "These figures did not come from any tool in this conversation: "
-                        f"{', '.join(ungrounded)}. Call a tool for them, or leave them out."
+                        f"{', '.join(ungrounded)}. Call a tool for them, or leave them out.",
                     )
                 return output
 
@@ -418,7 +487,7 @@ class InferenceEngine:
             usage_limits=UsageLimits(
                 request_limit=REQUEST_LIMIT, tool_calls_limit=TOOL_CALLS_LIMIT
             ),
-            model_settings={"max_tokens": MAX_TOKENS_PER_CALL},
+            model_settings=self._model_settings(model),
         )
         output = run.output
         if isinstance(output, str):
@@ -448,13 +517,32 @@ class InferenceEngine:
 
 def build_inference_engine(settings) -> InferenceEngine:
     return InferenceEngine(
-        base_url=settings.ai_base_url or settings.ollama_base_url,
-        provider=settings.ai_provider,
+        base_url=settings.ai_base_url,
         api_key=settings.ai_api_key,
         thinking=settings.ai_thinking,
         routing_model=settings.ai_routing_model,
         reasoning_model=settings.ai_reasoning_model,
         request_timeout_seconds=settings.ai_request_timeout_seconds,
         tool_timeout_seconds=settings.ai_tool_timeout_seconds,
+        enabled=settings.ai_enabled,
+    )
+
+
+def build_voice_inference_engine(settings) -> InferenceEngine:
+    """Sara's engine (ADR-0017): one fast model for every turn, short timeouts.
+
+    A caller waits in silence while the model thinks, so the voice model is its
+    own setting rather than the chat agents' local one. Each `VOICE_AI_*` value
+    left unset falls back to its `AI_*` setting.
+    """
+    model = settings.voice_ai_model or settings.ai_routing_model
+    return InferenceEngine(
+        base_url=settings.voice_ai_base_url or settings.ai_base_url,
+        api_key=settings.voice_ai_api_key or settings.ai_api_key,
+        thinking=False,
+        routing_model=model,
+        reasoning_model=model,
+        request_timeout_seconds=settings.voice_ai_request_timeout_seconds,
+        tool_timeout_seconds=settings.voice_ai_tool_timeout_seconds,
         enabled=settings.ai_enabled,
     )

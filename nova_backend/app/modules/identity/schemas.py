@@ -42,6 +42,8 @@ class CreateCustomerRequest(ApiSchema):
 class UpdateCustomerConsentRequest(ApiSchema):
     marketing_consent: bool | None = None
     whatsapp_consent: bool | None = None
+    #: Reminder calls from Sara, the phone agent (ADR-0017).
+    voice_consent: bool | None = None
 
 
 class CustomerOut(ApiSchema):
@@ -59,6 +61,9 @@ class CustomerOut(ApiSchema):
     marketing_consent_at: datetime | None = None
     whatsapp_consent_source: str | None = None
     whatsapp_consent_at: datetime | None = None
+    voice_consent: bool = False
+    voice_consent_source: str | None = None
+    voice_consent_at: datetime | None = None
     notes: str | None
     created_at: datetime
     updated_at: datetime
@@ -72,6 +77,8 @@ class MyConsentOut(ApiSchema):
     whatsapp_consent: bool
     marketing_consent_at: datetime | None = None
     whatsapp_consent_at: datetime | None = None
+    voice_consent: bool = False
+    voice_consent_at: datetime | None = None
 
 
 class CreateMembershipRequest(ApiSchema):

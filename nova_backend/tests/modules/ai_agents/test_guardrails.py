@@ -26,6 +26,7 @@ from app.modules.ai_agents.guardrails import (
     GuardrailError,
     GuardrailViolation,
     ProposedActionKind,
+    app_locale,
     assert_agent_may_set_status,
     assert_caller_may_use_agent,
     assert_tenant_matches,
@@ -36,6 +37,7 @@ from app.modules.ai_agents.guardrails import (
     extract_numbers,
     find_ungrounded_numbers,
     grounded_values_in,
+    in_wrong_language,
     redact_pii,
     sanitize_untrusted_text,
 )
@@ -560,3 +562,38 @@ class TestCityNames:
         from app.modules.ai_agents.tools.facts import city_name
 
         assert city_name(city, locale) == shown
+
+
+class TestAppLanguage:
+    """The reply is in the app's language (`in_wrong_language`, `app_locale`)."""
+
+    @pytest.mark.parametrize(
+        ("locale", "expected"),
+        [("ar", "ar"), ("ar-SA", "ar"), ("AR", "ar"), ("en", "en"), ("en-GB", "en"), ("fr", "en")],
+    )
+    def test_a_client_locale_names_one_of_the_two_app_languages(self, locale, expected):
+        assert app_locale(locale) == expected
+
+    def test_english_is_wrong_in_an_arabic_app(self):
+        assert in_wrong_language("Yes, we offer keratin treatments.", "ar")
+
+    def test_arabic_is_wrong_in_an_english_app(self):
+        assert in_wrong_language("نعم، نقدم علاج الكيراتين.", "en")
+
+    def test_each_language_is_right_in_its_own_app(self):
+        assert not in_wrong_language("نعم، نقدم علاج الكيراتين.", "ar")
+        assert not in_wrong_language("Yes, we offer keratin treatments.", "en")
+
+    def test_a_name_in_the_other_script_is_not_a_wrong_language(self):
+        assert not in_wrong_language("موعدك في Lumière Spa يوم الأحد الساعة 10:00.", "ar")
+        assert not in_wrong_language("Your visit to سبا لوميير is on Sunday at 10:00.", "en")
+
+    def test_too_little_text_to_judge_is_never_wrong(self):
+        assert not in_wrong_language("OK, 10:00", "ar")
+        assert not in_wrong_language("QR", "ar")
+
+    def test_a_chat_request_carries_an_app_language(self):
+        from app.modules.ai_agents.schemas import AiChatRequest, MarketplaceChatRequest
+
+        assert AiChatRequest(session_id="s", message="m", locale="ar-SA").locale == "ar"
+        assert MarketplaceChatRequest(session_id="s", message="m", locale="de").locale == "en"

@@ -1,5 +1,5 @@
 """The platform console: superusers browse every tenant, masked and audited,
-and change things only through curated actions.
+run curated actions, and add, edit or delete any row but the audit log's.
 
 A superuser here signs in as a CUSTOMER principal, as in
 `tests/modules/catalog/test_categories.py`: the flag is on the account, not a
@@ -78,13 +78,14 @@ async def test_the_console_lists_every_table_and_describes_one(
     assert names["customer_business_first_bookings"] == "billing"
     assert "admin_audit_log" in names
 
-    first_bookings = (
-        await client.get(f"{TABLES}/customer_business_first_bookings")
-    ).json()
+    first_bookings = (await client.get(f"{TABLES}/customer_business_first_bookings")).json()
     assert first_bookings["group"] == "billing"
-    assert {
-        column["name"] for column in first_bookings["columns"]
-    } >= {"business_id", "customer_id", "booking_id", "first_completed_at"}
+    assert {column["name"] for column in first_bookings["columns"]} >= {
+        "business_id",
+        "customer_id",
+        "booking_id",
+        "first_completed_at",
+    }
 
     users = (await client.get(f"{TABLES}/users")).json()
     columns = {column["name"]: column for column in users["columns"]}
@@ -159,9 +160,7 @@ async def test_boolean_filter_matches_rows_by_the_selected_value(
     disabled = await _account(db_session)
     _sign_in(app, enabled)
 
-    active_rows = await client.get(
-        f"{TABLES}/users/rows", params={"filter": "is_superuser:true"}
-    )
+    active_rows = await client.get(f"{TABLES}/users/rows", params={"filter": "is_superuser:true"})
     inactive_rows = await client.get(
         f"{TABLES}/users/rows", params={"filter": "is_superuser:false"}
     )
@@ -219,7 +218,7 @@ async def test_hiding_a_listing_goes_through_catalog_for_the_rows_tenant(
     (entry,) = [e for e in await _audit(db_session, admin) if e.action]
     assert entry.target_tenant_id == business.tenant_id
 
-    # Not an action on this table, and there is no generic edit.
+    # Not an action on this table.
     wrong = await client.post(
         f"{TABLES}/businesses/rows/{business.id}/actions/cancel_booking", json={}
     )
@@ -277,3 +276,191 @@ async def test_cancelling_a_booking_needs_a_reason_and_runs_the_state_machine(
 
     (entry,) = [e for e in await _audit(db_session, admin) if e.action]
     assert entry.detail == {"reason": "Provider ill"}
+
+
+# --- direct edits -------------------------------------------------------------
+
+
+async def test_an_account_that_is_not_a_superuser_cannot_edit(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession
+) -> None:
+    target = await _account(db_session)
+    _sign_in(app, await _account(db_session))
+    row = f"{TABLES}/users/rows/{target.id}"
+    assert (await client.post(f"{TABLES}/users/rows", json={"values": {}})).status_code == 403
+    assert (await client.patch(row, json={"values": {"full_name": "x"}})).status_code == 403
+    assert (await client.delete(row)).status_code == 403
+    await db_session.refresh(target)
+    assert target.full_name == "Someone"
+
+
+async def test_a_superuser_adds_edits_and_deletes_a_row_audited(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _account(db_session, is_superuser=True)
+    _sign_in(app, admin)
+    slug = f"brows-{uuid4().hex[:8]}"
+
+    incomplete = await client.post(
+        f"{TABLES}/service_categories/rows", json={"values": {"slug": slug}}
+    )
+    assert incomplete.status_code == 422
+    assert "name_en" in incomplete.json()["error"]["message"]
+
+    created = await client.post(
+        f"{TABLES}/service_categories/rows",
+        json={"values": {"slug": slug, "name_en": "Brows", "name_ar": "حواجب"}},
+    )
+    assert created.status_code == 201, created.text
+    row_id = created.json()["id"]
+    # Defaults filled what wasn't given.
+    assert created.json()["values"]["is_active"] is True
+    assert created.json()["values"]["created_at"]
+
+    edited = await client.patch(
+        f"{TABLES}/service_categories/rows/{row_id}",
+        json={"values": {"name_en": "Brows & lashes", "is_active": False}},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["values"]["name_en"] == "Brows & lashes"
+    assert edited.json()["values"]["is_active"] is False
+
+    gone = await client.delete(f"{TABLES}/service_categories/rows/{row_id}")
+    assert gone.status_code == 204, gone.text
+    missing = await client.get(f"{TABLES}/service_categories/rows/{row_id}")
+    assert missing.status_code == 404
+
+    writes = [e for e in await _audit(db_session, admin) if e.kind.value != "view"]
+    assert [(e.kind.value, e.row_id) for e in writes] == [
+        ("create", row_id),
+        ("update", row_id),
+        ("delete", row_id),
+    ]
+    assert writes[0].detail["values"]["slug"] == slug
+    assert writes[1].detail == {
+        "before": {"name_en": "Brows", "is_active": True},
+        "after": {"name_en": "Brows & lashes", "is_active": False},
+    }
+    assert writes[2].detail["values"]["name_en"] == "Brows & lashes"
+
+
+async def test_an_edit_is_scoped_to_the_rows_tenant_and_keeps_its_tenant(
+    app: FastAPI,
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tenant_factory,
+    business_factory,
+) -> None:
+    admin = await _account(db_session, is_superuser=True)
+    business = await business_factory(await tenant_factory())
+    other = await tenant_factory()
+    _sign_in(app, admin)
+    row = f"{TABLES}/businesses/rows/{business.id}"
+
+    moved = await client.patch(row, json={"values": {"tenant_id": str(other.id)}})
+    assert moved.status_code == 422
+    rekeyed = await client.patch(row, json={"values": {"id": str(uuid4())}})
+    assert rekeyed.status_code == 422
+
+    renamed = await client.patch(row, json={"values": {"name_en": "Renamed"}})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["values"]["name_en"] == "Renamed"
+    (entry,) = [e for e in await _audit(db_session, admin) if e.kind.value == "update"]
+    assert entry.target_tenant_id == business.tenant_id
+
+
+async def test_values_are_checked_against_the_column_before_writing(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _account(db_session, is_superuser=True)
+    target = await _account(db_session)
+    _sign_in(app, admin)
+    user = f"{TABLES}/users/rows/{target.id}"
+
+    for values in (
+        {"no_such_column": 1},
+        {"is_active": "maybe"},
+        {"email": None},
+        {"email": "x" * 1000},
+        # A masked value sent back would overwrite the secret with the mask.
+        {"password_hash": MASK},
+    ):
+        response = await client.patch(user, json={"values": values})
+        assert response.status_code == 422, (values, response.text)
+    assert (await client.patch(user, json={"values": {}})).status_code == 422
+
+    # Secrets can be replaced, but are never shown back.
+    replaced = await client.patch(user, json={"values": {"password_hash": "new-hash"}})
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["values"]["password_hash"] == MASK
+    await db_session.refresh(target)
+    assert target.password_hash == "new-hash"
+    (entry,) = [e for e in await _audit(db_session, admin) if e.kind.value == "update"]
+    assert entry.detail == {"before": {"password_hash": MASK}, "after": {"password_hash": MASK}}
+
+    description = (await client.get(f"{TABLES}/locations")).json()
+    columns = {column["name"]: column for column in description["columns"]}
+    assert columns["city_key"]["writable"] is False
+    assert columns["business_id"]["required"] is True
+    assert columns["id"]["required"] is False
+
+
+async def test_a_superuser_cannot_lock_themself_out(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _account(db_session, is_superuser=True)
+    _sign_in(app, admin)
+    own = f"{TABLES}/users/rows/{admin.id}"
+
+    assert (await client.delete(own)).status_code == 409
+    assert (await client.patch(own, json={"values": {"is_active": False}})).status_code == 409
+    assert (await client.patch(own, json={"values": {"is_superuser": False}})).status_code == 409
+    renamed = await client.patch(own, json={"values": {"full_name": "Admin"}})
+    assert renamed.status_code == 200, renamed.text
+
+
+async def test_the_audit_log_cannot_be_edited(
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession
+) -> None:
+    admin = await _account(db_session, is_superuser=True)
+    _sign_in(app, admin)
+    await client.get(f"{TABLES}/users/rows/{admin.id}")
+    (entry,) = await _audit(db_session, admin)
+
+    description = (await client.get(f"{TABLES}/admin_audit_log")).json()
+    assert description["editable"] is False
+    row = f"{TABLES}/admin_audit_log/rows/{entry.id}"
+    assert (await client.delete(row)).status_code == 409
+    assert (await client.patch(row, json={"values": {"action": "x"}})).status_code == 409
+    created = await client.post(
+        f"{TABLES}/admin_audit_log/rows", json={"values": {"table_name": "x"}}
+    )
+    assert created.status_code == 409
+
+
+async def test_deleting_a_row_others_still_point_at_is_refused(
+    app: FastAPI,
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tenant_factory,
+    business_factory,
+    location_factory,
+    service_factory,
+) -> None:
+    admin = await _account(db_session, is_superuser=True)
+    _sign_in(app, admin)
+    created = await client.post(
+        f"{TABLES}/service_categories/rows",
+        json={
+            "values": {"slug": f"nails-{uuid4().hex[:8]}", "name_en": "Nails", "name_ar": "أظافر"}
+        },
+    )
+    category_id = created.json()["id"]
+    location = await location_factory(await business_factory(await tenant_factory()))
+    await service_factory(location, category_id=category_id)
+
+    refused = await client.delete(f"{TABLES}/service_categories/rows/{category_id}")
+    assert refused.status_code == 409, refused.text
+    # The request's transaction survived the refused statement.
+    still = await client.get(f"{TABLES}/service_categories/rows/{category_id}")
+    assert still.status_code == 200

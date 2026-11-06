@@ -21,7 +21,7 @@ is not a marketplace. The exception is paid for in four ways:
 
 import time
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -141,7 +141,7 @@ def _listing_card(card: ListingCard, covers: dict[UUID, Any] | None = None) -> L
     dependencies=[Depends(discovery_read_rate_limit)],
 )
 async def list_categories(
-    service: DiscoveryService = Depends(get_discovery_service),
+    service: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> list[CategoryOut]:
     """Every service category, by English name. Filter `GET /discovery/businesses`
     by a category's `slug`; a salon files each service under one. Only a NOVA
@@ -155,24 +155,28 @@ async def list_categories(
     dependencies=[Depends(discovery_read_rate_limit)],
 )
 async def search_businesses(
-    q: str | None = Query(default=None, max_length=120, description="Free text, EN or AR."),
-    city: str | None = Query(default=None, max_length=120),
-    category: str | None = Query(default=None, max_length=120),
-    latitude: float | None = Query(default=None, ge=-90, le=90),
-    longitude: float | None = Query(default=None, ge=-180, le=180),
-    radius_km: float | None = Query(default=None, gt=0, le=100),
-    bbox: str | None = Query(
-        default=None,
-        max_length=120,
-        description="A map viewport, `west,south,east,north` in degrees.",
-    ),
-    sort: SearchSort = Query(
-        default="default",
-        description="`default` (nearest first when located, else by name), "
-        "`distance` (needs coordinates), or `rating` (best rated first).",
-    ),
-    params: PageParams = Depends(),
-    service: DiscoveryService = Depends(get_discovery_service),
+    *,
+    q: Annotated[str | None, Query(max_length=120, description="Free text, EN or AR.")] = None,
+    city: Annotated[str | None, Query(max_length=120)] = None,
+    category: Annotated[str | None, Query(max_length=120)] = None,
+    latitude: Annotated[float | None, Query(ge=-90, le=90)] = None,
+    longitude: Annotated[float | None, Query(ge=-180, le=180)] = None,
+    radius_km: Annotated[float | None, Query(gt=0, le=100)] = None,
+    bbox: Annotated[
+        str | None,
+        Query(max_length=120, description="A map viewport, `west,south,east,north` in degrees."),
+    ] = None,
+    sort: Annotated[
+        SearchSort,
+        Query(
+            description="`default` (nearest first when located, else by name), "
+            "`distance` (needs coordinates), `rating` (best rated first), or "
+            "`price_asc`/`price_desc` (by the cheapest service at the branch; branches "
+            "with nothing priced last)."
+        ),
+    ] = "default",
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> Page[ListingCardOut]:
     """Finds bookable branches. The marketplace's front door.
 
@@ -212,16 +216,16 @@ async def search_businesses(
     dependencies=[Depends(discovery_read_rate_limit)],
 )
 async def map_businesses(
-    q: str | None = Query(default=None, max_length=120, description="Free text, EN or AR."),
-    city: str | None = Query(default=None, max_length=120),
-    category: str | None = Query(default=None, max_length=120),
-    bbox: str | None = Query(
-        default=None,
-        max_length=120,
-        description="A map viewport, `west,south,east,north` in degrees.",
-    ),
-    limit: int = Query(default=200, ge=1, le=500),
-    service: DiscoveryService = Depends(get_discovery_service),
+    *,
+    q: Annotated[str | None, Query(max_length=120, description="Free text, EN or AR.")] = None,
+    city: Annotated[str | None, Query(max_length=120)] = None,
+    category: Annotated[str | None, Query(max_length=120)] = None,
+    bbox: Annotated[
+        str | None,
+        Query(max_length=120, description="A map viewport, `west,south,east,north` in degrees."),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    service: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> ListingFeatureCollection:
     """The same search as `/businesses`, as GeoJSON for a Leaflet map.
 
@@ -268,7 +272,7 @@ async def map_businesses(
 )
 async def get_storefront(
     slug: str,
-    service: DiscoveryService = Depends(get_discovery_service),
+    service: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> StorefrontOut:
     """One business's public page: branches, services, and providers.
 
@@ -313,10 +317,10 @@ async def get_storefront(
 async def get_public_availability(
     slug: str,
     service_id: UUID,
-    date_from: datetime = Query(...),
-    date_to: datetime = Query(...),
-    session: AsyncSession = Depends(get_db_session),
-    discovery: DiscoveryService = Depends(get_discovery_service),
+    date_from: Annotated[datetime, Query()],
+    date_to: Annotated[datetime, Query()],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    discovery: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> PublicAvailabilityOut:
     """Free slots for one service, across every provider qualified for it.
 
@@ -327,6 +331,10 @@ async def get_public_availability(
     The slots carry the same signed `slot_id` the authenticated availability
     route issues, so a slot found here can be booked directly and the server
     can still prove it offered exactly that slot (docs/07 §5).
+
+    A busy salon's window can be more than one response holds. Then whole days
+    are left off the end and `more_from` names the first of them; every day
+    that is in `slots` is complete.
 
     Rate-limited harder than the other two routes: free slots are the inverse
     of a provider's calendar, so this is an occupancy oracle for anyone willing
@@ -363,6 +371,7 @@ async def get_public_availability(
             )
             for offered in availability.slots
         ],
+        more_from=availability.more_from,
     )
 
 
@@ -374,8 +383,8 @@ async def get_public_availability(
 )
 async def record_referral(
     slug: str,
-    session: AsyncSession = Depends(get_db_session),
-    service: DiscoveryService = Depends(get_discovery_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> ReferralOut:
     """Records that NOVA sent this customer to this storefront.
 
@@ -408,11 +417,12 @@ async def record_referral(
 async def get_photo(
     photo_id: UUID,
     variant: str,
-    t: UUID | None = Query(default=None, description="Signed links only: the tenant."),
-    exp: int | None = Query(default=None, description="Signed links only: expiry (epoch s)."),
-    sig: str | None = Query(default=None, max_length=128),
-    session: AsyncSession = Depends(get_db_session),
-    service: DiscoveryService = Depends(get_discovery_service),
+    *,
+    t: Annotated[UUID | None, Query(description="Signed links only: the tenant.")] = None,
+    exp: Annotated[int | None, Query(description="Signed links only: expiry (epoch s).")] = None,
+    sig: Annotated[str | None, Query(max_length=128)] = None,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[DiscoveryService, Depends(get_discovery_service)],
 ) -> Response:
     """A business photo, as WebP.
 

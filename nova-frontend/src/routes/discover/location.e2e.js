@@ -151,6 +151,8 @@ test('the customer can drag the dot to correct a poor fix', async ({ page }) => 
 		IP_GUESS
 	);
 
+	// The map is behind a toggle; a rough fix offers the way to it.
+	await page.getByRole('button', { name: 'Correct it on the map' }).click();
 	const dot = page.getByTitle('You are here — drag to correct');
 	await expect(dot).toBeVisible();
 	// The mouse can only drag what is on screen, and the map glides to the fix:

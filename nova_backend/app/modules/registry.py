@@ -9,7 +9,7 @@ point of the vertical-slice layout.
 
 Import order matters for SQLAlchemy relationship resolution: a module must be
 imported after the modules it holds ForeignKeys into (catalog -> identity,
-discovery -> catalog, review -> booking/catalog/identity).
+discovery -> catalog, review -> booking/catalog/identity, support -> identity).
 """
 
 # Cross-cutting tables that belong to no single module. Imported for their
@@ -29,6 +29,9 @@ from app.modules.billing.router import router as billing_router
 from app.modules.booking import models as booking_models  # noqa: F401
 from app.modules.booking.router import router as booking_router
 from app.modules.booking.router import schedule_router
+from app.modules.call_center import models as call_center_models  # noqa: F401
+from app.modules.call_center.router import router as call_center_router
+from app.modules.call_center.router import webhook_router as voice_webhook_router
 from app.modules.catalog import models as catalog_models  # noqa: F401
 from app.modules.catalog.router import admin_router as catalog_admin_router
 from app.modules.catalog.router import router as catalog_router
@@ -48,6 +51,8 @@ from app.modules.queue.router import router as queue_router
 from app.modules.queue.router import ticket_router
 from app.modules.review import models as review_models  # noqa: F401
 from app.modules.review.router import router as review_router
+from app.modules.support import models as support_models  # noqa: F401
+from app.modules.support.router import router as support_router
 
 routers = [
     auth_router,
@@ -70,5 +75,8 @@ routers = [
     ai_router,
     ai_marketplace_router,
     ai_memory_router,
+    call_center_router,
+    voice_webhook_router,
+    support_router,
     admin_router,
 ]

@@ -5,6 +5,7 @@ The token issuer ADR-0006 listed as missing. Tokens are minted here from the
 anything a client asserted.
 """
 
+import asyncio
 import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
@@ -145,7 +146,7 @@ class AuthService:
             email=email,
             full_name=full_name,
             phone=phone,
-            password_hash=hash_password(password),
+            password_hash=await asyncio.to_thread(hash_password, password),
         )
         self.session.add(user)
         await self.session.flush()
@@ -189,7 +190,7 @@ class AuthService:
         user.failed_login_attempts = 0
         user.locked_until = None
         if needs_rehash(user.password_hash):
-            user.password_hash = hash_password(password)
+            user.password_hash = await asyncio.to_thread(hash_password, password)
         await self.limiter.forget(failures)
 
         await self.session.flush()
@@ -339,16 +340,18 @@ class AuthService:
         """
         user = await self._find_by_email(email)
         if user is None:
-            hash_password(password)
+            await asyncio.to_thread(hash_password, password)
             raise InvalidCredentialsError()
 
         if user.locked_until is not None and user.locked_until > datetime.now(UTC):
             # No separate "locked" answer. It told anyone which addresses have an
             # account, and a correct password must not reveal that either.
-            hash_password(password)
+            await asyncio.to_thread(hash_password, password)
             raise InvalidCredentialsError()
 
-        if not user.is_active or not verify_password(password, user.password_hash):
+        if not user.is_active or not await asyncio.to_thread(
+            verify_password, password, user.password_hash
+        ):
             await self._record_failed_login(user)
             raise InvalidCredentialsError()
 

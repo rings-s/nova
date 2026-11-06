@@ -81,22 +81,33 @@ async def hold_slot(
 
 ### Model servers
 
-`AI_PROVIDER` chooses **Ollama** or **LM Studio**. Both speak the OpenAI chat protocol at `/v1`,
-so one `OpenAIChatModel` serves either. `runtime.py` is the only file that imports PydanticAI:
+The one model server is **vLLM** (`vllm`), the compose `llm` service, in every environment
+(ADR-0019): its CUDA build on a GPU, its CPU build otherwise. llama.cpp served the models from
+2026-10-23 to 2026-10-28 (ADR-0018), and Ollama and LM Studio before that. It speaks the OpenAI chat protocol
+at `/v1`, so the model is an `OpenAIChatModel`. `runtime.py` is the only file that imports PydanticAI:
 
 | Setting                      | Purpose                                                                                          |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `AI_PROVIDER`                | `ollama` (default) or `lmstudio`                                                                 |
-| `AI_BASE_URL`                | the server's `/v1` URL; falls back to `OLLAMA_BASE_URL`                                          |
+| `AI_PROVIDER`                | `vllm`, the only value accepted                                                                  |
+| `AI_BASE_URL`                | the server's `/v1` URL; default `http://llm:8000/v1`                                             |
 | `AI_ROUTING_MODEL`           | the fast model: the concierge agent, and the retry when the reasoning model fails                |
 | `AI_REASONING_MODEL`         | every other agent                                                                                |
 | `AI_THINKING`                | `false` (default) adds Qwen3's `/no_think` switch; thinking made a qwen3-8b turn about 5x slower |
 | `AI_REQUEST_TIMEOUT_SECONDS` | past this, the turn hands off to a human                                                         |
 | `AI_API_KEY`                 | only if the server was started with authentication                                               |
 
-With LM Studio, a model id such as `qwen/qwen3-8b` gets its family's profile (Qwen) by the part
-after the slash. A reasoning model's thinking is read from `reasoning_content`, so it is never
-shown as the answer.
+The model's `--served-model-name` (`qwen3-4b`) picks its family's profile (Qwen). A reasoning
+model's thinking is read from `reasoning_content`, where vLLM's `--reasoning-parser qwen3` puts it,
+so it is never shown as the answer. A Qwen3 model's thinking is also switched off in the chat
+template (`enable_thinking: false` on every request).
+
+### Reply language
+
+An agent replies in the app's language, the `locale` the web app sends from its current translation
+(`ar` or `en`), whatever language the customer typed in. The instructions end with the rule, and an
+output validator (`runtime.py`, `in_app_language`) checks the reply's script: a reply in the other
+language goes back to the model once, and a second one hands off with the localized fallback.
+Phone calls are exempt.
 
 ### Where agents appear
 

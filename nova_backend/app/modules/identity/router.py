@@ -6,6 +6,7 @@ its phone number — a full customer-list enumeration for a competitor. ADR-0006
 claimed all endpoints required a bearer token; these were the exception.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -53,9 +54,9 @@ router = APIRouter(prefix="/tenants", tags=["identity"])
 )
 async def create_tenant(
     payload: CreateTenantRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: TenantService = Depends(get_tenant_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[TenantService, Depends(get_tenant_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Tenant:
     """Registers a business. The caller becomes its owner.
 
@@ -74,9 +75,9 @@ async def create_tenant(
 
 @router.get("", response_model=Page[TenantOut])
 async def list_my_tenants(
-    params: PageParams = Depends(),
-    service: TenantService = Depends(get_tenant_service),
-    principal: Principal = Depends(get_principal),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[TenantService, Depends(get_tenant_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Page[TenantOut]:
     """The caller's own businesses, never the whole platform's."""
     tenants = await service.list_for_principal(principal, limit=params.limit, offset=params.offset)
@@ -85,8 +86,8 @@ async def list_my_tenants(
 
 @router.get("/{tenant_id}", response_model=TenantOut)
 async def get_tenant(
-    tenant_id: UUID = Depends(get_tenant_context),
-    service: TenantService = Depends(get_tenant_service),
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    service: Annotated[TenantService, Depends(get_tenant_service)],
 ) -> Tenant:
     """`get_tenant_context` proves membership before the id is used at all."""
     return await service.get(tenant_id)
@@ -110,9 +111,9 @@ customers_router = APIRouter(prefix="/tenants/{tenant_id}/customers", tags=["ide
 async def create_customer(
     tenant_id: UUID,
     payload: CreateCustomerRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CustomerService = Depends(get_customer_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CustomerService, Depends(get_customer_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Customer:
     """Adds a customer to this business's book, such as a walk-in at the desk. Staff only.
 
@@ -133,9 +134,10 @@ async def create_customer(
 )
 async def list_customers(
     tenant_id: UUID,
-    q: str | None = Query(default=None, description="Partial name or phone."),
-    params: PageParams = Depends(),
-    service: CustomerService = Depends(get_customer_service),
+    *,
+    q: Annotated[str | None, Query(description="Partial name or phone.")] = None,
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[CustomerService, Depends(get_customer_service)],
 ) -> Page[CustomerOut]:
     """This business's customers. Needs `view_customers` (owner, manager, receptionist).
 
@@ -156,7 +158,7 @@ async def list_customers(
 async def get_customer(
     tenant_id: UUID,
     customer_id: UUID,
-    service: CustomerService = Depends(get_customer_service),
+    service: Annotated[CustomerService, Depends(get_customer_service)],
 ) -> Customer:
     """One customer, with their consent flags and who last changed each. Needs `view_customers`."""
     return await service.get(customer_id)
@@ -170,9 +172,9 @@ async def get_customer(
 async def update_my_consent(
     tenant_id: UUID,
     payload: UpdateCustomerConsentRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CustomerService = Depends(get_customer_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CustomerService, Depends(get_customer_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Customer:
     """The signed-in customer's own consent at this salon — the only way to
     opt in to marketing. Declared before `/{customer_id}/consent`, which
@@ -191,9 +193,9 @@ async def update_customer_consent(
     tenant_id: UUID,
     customer_id: UUID,
     payload: UpdateCustomerConsentRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CustomerService = Depends(get_customer_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CustomerService, Depends(get_customer_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Customer:
     """PDPL: withdrawing consent must be as easy as giving it.
 
@@ -245,9 +247,9 @@ def _membership_out(membership: Membership) -> MembershipOut:
 )
 async def list_memberships(
     tenant_id: UUID,
-    params: PageParams = Depends(),
-    service: MembershipService = Depends(get_membership_service),
-    principal: Principal = Depends(get_principal),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[MembershipService, Depends(get_membership_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Page[MembershipOut]:
     """This salon's staff, active only. Revoked memberships are history."""
     rows = await service.list(principal, limit=params.limit, offset=params.offset)
@@ -257,8 +259,8 @@ async def list_memberships(
 @memberships_router.get("/me", response_model=MyAccessOut, dependencies=[Depends(require_staff)])
 async def get_my_access(
     tenant_id: UUID,
-    service: MembershipService = Depends(get_membership_service),
-    principal: Principal = Depends(get_principal),
+    service: Annotated[MembershipService, Depends(get_membership_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> MyAccessOut:
     """Your role in this business and what it unlocks — so a client can show
     only the screens you can use. Every other route still checks for itself."""
@@ -291,9 +293,9 @@ def _invite_out(invite: MembershipInvite, token: str) -> MembershipInviteOut:
 async def invite_membership(
     tenant_id: UUID,
     payload: CreateMembershipRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: MembershipService = Depends(get_membership_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[MembershipService, Depends(get_membership_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> MembershipInviteOut:
     """Starts staff access for `email`. Nobody has it yet.
 
@@ -316,9 +318,9 @@ async def invite_membership(
 )
 async def list_pending_invites(
     tenant_id: UUID,
-    params: PageParams = Depends(),
-    service: MembershipService = Depends(get_membership_service),
-    principal: Principal = Depends(get_principal),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[MembershipService, Depends(get_membership_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Page[MembershipInviteSummary]:
     """Invites this business has sent that nobody has redeemed yet.
 
@@ -338,9 +340,9 @@ async def accept_membership_invite(
     tenant_id: UUID,
     invite_id: UUID,
     payload: AcceptInviteRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: MembershipService = Depends(get_membership_service_unauthorized),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[MembershipService, Depends(get_membership_service_unauthorized)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> MembershipOut:
     """Redeems an invite token. The token is the entire credential.
 
@@ -364,9 +366,9 @@ async def change_membership_role(
     tenant_id: UUID,
     membership_id: UUID,
     payload: UpdateMembershipRoleRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: MembershipService = Depends(get_membership_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[MembershipService, Depends(get_membership_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> MembershipOut:
     """409 when it would leave the business with no owner."""
     membership = await service.change_role(
@@ -384,9 +386,9 @@ async def change_membership_role(
 async def revoke_membership(
     tenant_id: UUID,
     membership_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: MembershipService = Depends(get_membership_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[MembershipService, Depends(get_membership_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> MembershipOut:
     """Withdraws access, keeping the row.
 

@@ -3,6 +3,7 @@
 Layer rule: schemas, service, dependencies. No business rules here.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -29,9 +30,9 @@ router = APIRouter(prefix="/tenants/{tenant_id}/reviews", tags=["review"])
 async def submit_review(
     tenant_id: UUID,
     payload: SubmitReviewRequest,
-    principal: Principal = Depends(get_principal),
-    session: AsyncSession = Depends(get_db_session),
-    service: ReviewService = Depends(get_review_service),
+    principal: Annotated[Principal, Depends(get_principal)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[ReviewService, Depends(get_review_service)],
 ) -> object:
     """Rate one of your own completed visits, once."""
     review = await service.submit(
@@ -47,8 +48,8 @@ async def submit_review(
 @router.get("/mine", response_model=list[MyReviewOut])
 async def list_my_reviews(
     tenant_id: UUID,
-    principal: Principal = Depends(get_principal),
-    service: ReviewService = Depends(get_review_service),
+    principal: Annotated[Principal, Depends(get_principal)],
+    service: Annotated[ReviewService, Depends(get_review_service)],
 ) -> object:
     """Your reviews at this business — which of your visits you have rated."""
     return await service.list_mine(principal)
@@ -58,8 +59,8 @@ async def list_my_reviews(
 async def list_business_reviews(
     tenant_id: UUID,
     business_id: UUID,
-    params: PageParams = Depends(),
-    service: ReviewService = Depends(get_review_service),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[ReviewService, Depends(get_review_service)],
 ) -> Page[ReviewOut]:
     """Every review of one business, comments included. Staff only."""
     rows = await service.list_for_business(business_id, limit=params.limit, offset=params.offset)

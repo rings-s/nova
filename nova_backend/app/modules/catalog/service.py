@@ -565,6 +565,24 @@ class CatalogService:
         await self.providers.session.flush()
         return assignment
 
+    async def unassign_service_from_provider(self, provider_id: UUID, service_id: UUID) -> None:
+        """Stops a provider being offered for a service.
+
+        Bookings already made stay: booking checks the pair when a booking is
+        created, not afterwards. Removing a pair that was never assigned is a
+        no-op, so a retried request is harmless.
+        """
+        await self.get_provider(provider_id)
+        await self.get_service(service_id)
+        await self.providers.unassign_service(provider_id, service_id)
+        await self.providers.session.flush()
+
+    async def list_assignments(self, location_id: UUID) -> list[ProviderService]:
+        """Who performs what at one branch. A service with no pair here has no
+        bookable time at all, which the dashboard warns about."""
+        await self.get_location(location_id)
+        return await self.providers.list_assignments(location_id)
+
     async def is_provider_qualified(self, provider_id: UUID, service_id: UUID) -> bool:
         return await self.providers.is_qualified(provider_id, service_id)
 
@@ -728,7 +746,7 @@ class PublicCatalogService:
         city: str | None = None,
         category: str | None = None,
         bounding_box: tuple[float, float, float, float] | None = None,
-        order: Literal["name", "rating"] = "name",
+        order: Literal["name", "rating", "price_asc", "price_desc"] = "name",
         limit: int = 20,
         offset: int = 0,
     ) -> list[ListingCard]:

@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 // The platform console against a stubbed API: who may open it, browsing a
-// table into a row, and running one of its curated actions. The API enforces
+// table into a row, running one of its curated actions, and editing, adding
+// and deleting rows directly. The API enforces
 // all of this itself (`require_superuser`); here we check the page follows.
 
 const origin = 'http://localhost:5173';
@@ -30,6 +31,9 @@ const column = (name, extra = {}) => ({
 	filterable: true,
 	references: null,
 	choices: [],
+	writable: true,
+	required: false,
+	max_length: null,
 	...extra
 });
 
@@ -43,9 +47,10 @@ const DEACTIVATE = {
 const USERS = {
 	name: 'users',
 	group: 'identity',
+	editable: true,
 	primary_key: ['id'],
 	columns: [
-		column('email'),
+		column('email', { required: true, max_length: 255 }),
 		column('password_hash', { masked: true, searchable: false, filterable: false }),
 		column('is_active', { type: 'boolean', searchable: false }),
 		column('id', { type: 'uuid', primary_key: true, searchable: false })
@@ -55,18 +60,19 @@ const USERS = {
 };
 
 const USER_ID = '11111111-2222-3333-4444-555555555555';
-/** @param {boolean} active */
-const userRow = (active) => ({
+/** @param {boolean} active @param {string} [email] */
+const userRow = (active, email = 'stylist@example.com') => ({
 	id: USER_ID,
 	tenant_id: null,
-	values: { id: USER_ID, email: 'stylist@example.com', password_hash: '••••••', is_active: active },
+	values: { id: USER_ID, email, password_hash: '••••••', is_active: active },
 	actions: [DEACTIVATE]
 });
 
 /**
  * @param {import('@playwright/test').Page} page
  * @param {{ superuser: boolean }} account
- * @returns {Promise<string[]>} the API calls the page made, as `METHOD path?query`
+ * @returns {Promise<string[]>} the API calls the page made, as `METHOD path?query`, with a
+ *   JSON body after a space when there is one
  */
 async function signIn(page, { superuser }) {
 	const now = Math.floor(Date.now() / 1000);
@@ -81,6 +87,7 @@ async function signIn(page, { superuser }) {
 
 	/** @type {string[]} */ const calls = [];
 	let active = true;
+	let email = 'stylist@example.com';
 	await page.route('**/api/v1/**', (route) => {
 		const request = route.request();
 		if (request.method() === 'OPTIONS') {
@@ -95,7 +102,8 @@ async function signIn(page, { superuser }) {
 		}
 		const url = new URL(request.url());
 		const path = url.pathname.replace(/^.*\/api\/v1/, '');
-		calls.push(`${request.method()} ${path}${url.search}`);
+		const body = request.postData();
+		calls.push(`${request.method()} ${path}${url.search}${body ? ` ${body}` : ''}`);
 
 		if (path === '/auth/me') {
 			return route.fulfill({
@@ -105,6 +113,10 @@ async function signIn(page, { superuser }) {
 		}
 		if (path === '/admin/tables') return route.fulfill({ headers: cors, json: TABLES });
 		if (path === '/admin/tables/users') return route.fulfill({ headers: cors, json: USERS });
+		if (path === '/admin/tables/users/rows' && request.method() === 'POST') {
+			const { values } = JSON.parse(body ?? '{}');
+			return route.fulfill({ status: 201, headers: cors, json: userRow(true, values.email) });
+		}
 		if (path === '/admin/tables/users/rows') {
 			const matchesFilter = url.searchParams.getAll('filter').every((filter) => {
 				const [column, value] = filter.split(':');
@@ -121,11 +133,13 @@ async function signIn(page, { superuser }) {
 			});
 		}
 		if (path === `/admin/tables/users/rows/${USER_ID}`) {
-			return route.fulfill({ headers: cors, json: userRow(active) });
+			if (request.method() === 'DELETE') return route.fulfill({ status: 204, headers: cors });
+			if (request.method() === 'PATCH') email = JSON.parse(body ?? '{}').values.email ?? email;
+			return route.fulfill({ headers: cors, json: userRow(active, email) });
 		}
 		if (path === `/admin/tables/users/rows/${USER_ID}/actions/deactivate_user`) {
 			active = false;
-			return route.fulfill({ headers: cors, json: userRow(active) });
+			return route.fulfill({ headers: cors, json: userRow(active, email) });
 		}
 		if (path === '/admin/tables/bookings') {
 			return route.fulfill({
@@ -182,7 +196,9 @@ test('a superuser browses a table into a row and deactivates it', async ({ page 
 
 	await expect(page.getByText('Done: Deactivate account.')).toBeVisible();
 	await expect(page.getByText('No', { exact: true })).toBeVisible();
-	expect(calls).toContain(`POST /admin/tables/users/rows/${USER_ID}/actions/deactivate_user`);
+	expect(calls).toContain(
+		`POST /admin/tables/users/rows/${USER_ID}/actions/deactivate_user {"reason":null}`
+	);
 });
 
 test('first-booking claims are listed under Billing in the admin console', async ({ page }) => {
@@ -231,4 +247,41 @@ test('a filter added through the form is sent to the table rows API', async ({ p
 		.toBeTruthy();
 	await expect(page.getByText('stylist@example.com')).toBeVisible();
 	await expect(page).toHaveURL(/filter=is_active%3Atrue/);
+});
+
+test('a superuser edits a row, sending only what changed, then deletes it', async ({ page }) => {
+	const calls = await signIn(page, { superuser: true });
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await page.goto(`/admin/tables/users/${USER_ID}`);
+
+	await page.getByRole('button', { name: 'Edit fields' }).click();
+	// The primary key isn't editable, and the secret starts blank.
+	await expect(page.getByLabel('id', { exact: true })).toHaveCount(0);
+	await expect(page.getByLabel('password_hash')).toHaveValue('');
+	await page.getByLabel('email').fill('renamed@example.com');
+	await page.getByRole('button', { name: 'Save changes' }).click();
+
+	await expect(page.getByText('Saved.')).toBeVisible();
+	await expect(page.getByText('renamed@example.com')).toBeVisible();
+	expect(calls).toContain(
+		`PATCH /admin/tables/users/rows/${USER_ID} {"values":{"email":"renamed@example.com"}}`
+	);
+
+	await page.getByRole('button', { name: 'Delete row' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Delete row' }).click();
+	await expect(page).toHaveURL(/\/admin\/tables\/users$/);
+	expect(calls).toContain(`DELETE /admin/tables/users/rows/${USER_ID}`);
+});
+
+test('a superuser adds a row; blank fields are left to their defaults', async ({ page }) => {
+	const calls = await signIn(page, { superuser: true });
+	await page.goto('/admin/tables/users');
+
+	await page.getByRole('link', { name: 'Add row' }).click();
+	await expect(page.getByRole('heading', { name: 'Add row' })).toBeVisible();
+	await page.getByLabel('email').fill('new@example.com');
+	await page.getByRole('button', { name: 'Add row' }).click();
+
+	await expect(page).toHaveURL(new RegExp(`/admin/tables/users/${USER_ID}$`));
+	expect(calls).toContain('POST /admin/tables/users/rows {"values":{"email":"new@example.com"}}');
 });

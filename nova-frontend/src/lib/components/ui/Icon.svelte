@@ -1,6 +1,6 @@
 <script module>
 	/**
-	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'|'log-out'|'home'|'inbox'|'plus'|'chevron-down'|'receipt'|'settings'|'layers'|'arrow-up-right'|'user'|'panel-left'|'info'|'lock'|'table'|'arrow-up'|'arrow-down'|'minus'} IconName
+	 * @typedef {'calendar'|'chat-bubble'|'users'|'chart-bar'|'credit-card'|'shield-check'|'globe'|'sparkles'|'check'|'chevron-left'|'chevron-right'|'arrow-right'|'x'|'user-check'|'phone'|'search'|'clock'|'map-pin'|'star'|'filter'|'zap'|'building'|'trending-up'|'sun'|'moon'|'menu'|'log-out'|'home'|'inbox'|'plus'|'chevron-down'|'receipt'|'settings'|'layers'|'arrow-up-right'|'user'|'panel-left'|'info'|'lock'|'table'|'arrow-up'|'arrow-down'|'minus'|'pencil'|'trash'|'map'|'list'} IconName
 	 */
 
 	/**
@@ -59,6 +59,9 @@
 		'arrow-up': '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>',
 		'arrow-down': '<path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/>',
 		minus: '<path d="M5 12h14"/>',
+		pencil: '<path d="M4.5 19.5h4l10-10a2.83 2.83 0 0 0-4-4l-10 10z"/><path d="m13 7 4 4"/>',
+		trash:
+			'<path d="M4.5 7h15M10 11v5.5M14 11v5.5M6 7l.9 11.1A2 2 0 0 0 8.9 20h6.2a2 2 0 0 0 2-1.9L18 7M9 7V4.5h6V7"/>',
 		'chevron-down': '<path d="M6 9.5l6 6 6-6"/>',
 		receipt:
 			'<path d="M6 3.5h12v17l-2.5-1.5-2 1.5-1.5-1.5-1.5 1.5-2-1.5L6 20.5z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>',
@@ -68,7 +71,9 @@
 		'arrow-up-right': '<path d="M7 17 17 7M8.5 7H17v8.5"/>',
 		user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>',
 		info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8v.2"/>',
-		'panel-left': '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M9.5 4v16"/>'
+		'panel-left': '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M9.5 4v16"/>',
+		map: '<path d="M3.5 6.5 9 4.5l6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13M15 6.5v13"/>',
+		list: '<path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/>'
 	};
 
 	/** @type {(keyof typeof ICONS)[]} */

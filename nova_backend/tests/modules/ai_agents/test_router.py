@@ -43,7 +43,7 @@ async def test_the_catalog_says_what_each_agent_needs_and_whether_a_model_answer
 ) -> None:
     """A client hides the agents a role can't use, and the whole chat when the
     local model server is down. The engine points at nothing, so the answer does
-    not depend on whether this machine happens to run LM Studio."""
+    not depend on whether this machine happens to run the llm service."""
     app.dependency_overrides[get_inference_engine] = lambda: InferenceEngine(
         base_url="http://unused.invalid/v1",
         routing_model="routing",

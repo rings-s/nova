@@ -11,10 +11,10 @@ and then a handoff.
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.core.schemas import ApiSchema
-from app.modules.ai_agents.guardrails import ProposalTarget, ProposedActionKind
+from app.modules.ai_agents.guardrails import ProposalTarget, ProposedActionKind, app_locale
 from app.modules.analytics.schemas import ChartOut
 from app.modules.booking.schemas import HoldSlotResult
 
@@ -56,11 +56,18 @@ class AiChatRequest(ApiSchema):
     session_id: str = Field(max_length=128)
     message: str = Field(max_length=4000)
     channel: str = Field(default="pwa", max_length=32)
+    #: The app's language (`ar` or `en`): the agent replies in it and nothing
+    #: else, whatever language the message is in. `ar-SA` reads as `ar`.
     locale: str = Field(default="ar", max_length=8)
     #: The held time the customer pressed "Yes, book it" on: its `hold_token`,
     #: from an earlier turn's `held_slots`. `book_held_slot` books only this
     #: offer, so a model's reading of "yes" never books by itself (ADR-0015).
     confirm_hold_token: str | None = Field(default=None, max_length=64)
+
+    @field_validator("locale")
+    @classmethod
+    def _an_app_language(cls, value: str) -> str:
+        return app_locale(value)
 
     #: Staff may ask on behalf of a named customer; a customer principal
     #: supplying this is rejected, exactly as in booking.
@@ -86,6 +93,11 @@ class MarketplaceChatRequest(ApiSchema):
     #: from an earlier turn's `held_slots`. `book_held_slot` books only this
     #: offer, so a model's reading of "yes" never books by itself (ADR-0015).
     confirm_hold_token: str | None = Field(default=None, max_length=64)
+
+    @field_validator("locale")
+    @classmethod
+    def _an_app_language(cls, value: str) -> str:
+        return app_locale(value)
 
 
 class ProposedActionOut(ApiSchema):
@@ -152,6 +164,10 @@ class AiChatResponse(ApiSchema):
     reply: str
     suggested_actions: list[str] = []
     requires_human_handoff: bool = False
+    #: A person was told: the handoff opened a follow-up in the business's
+    #: inbox (`GET /tenants/{tenant_id}/follow-ups`). Only then may a client say
+    #: someone will get back to the customer.
+    follow_up_opened: bool = False
     related_booking_id: UUID | None = None
     related_ticket_url: str | None = None
     #: Slots a tool held this turn, each with its token: book one with

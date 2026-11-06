@@ -34,7 +34,9 @@ class SetQueueOpenRequest(ApiSchema):
 
 
 class JoinQueueRequest(ApiSchema):
-    service_id: UUID
+    #: Required for a walk-in; an appointment (`booking_id`) defaults to its
+    #: booking's service.
+    service_id: UUID | None = None
     provider_id: UUID | None = None
     party_size: int = Field(default=1, ge=1, le=20)
 
@@ -63,8 +65,12 @@ class QueueEntryOut(ApiSchema):
 
     #: Place in the line as the customer experiences it (1 = next), which is
     #: not `position` — that is a monotonic join counter that never renumbers.
+    #: Only a waiting entry has one.
     place_in_line: int | None = None
     estimated_wait_minutes: int | None = None
+
+    #: Staff reads of the board only, so reception can call people by name.
+    customer_name: str | None = None
 
 
 class IssueTicketRequest(ApiSchema):

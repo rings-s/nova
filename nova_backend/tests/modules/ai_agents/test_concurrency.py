@@ -24,6 +24,17 @@ async def test_a_further_turn_waits_for_a_slot_then_is_told_to_retry() -> None:
                 pass  # pragma: no cover
 
 
+async def test_a_turn_that_cannot_wait_long_gives_up_sooner() -> None:
+    """A phone turn has seconds in all: it must not queue as long as a chat turn."""
+    gate = InferenceGate(max_concurrent=1, queue_wait_seconds=5.0)
+    async with gate.slot("alice"):
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(AiBusyError):
+            async with gate.slot("caller", wait_seconds=0.05):
+                pass  # pragma: no cover
+        assert asyncio.get_running_loop().time() - started < 1.0
+
+
 async def test_a_waiting_turn_gets_the_slot_when_it_frees() -> None:
     gate = InferenceGate(max_concurrent=1, queue_wait_seconds=1.0)
     order: list[str] = []

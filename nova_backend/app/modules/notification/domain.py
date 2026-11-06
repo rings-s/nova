@@ -65,6 +65,9 @@ class NotificationCategory(StrEnum):
 #: name fails locally instead of at the BSP.
 class MessageTemplate(StrEnum):
     BOOKING_CONFIRMED = "booking_confirmed"
+    #: A booking made for the customer (by Sara on the phone) and not yet
+    #: confirmed: when, where, the ticket link, and that the business confirms.
+    BOOKING_RECEIVED = "booking_received"
     BOOKING_CANCELLED = "booking_cancelled"
     BOOKING_RESCHEDULED = "booking_rescheduled"
     BOOKING_REMINDER = "booking_reminder"
@@ -77,6 +80,7 @@ class MessageTemplate(StrEnum):
 
 _TEMPLATE_CATEGORY: dict[MessageTemplate, NotificationCategory] = {
     MessageTemplate.BOOKING_CONFIRMED: NotificationCategory.TRANSACTIONAL,
+    MessageTemplate.BOOKING_RECEIVED: NotificationCategory.TRANSACTIONAL,
     MessageTemplate.BOOKING_CANCELLED: NotificationCategory.TRANSACTIONAL,
     MessageTemplate.BOOKING_RESCHEDULED: NotificationCategory.TRANSACTIONAL,
     MessageTemplate.BOOKING_REMINDER: NotificationCategory.TRANSACTIONAL,
@@ -268,6 +272,13 @@ def render_template_params(template: MessageTemplate, context: dict[str, str]) -
 
 _TEMPLATE_PARAMS: dict[MessageTemplate, tuple[str, ...]] = {
     MessageTemplate.BOOKING_CONFIRMED: ("customer_name", "service_name", "starts_at"),
+    MessageTemplate.BOOKING_RECEIVED: (
+        "customer_name",
+        "business_name",
+        "service_name",
+        "starts_at",
+        "ticket_url",
+    ),
     MessageTemplate.BOOKING_CANCELLED: ("customer_name", "starts_at"),
     MessageTemplate.BOOKING_RESCHEDULED: ("customer_name", "previous_starts_at", "starts_at"),
     MessageTemplate.BOOKING_REMINDER: ("customer_name", "service_name", "starts_at"),

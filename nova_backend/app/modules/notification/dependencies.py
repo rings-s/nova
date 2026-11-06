@@ -1,5 +1,6 @@
 """notification · DELIVERY layer — DI providers."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -54,10 +55,10 @@ def build_notification_service(
 
 
 def get_notification_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
-    whatsapp: WhatsAppClient = Depends(get_whatsapp_client),
-    customers: CustomerService = Depends(get_customer_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    whatsapp: Annotated[WhatsAppClient, Depends(get_whatsapp_client)],
+    customers: Annotated[CustomerService, Depends(get_customer_service)],
 ) -> NotificationService:
     return build_notification_service(session, tenant_id, whatsapp=whatsapp, customers=customers)
 

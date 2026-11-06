@@ -44,19 +44,21 @@ export function updateCategory(categoryId, { nameEn, nameAr, isActive }) {
 
 // --- The platform console: nova_backend/app/modules/admin/router.py ---------
 //
-// Every table across every tenant, read-only and masked; writes only through
-// each table's curated actions. Every read is recorded in the audit log.
+// Every table across every tenant, masked. Writes through each table's curated
+// actions, or as direct edits (add, change, delete) to any table but the audit
+// log. Every read and write is recorded in the audit log.
 
 /**
  * @typedef {{ name: string, group: string, estimated_rows: number }} AdminTable
  * @typedef {{
  *   name: string, type: 'uuid'|'text'|'number'|'boolean'|'datetime'|'date'|'enum'|'json',
  *   nullable: boolean, primary_key: boolean, masked: boolean, searchable: boolean,
- *   filterable: boolean, references: string|null, choices: string[]
+ *   filterable: boolean, references: string|null, choices: string[],
+ *   writable: boolean, required: boolean, max_length: number|null
  * }} AdminColumn
  * @typedef {{ name: string, label: string, destructive: boolean, requires_reason: boolean }} AdminAction
  * @typedef {{
- *   name: string, group: string, columns: AdminColumn[], primary_key: string[],
+ *   name: string, group: string, editable: boolean, columns: AdminColumn[], primary_key: string[],
  *   actions: AdminAction[], related: { table: string, column: string }[]
  * }} AdminTableDetail
  * @typedef {{ id: string, tenant_id: string|null, values: Record<string, unknown>, actions: AdminAction[] }} AdminRow
@@ -102,5 +104,39 @@ export function runAction(table, rowId, action, { reason = null } = {}) {
 	return http.post(
 		`/admin/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(rowId)}/actions/${encodeURIComponent(action)}`,
 		{ reason }
+	);
+}
+
+// Direct edits: only the database's own constraints apply, not the owning
+// module's rules, and no event is published (no notification is sent).
+
+/**
+ * A column left out takes its default.
+ * @param {string} table @param {Record<string, unknown>} values
+ * @returns {Promise<AdminRow>}
+ */
+export function createRow(table, values) {
+	return http.post(`/admin/tables/${encodeURIComponent(table)}/rows`, { values });
+}
+
+/**
+ * Send only what changes, and never a masked value back.
+ * @param {string} table @param {string} rowId @param {Record<string, unknown>} values
+ * @returns {Promise<AdminRow>}
+ */
+export function updateRow(table, rowId, values) {
+	return http.patch(
+		`/admin/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(rowId)}`,
+		{ values }
+	);
+}
+
+/**
+ * 409 while other rows still point at it.
+ * @param {string} table @param {string} rowId @returns {Promise<void>}
+ */
+export function deleteRow(table, rowId) {
+	return http.delete(
+		`/admin/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(rowId)}`
 	);
 }

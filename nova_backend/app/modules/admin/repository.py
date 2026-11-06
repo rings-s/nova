@@ -7,19 +7,22 @@ and a generic browser has no use for their behaviour anyway. Every table is
 present by the time a request arrives, because `app.modules.registry` imports
 every module's models before the app is built.
 
-Reads only. The one write is the audit entry; the console's curated actions go
-through the owning module's service (`AdminService.run_action`).
+Reads, and the console's direct edits (`insert_row`, `update_row`,
+`delete_row`) as plain Core statements: no ORM class, so no domain rule, event
+or state machine runs. The curated actions go through the owning module's
+service instead (`AdminService.run_action`).
 
 The caller must have opened `bypass_tenant_scope` (`get_admin_session`), or
 RLS correctly returns no tenant rows.
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     Column,
     ColumnElement,
@@ -32,12 +35,15 @@ from sqlalchemy import (
     Table,
     Text,
     and_,
+    delete,
     false,
     func,
+    insert,
     or_,
     select,
     text,
     true,
+    update,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import Base
 from app.db.types import EnumValue
 from app.modules.admin.domain import is_masked_column
-from app.modules.admin.exceptions import AdminFilterError
+from app.modules.admin.exceptions import AdminFilterError, AdminValueError
 from app.modules.admin.models import AdminAuditEntry
 
 
@@ -111,6 +117,89 @@ def referenced_by(table: Table) -> list[tuple[str, str]]:
         if any(fk.column.table is table for fk in column.foreign_keys)
     ]
     return sorted(set(found))
+
+
+def is_writable(column: Column[Any]) -> bool:
+    """Whether the console can set this column. A generated column is computed
+    by Postgres from the others."""
+    return column.computed is None
+
+
+def is_required(column: Column[Any]) -> bool:
+    """Whether a new row must be given a value for this column: it can't be
+    null, and neither Python nor Postgres fills it in."""
+    return (
+        is_writable(column)
+        and not column.nullable
+        and column.default is None
+        and column.server_default is None
+        and not (column.primary_key and column.autoincrement is True)
+    )
+
+
+def max_length(column: Column[Any]) -> int | None:
+    kind = column.type
+    if isinstance(kind, EnumValue):
+        return None
+    return getattr(kind, "length", None) if isinstance(kind, String) else None
+
+
+def coerce_value(column: Column[Any], value: Any) -> Any:
+    """A submitted JSON value as the column's own Python type, or
+    `AdminValueError` saying why it isn't one. Checked here, before the
+    statement, so a bad value is a 422 naming the column rather than a
+    database error."""
+    if value is None:
+        if not column.nullable:
+            raise AdminValueError(column.name, "can't be empty")
+        return None
+    kind = column.type
+    try:
+        if isinstance(kind, EnumValue):
+            return kind.enum_class(value)
+        if isinstance(kind, Boolean):
+            if isinstance(value, bool):
+                return value
+            if str(value).lower() in ("true", "false"):
+                return str(value).lower() == "true"
+            raise ValueError(value)
+        if isinstance(kind, PG_UUID):
+            return uuid.UUID(str(value))
+        if isinstance(kind, DateTime):
+            parsed = datetime.fromisoformat(str(value))
+            if kind.timezone and parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
+        if isinstance(kind, Date):
+            return date.fromisoformat(str(value))
+        if isinstance(kind, Integer):
+            if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+                raise ValueError(value)
+            return int(value)
+        if isinstance(kind, Numeric) and not isinstance(kind, Float):
+            if isinstance(value, bool):
+                raise ValueError(value)
+            return Decimal(str(value))
+        if isinstance(kind, Float):
+            if isinstance(value, bool):
+                raise ValueError(value)
+            return float(value)
+        if isinstance(kind, String | Text):
+            if not isinstance(value, str):
+                raise ValueError(value)
+            limit = max_length(column)
+            if limit is not None and len(value) > limit:
+                raise AdminValueError(column.name, f"is longer than {limit} characters")
+            return value
+        if isinstance(kind, ARRAY):
+            if not isinstance(value, list):
+                raise ValueError(value)
+            item = Column(column.name, kind.item_type, nullable=False)
+            return [coerce_value(item, entry) for entry in value]
+    except (ValueError, KeyError, TypeError, InvalidOperation) as exc:
+        raise AdminValueError(column.name, f"isn't a valid {type_name(column)}") from exc
+    # JSON, and any type the console has no input for: stored as given.
+    return value
 
 
 def _coerce(column: Column[Any], raw: str) -> Any:
@@ -224,12 +313,37 @@ class AdminTableRepository:
         result = await self.session.execute(stmt)
         return [dict(row) for row in result.mappings().all()], int(total or 0)
 
-    async def get_row(self, table: Table, key: list[str]) -> dict[str, Any] | None:
+    def _key_clauses(self, table: Table, key: list[str]) -> list[ColumnElement[bool]]:
         columns = list(table.primary_key.columns)
-        clauses = [column == _coerce(column, raw) for column, raw in zip(columns, key, strict=True)]
-        result = await self.session.execute(select(table).where(*clauses))
+        return [column == _coerce(column, raw) for column, raw in zip(columns, key, strict=True)]
+
+    async def get_row(self, table: Table, key: list[str]) -> dict[str, Any] | None:
+        result = await self.session.execute(select(table).where(*self._key_clauses(table, key)))
         row = result.mappings().one_or_none()
         return dict(row) if row is not None else None
+
+    # --- direct edits -----------------------------------------------------
+    #
+    # Each runs in a savepoint: a statement Postgres refuses (a unique value
+    # taken, a row still referenced) then leaves the request's transaction
+    # usable, and the IntegrityError reaches the error handler as usual.
+
+    async def insert_row(self, table: Table, values: dict[str, Any]) -> list[Any]:
+        """Adds a row; returns its primary key values. Python-side defaults
+        (`uuid4` ids) and server defaults (timestamps) fill what isn't given."""
+        stmt = insert(table).values(values).returning(*table.primary_key.columns)
+        async with self.session.begin_nested():
+            return list((await self.session.execute(stmt)).one())
+
+    async def update_row(self, table: Table, key: list[str], values: dict[str, Any]) -> None:
+        stmt = update(table).where(*self._key_clauses(table, key)).values(values)
+        async with self.session.begin_nested():
+            await self.session.execute(stmt)
+
+    async def delete_row(self, table: Table, key: list[str]) -> None:
+        stmt = delete(table).where(*self._key_clauses(table, key))
+        async with self.session.begin_nested():
+            await self.session.execute(stmt)
 
 
 class AdminAuditRepository:

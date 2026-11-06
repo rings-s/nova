@@ -17,7 +17,6 @@ from app.modules.ai_agents.tools.base import (
     Result,
     ToolkitBase,
     _fold,
-    _local,
     _same_instant,
     _TimeNotFree,
 )
@@ -102,7 +101,7 @@ class SlotTools(ToolkitBase):
             "times": [
                 {
                     "starts_at": slot.starts_at.isoformat(),
-                    "local_time": _local(slot.starts_at, location.timezone),
+                    "local_time": self._when(slot.starts_at, location.timezone),
                     "provider_id": str(slot.provider_id),
                     "provider": self._name(providers[slot.provider_id]),
                 }
@@ -115,12 +114,17 @@ class SlotTools(ToolkitBase):
         location = await services.catalog.get_location(hold.location_id)
         business = self._name(await services.catalog.get_business(location.business_id))
         service = self._name(await services.catalog.get_service(hold.service_id))
-        local_time = _local(hold.starts_at, location.timezone)
+        local_time = self._when(hold.starts_at, location.timezone)
+        label = (
+            f"{service} في {business}، {local_time}"
+            if self._speaks_saudi()
+            else f"{service} at {business}, {local_time}"
+        )
         return {
             "local_time": local_time,
             "business": business,
             "service": service,
-            "label": f"{service} at {business}, {local_time}",
+            "label": label,
         }
 
     async def _free_provider(

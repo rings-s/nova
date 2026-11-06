@@ -96,6 +96,14 @@ function defined(fields) {
  * @property {string} updated_at
  */
 
+/**
+ * One provider qualified for one service. A service with none has no
+ * bookable time anywhere.
+ * @typedef {Object} Assignment
+ * @property {string} provider_id
+ * @property {string} service_id
+ */
+
 // --- Businesses --------------------------------------------------------------
 
 /**
@@ -434,4 +442,19 @@ export function assignServiceToProvider(tenantId, providerId, serviceId) {
 	return http.post(tenantPath(tenantId, `/catalog/providers/${providerId}/services`), {
 		service_id: serviceId
 	});
+}
+
+/**
+ * Stops offering a provider for a service. Bookings already made stay.
+ * @param {string} tenantId @param {string} providerId @param {string} serviceId
+ */
+export function unassignServiceFromProvider(tenantId, providerId, serviceId) {
+	return http.delete(
+		tenantPath(tenantId, `/catalog/providers/${providerId}/services/${serviceId}`)
+	);
+}
+
+/** @param {string} tenantId @param {string} locationId @returns {Promise<{ items: Assignment[], total: number|null }>} */
+export function listAssignments(tenantId, locationId) {
+	return http.get(tenantPath(tenantId, `/catalog/locations/${locationId}/assignments`));
 }

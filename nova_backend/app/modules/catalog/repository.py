@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import Select, func, or_, select, update
+from sqlalchemy import Select, delete, func, or_, select, update
 
 from app.db.repository import BaseRepository, TenantScopedRepository
 from app.modules.catalog.domain import RATING_PRIOR_MEAN, RATING_PRIOR_WEIGHT
@@ -202,6 +202,35 @@ class ProviderRepository(_SoftDeleteAwareRepository[Provider]):
         self.session.add(assignment)
         return assignment
 
+    async def unassign_service(self, provider_id: UUID, service_id: UUID) -> bool:
+        """Removes the pair. False when it was not assigned, which is not an error."""
+        stmt = delete(ProviderService).where(
+            ProviderService.tenant_id == self.tenant_id,
+            ProviderService.provider_id == provider_id,
+            ProviderService.service_id == service_id,
+        )
+        result = await self.session.execute(stmt)
+        return bool(getattr(result, "rowcount", 0))
+
+    async def list_assignments(self, location_id: UUID) -> list[ProviderService]:
+        """Every provider-service pair at one branch, for the dashboard.
+
+        Deleted providers drop out: their rows outlive them (soft delete), but
+        they perform nothing any more.
+        """
+        stmt = (
+            select(ProviderService)
+            .join(Provider, Provider.id == ProviderService.provider_id)
+            .where(
+                ProviderService.tenant_id == self.tenant_id,
+                Provider.tenant_id == self.tenant_id,
+                Provider.location_id == location_id,
+                Provider.is_deleted.is_(False),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
 # --- public marketplace reads --------------------------------------------
 #
@@ -285,7 +314,7 @@ class PublicCatalogRepository(BaseRepository[Business]):
         city: str | None = None,
         category: str | None = None,
         bounding_box: tuple[float, float, float, float] | None = None,
-        order: Literal["name", "rating"] = "name",
+        order: Literal["name", "rating", "price_asc", "price_desc"] = "name",
         limit: int = 20,
         offset: int = 0,
     ) -> list[tuple[Business, Location, Decimal | None, str | None]]:
@@ -419,6 +448,11 @@ class PublicCatalogRepository(BaseRepository[Business]):
                 Business.name_en.asc(),
                 Location.id.asc(),
             )
+        elif order in ("price_asc", "price_desc"):
+            # The card's own "from" price. A branch with nothing priced has no
+            # place on a price scale, so it goes last either way.
+            by_price = cheapest.asc() if order == "price_asc" else cheapest.desc()
+            stmt = stmt.order_by(by_price.nulls_last(), Business.name_en.asc(), Location.id.asc())
         else:
             stmt = stmt.order_by(Business.name_en.asc(), Location.id.asc())
         stmt = stmt.limit(limit).offset(offset)

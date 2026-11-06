@@ -1,6 +1,7 @@
 """FastAPI dependencies that apply rate-limit policies to endpoints."""
 
 import ipaddress
+from typing import Annotated
 
 from fastapi import Depends, Request
 
@@ -75,7 +76,9 @@ def rate_limit_by_principal(policy: RateLimitPolicy, *, scope: str):
     their own budgets instead of competing for a shared one.
     """
 
-    async def _dependency(request: Request, principal: Principal = Depends(get_principal)) -> None:
+    async def _dependency(
+        request: Request, principal: Annotated[Principal, Depends(get_principal)]
+    ) -> None:
         limiter = get_rate_limiter()
         key = f"{scope}:{principal.subject_id}"
         result = await limiter.check(key, policy)

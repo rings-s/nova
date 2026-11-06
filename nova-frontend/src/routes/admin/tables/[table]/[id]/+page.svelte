@@ -2,17 +2,19 @@
 	import { t } from '$lib/i18n/index.svelte.js';
 	/**
 	 * One row, every field, with links to the rows it points at and the rows
-	 * that point at it, and the curated actions its table offers. An action runs
-	 * through the module that owns the row (the API's `run_action`); there is no
-	 * generic edit.
+	 * that point at it, the curated actions its table offers, and direct edit
+	 * and delete. An action runs through the module that owns the row (the API's
+	 * `run_action`); a direct edit changes the row and nothing else.
 	 */
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { describeTable, getRow, runAction } from '$lib/api/admin.js';
+	import { deleteRow, describeTable, getRow, runAction, updateRow } from '$lib/api/admin.js';
 	import { humanize } from '$lib/admin/console.svelte.js';
 	import { toastStore } from '$lib/stores/toast.svelte.js';
 	import { formatApiError } from '$lib/utils/errors.js';
 
+	import AdminRowForm from '$lib/components/admin/AdminRowForm.svelte';
 	import AdminValue from '$lib/components/admin/AdminValue.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -36,6 +38,14 @@
 	let running = $state(false);
 	let actionError = $state(/** @type {string|null} */ (null));
 
+	let editing = $state(false);
+	let saving = $state(false);
+	let editError = $state(/** @type {string|null} */ (null));
+
+	let confirmingDelete = $state(false);
+	let deleting = $state(false);
+	let deleteError = $state(/** @type {string|null} */ (null));
+
 	$effect(() => {
 		const name = table;
 		const rowId = id;
@@ -43,6 +53,7 @@
 		detail = null;
 		row = null;
 		error = null;
+		editing = false;
 		Promise.all([describeTable(name), getRow(name, rowId)])
 			.then(([description, found]) => {
 				if (cancelled) return;
@@ -88,6 +99,45 @@
 		}
 	}
 
+	function startEditing() {
+		editError = null;
+		editing = true;
+	}
+
+	/** @param {Record<string, unknown>} values */
+	async function save(values) {
+		if (Object.keys(values).length === 0) {
+			editing = false;
+			return;
+		}
+		saving = true;
+		editError = null;
+		try {
+			row = await updateRow(table, id, values);
+			toastStore.success(t('Saved.'));
+			editing = false;
+		} catch (err) {
+			editError = formatApiError(err);
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function remove() {
+		deleting = true;
+		deleteError = null;
+		try {
+			await deleteRow(table, id);
+			toastStore.success(t('Deleted.'));
+			confirmingDelete = false;
+			await goto(resolve('/admin/tables/[table]', { table }));
+		} catch (err) {
+			deleteError = formatApiError(err);
+		} finally {
+			deleting = false;
+		}
+	}
+
 	/** @param {string} relatedTable @param {string} column */
 	function relatedHref(relatedTable, column) {
 		const query = new URLSearchParams({ filter: `${column}:${id}` });
@@ -118,31 +168,100 @@
 	</div>
 {:else}
 	<div class="mt-2 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
-		<Card padding="none" class="overflow-hidden shadow-raised">
-			<div
-				class="flex items-center justify-between gap-3 border-b border-line bg-surface-muted px-5 py-3"
-			>
-				<h2 class="text-sm font-semibold text-fg">{t('Record details')}</h2>
-				<span class="font-mono text-[11px] text-fg-subtle">{detail.columns.length}</span>
-			</div>
-			<dl class="divide-y divide-line-subtle">
-				{#each detail.columns as column (column.name)}
-					<div class="grid gap-1.5 px-5 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-5">
-						<dt class="pt-0.5 font-mono text-[11px] text-fg-muted" dir="ltr">
-							{column.name}
-							{#if column.references}
-								<span class="mt-0.5 block text-[10px] text-fg-subtle">→ {column.references}</span>
-							{/if}
-						</dt>
-						<dd class="min-w-0 rounded-control bg-surface-sunken/50 px-2.5 py-1.5 text-sm text-fg">
-							<AdminValue value={row.values[column.name]} {column} full />
-						</dd>
+		{#if editing}
+			<Card padding="none" class="overflow-hidden shadow-raised">
+				<div
+					class="flex items-center justify-between gap-3 border-b border-line bg-surface-muted px-5 py-3"
+				>
+					<h2 class="text-sm font-semibold text-fg">{t('Edit record')}</h2>
+				</div>
+				<div class="flex flex-col gap-5 p-5">
+					<Alert tone="warning">
+						{t(
+							'A direct edit changes this row and nothing else: no business rule, notification or event runs. Use an action where one fits.'
+						)}
+					</Alert>
+					{#if editError}
+						<Alert tone="error">{editError}</Alert>
+					{/if}
+					{#key row.id}
+						<AdminRowForm
+							id="admin-edit"
+							columns={detail.columns}
+							values={row.values}
+							onsubmit={save}
+						/>
+					{/key}
+					<div class="flex justify-end gap-2 border-t border-line-subtle pt-4">
+						<Button variant="ghost" onclick={() => (editing = false)}>{t('Cancel')}</Button>
+						<Button type="submit" form="admin-edit" loading={saving}>{t('Save changes')}</Button>
 					</div>
-				{/each}
-			</dl>
-		</Card>
+				</div>
+			</Card>
+		{:else}
+			<Card padding="none" class="overflow-hidden shadow-raised">
+				<div
+					class="flex items-center justify-between gap-3 border-b border-line bg-surface-muted px-5 py-3"
+				>
+					<h2 class="text-sm font-semibold text-fg">{t('Record details')}</h2>
+					<span class="font-mono text-[11px] text-fg-subtle">{detail.columns.length}</span>
+				</div>
+				<dl class="divide-y divide-line-subtle">
+					{#each detail.columns as column (column.name)}
+						<div class="grid gap-1.5 px-5 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-5">
+							<dt class="pt-0.5 font-mono text-[11px] text-fg-muted" dir="ltr">
+								{column.name}
+								{#if column.references}
+									<span class="mt-0.5 block text-[10px] text-fg-subtle">→ {column.references}</span>
+								{/if}
+							</dt>
+							<dd
+								class="min-w-0 rounded-control bg-surface-sunken/50 px-2.5 py-1.5 text-sm text-fg"
+							>
+								<AdminValue value={row.values[column.name]} {column} full />
+							</dd>
+						</div>
+					{/each}
+				</dl>
+			</Card>
+		{/if}
 
 		<div class="flex flex-col gap-6">
+			{#if detail.editable}
+				<Card padding="md" class="shadow-card">
+					<div class="flex items-center gap-2">
+						<span
+							class="flex size-8 items-center justify-center rounded-control bg-surface-muted text-fg-secondary"
+						>
+							<Icon name="pencil" class="size-4" />
+						</span>
+						<h2 class="text-sm font-semibold text-fg">{t('Direct edit')}</h2>
+					</div>
+					<div class="mt-3 flex flex-col gap-2">
+						<Button
+							variant="outline"
+							class="justify-start"
+							disabled={editing}
+							onclick={startEditing}
+						>
+							<Icon name="pencil" class="size-4" />
+							{t('Edit fields')}
+						</Button>
+						<Button
+							variant="danger-ghost"
+							class="justify-start"
+							onclick={() => {
+								deleteError = null;
+								confirmingDelete = true;
+							}}
+						>
+							<Icon name="trash" class="size-4" />
+							{t('Delete row')}
+						</Button>
+					</div>
+				</Card>
+			{/if}
+
 			{#if row.actions.length > 0}
 				<Card padding="md" class="shadow-card">
 					<div class="flex items-center gap-2">
@@ -227,5 +346,23 @@
 		>
 			{pending ? t(pending.label) : ''}
 		</Button>
+	{/snippet}
+</Modal>
+
+<Modal
+	open={confirmingDelete}
+	title={t('Delete this row?')}
+	description={t(
+		'This can’t be undone. Rows that depend on it may be deleted with it, and no business rule, notification or event runs. The audit log keeps a copy of what was deleted.'
+	)}
+	onclose={() => (confirmingDelete = false)}
+>
+	{#if deleteError}
+		<Alert tone="error">{deleteError}</Alert>
+	{/if}
+	<p class="font-mono text-xs text-fg-muted" dir="ltr">{table} · {id}</p>
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (confirmingDelete = false)}>{t('Cancel')}</Button>
+		<Button variant="danger" loading={deleting} onclick={remove}>{t('Delete row')}</Button>
 	{/snippet}
 </Modal>

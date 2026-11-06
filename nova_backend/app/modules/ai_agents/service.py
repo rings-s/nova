@@ -30,9 +30,13 @@ A turn, in order (docs/13 sections 3 and 5):
     remember the turn            unless no model answered
     attach what tools produced   charts, actions, holds and queue places from
                                  `TurnArtifacts`, never from the model's text
+    open a follow-up             a customer's handoff at a business goes to
+                                 its staff inbox (`support`), or no person is
+                                 promised
 """
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager, nullcontext
@@ -58,10 +62,12 @@ from app.modules.ai_agents.guardrails import (
     GuardrailError,
     GuardrailViolation,
     ProposedAction,
+    app_locale,
     assert_caller_may_use_agent,
     assert_tenant_matches,
     clean_reply,
     grounded_values_in,
+    redact_pii,
     sanitize_untrusted_text,
 )
 from app.modules.ai_agents.history import ConversationKey, ConversationStore
@@ -84,6 +90,8 @@ from app.modules.discovery.service import DiscoveryService
 from app.modules.identity.service import MembershipService
 from app.modules.payment.service import PaymentService
 from app.modules.queue.service import QueueService
+from app.modules.support.domain import FollowUpReason
+from app.modules.support.service import SupportService
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +108,8 @@ class TenantServices:
     analytics: AnalyticsService
     #: Not a tool's: the turn reads the caller's role with it before inference.
     memberships: MembershipService
+    #: Not a tool's either: a customer's handoff opens a follow-up after the turn.
+    support: SupportService
 
 
 class ServiceScope(Protocol):
@@ -153,6 +163,8 @@ class TurnArtifacts:
     #: Write tools that completed, in order. Each one's unit of work committed.
     committed_writes: list[str] = field(default_factory=list)
     handoff_reason: str | None = None
+    #: `verify_caller` asked for a code to be sent; the call center sends it.
+    verification_requested: bool = False
 
     def begin_attempt(self) -> None:
         """Clears what one model attempt presented, before the next begins.
@@ -202,6 +214,12 @@ class AgentDeps:
     #: A marketplace referral the client holds (a storefront visit), checked by
     #: booking's own attribution; never trusted beyond that.
     referral_token: str | None = None
+    #: A phone call (ADR-0017): Sara's turn, spoken rather than shown.
+    voice: bool = False
+    #: Whether the person is known to be who the customer record says. True for
+    #: a signed-in caller; on a phone call, only once the caller typed the code
+    #: sent to the customer's WhatsApp, because caller ID can be forged.
+    caller_verified: bool = True
     #: Marketplace assistant only: the public listings, and a unit of work for
     #: a tenant a listing named.
     discovery: DiscoveryScope | None = None
@@ -220,6 +238,12 @@ class ChatTurn:
     queue_places: list[QueuePlace]
     pending_cancellations: list[PendingCancellation]
     tickets: list[BookedTicket] = field(default_factory=list)
+    verification_requested: bool = False
+    #: The summary the agent gave `escalate_to_human`, for whoever follows up.
+    handoff_reason: str | None = None
+    #: A follow-up was opened in the business's inbox: a person will get back
+    #: to the customer. False for a handoff no one was told about.
+    follow_up_opened: bool = False
 
 
 class AiChatService:
@@ -233,6 +257,7 @@ class AiChatService:
         discovery: DiscoveryScope | None = None,
         services_for: Callable[[UUID], ServiceScope] | None = None,
         gate_factory: Callable[[], InferenceGate] | None = None,
+        gate_wait_seconds: float | None = None,
     ) -> None:
         """A tenant's chat (`tenant_id` and `services`), or the marketplace's
         (no tenant; `discovery` and `services_for` instead)."""
@@ -247,6 +272,8 @@ class AiChatService:
         #: binds to its loop, and dependencies are built outside it). None: no
         #: limit, as in tests that run one turn.
         self.gate_factory = gate_factory
+        #: How long a turn queues for a slot. None: the gate's own wait.
+        self.gate_wait_seconds = gate_wait_seconds
 
     async def chat(
         self,
@@ -263,13 +290,26 @@ class AiChatService:
         requested_tenant_id: UUID | None = None,
         referral_token: str | None = None,
         confirmed_hold_token: str | None = None,
+        voice: bool = False,
+        caller_verified: bool = True,
+        confirm_latest_offer: bool = False,
     ) -> ChatTurn:
-        """Runs a turn. Refuses before inference; never raises for an inference problem."""
+        """Runs a turn. Refuses before inference; never raises for an inference problem.
+
+        `voice` is a phone call (ADR-0017), from `call_center` alone. There the
+        caller confirms by pressing 1, which `confirm_latest_offer` reports: the
+        newest offer's hold token is read here, server-side, as the button's is
+        sent by the client. `caller_verified` is False until the caller proved
+        the customer's phone.
+        """
         spec = resolve_agent(agent_name)
         # A marketplace agent works across tenants and a tenant's agent inside
-        # one: each is reachable only through its own route.
-        if spec.marketplace != (self.tenant_id is None):
+        # one: each is reachable only through its own route. A voice agent
+        # answers calls only, and only it does.
+        if spec.marketplace != (self.tenant_id is None) or spec.voice_only != voice:
             raise AgentUnavailableError(agent_name)
+        if voice:
+            channel = "voice"
         # Both names: the alias the caller used and the agent it resolved to.
         assert_caller_may_use_agent(agent_name, caller_is_staff=principal.is_staff)
         assert_caller_may_use_agent(spec.name, caller_is_staff=principal.is_staff)
@@ -298,10 +338,11 @@ class AiChatService:
                     await services.catalog.get_business(business_id)
                     if spec.needs_business and spec.required_feature is not None:
                         await services.billing.require_feature(business_id, spec.required_feature)
-                    # A locked business gets no AI (402 `subscription_required`),
-                    # and a trial counts this message against its allowance
-                    # (402 `trial_ai_limit_reached` once it is spent).
-                    await services.billing.use_ai_message(business_id)
+                    # A locked business gets no AI (402 `subscription_required`).
+                    # A trial's allowance is the owner's: only staff agents spend
+                    # it (402 `trial_ai_limit_reached` once it is spent), or any
+                    # customer could use it up from the storefront.
+                    await services.billing.require_ai(business_id, spends_trial=_spends_trial(spec))
                     if spec.audience is Audience.CUSTOMER:
                         # What the storefront's assistant can say without a tool.
                         facts = await business_facts(services, business_id, locale)
@@ -325,15 +366,15 @@ class AiChatService:
             services=self.services,
             referral_token=referral_token,
             confirmed_hold_token=confirmed_hold_token,
+            voice=voice,
+            caller_verified=caller_verified,
             discovery=self.discovery if spec.marketplace else None,
             services_for=self.services_for if spec.marketplace else None,
         )
         artifacts = deps.artifacts
-        instructions = self._instructions(spec, locale=locale)
+        instructions = self._instructions(spec, locale=locale, voice=voice)
         if facts is not None:
             instructions = f"{instructions}\n\n{facts.text}"
-        # NOVA's own instructions are facts too: a reply may repeat a number they state.
-        artifacts.grounded_values |= grounded_values_in(instructions)
         toolkit = AgentToolkit(
             deps, spec=spec, tool_timeout_seconds=self.engine.tool_timeout_seconds
         )
@@ -349,17 +390,31 @@ class AiChatService:
             # Loaded before the model runs, so a hold made in this turn is not
             # among them: the customer has to see it before it can be booked.
             deps.offers = decode_offers(await self.history.load_offers(conversation))
+        if confirm_latest_offer and deps.offers:
+            deps.confirmed_hold_token = deps.offers[-1].hold_token
         if deps.offers:
             # Stated as a fact of the conversation, not left to memory: a turn
             # whose answer failed is not remembered, but its hold still stands.
             instructions = (
-                f"{instructions}\n\n{self._offers_note(deps.offers, confirmed_hold_token)}"
+                f"{instructions}\n\n"
+                f"{self._offers_note(deps.offers, deps.confirmed_hold_token, voice=voice)}"
             )
+        if not voice:
+            # Last, where a small model weighs it most. A call keeps its own
+            # rule: Sara answers a caller who speaks English in English.
+            instructions = f"{instructions}\n\n{_LANGUAGE_RULES[app_locale(locale)]}"
+        # NOVA's own instructions are facts too: a reply may repeat a number they
+        # state. Read once they are whole, so the open offers' times count.
+        artifacts.grounded_values |= grounded_values_in(instructions)
 
         gate = self.gate_factory() if self.gate_factory is not None else None
         started = time.perf_counter()
         try:
-            async with gate.slot(str(principal.subject_id)) if gate else nullcontext():
+            async with (
+                gate.slot(str(principal.subject_id), self.gate_wait_seconds)
+                if gate
+                else nullcontext()
+            ):
                 result = await self.engine.run_turn(
                     agent_name=spec.name,
                     system_prompt=instructions,
@@ -373,6 +428,8 @@ class AiChatService:
                     history=earlier_turns,
                     before_attempt=artifacts.begin_attempt,
                     retry_is_safe=artifacts.nothing_committed,
+                    # The app's language is the reply's, checked, not asked for.
+                    reply_locale=None if voice else locale,
                 )
         except AiBusyError:
             metrics.record_ai_turn(
@@ -381,6 +438,9 @@ class AiChatService:
             raise
         if self.history and result.new_turn is not None:
             await self.history.append(conversation, result.new_turn)
+        if result.new_turn is not None and _spends_trial(spec) and deps.business_id:
+            # Counted once a model answered: a busy, refused or failed turn is free.
+            await self._count_ai_message(deps.business_id)
         if self.history is not None and (artifacts.held_slots or artifacts.used_offers):
             await self.history.save_offers(
                 conversation, encode_offers(self._offers_after(deps)), OFFER_TTL_SECONDS
@@ -398,7 +458,7 @@ class AiChatService:
             logger.info("ai_reply_said_nothing", extra={"agent": spec.name})
             result = replace(
                 result,
-                reply=_unanswered_reply(locale, facts.branches if facts else ()),
+                reply=_unanswered_reply(locale, facts.branches if facts else (), voice=voice),
                 requires_human_handoff=False,
             )
         elif artifacts.booking_failures and not artifacts.tickets:
@@ -409,13 +469,13 @@ class AiChatService:
             if code == "not_confirmed_yet" and artifacts.held_slots:
                 # It tried to book what it had only just held: the honest
                 # state is "held, waiting for your yes".
-                reply = _after_write_reply(locale, booked=False)
+                reply = _after_write_reply(locale, booked=False, voice=voice)
             elif code == "not_confirmed":
                 # Held in an earlier turn, but the customer never pressed its
                 # button: whatever text persuaded the model, nothing is booked.
-                reply = _press_to_book_reply(locale)
+                reply = _press_to_book_reply(locale, voice=voice)
             else:
-                reply = _booking_failed_reply(locale, reason)
+                reply = _booking_failed_reply(locale, reason, voice=voice)
             result = replace(result, reply=reply, requires_human_handoff=False)
         elif (
             artifacts.held_slots
@@ -426,7 +486,7 @@ class AiChatService:
             # book it?". The customer must know what is held: say it for it.
             result = replace(
                 result,
-                reply=_holding_reply(locale, artifacts.held_slots[-1]),
+                reply=_holding_reply(locale, artifacts.held_slots[-1], voice=voice),
                 requires_human_handoff=False,
             )
         elif result.new_turn is None and (artifacts.held_slots or artifacts.tickets):
@@ -435,9 +495,26 @@ class AiChatService:
             # when the customer's time is in fact held or booked.
             result = replace(
                 result,
-                reply=_after_write_reply(locale, booked=bool(artifacts.tickets)),
+                reply=_after_write_reply(locale, booked=bool(artifacts.tickets), voice=voice),
                 requires_human_handoff=False,
             )
+
+        follow_up_opened = False
+        if result.requires_human_handoff and self._owes_follow_up(
+            spec, principal, self_service=self_service, voice=voice
+        ):
+            follow_up_opened = await self._open_follow_up(
+                user_id=principal.subject_id,
+                business_id=deps.business_id,
+                session_id=session_id,
+                result=result,
+                artifacts=artifacts,
+                message=message,
+            )
+        if result.requires_human_handoff and result.degraded and not follow_up_opened and not voice:
+            # The fallback says a person will help. Nobody was told, so say
+            # what is true instead. A call is Sara's to word (`call_center`).
+            result = replace(result, reply=_unavailable_reply(locale))
 
         turn = ChatTurn(
             agent=spec,
@@ -452,6 +529,9 @@ class AiChatService:
             queue_places=list(artifacts.queue_places),
             pending_cancellations=list(artifacts.pending_cancellations),
             tickets=list(artifacts.tickets),
+            verification_requested=artifacts.verification_requested,
+            handoff_reason=artifacts.handoff_reason,
+            follow_up_opened=follow_up_opened,
         )
         metrics.record_ai_turn(
             agent=spec.name,
@@ -469,6 +549,7 @@ class AiChatService:
                 "tenant_id": str(self.tenant_id or "market"),
                 "agent": spec.name,
                 "handoff": result.requires_human_handoff,
+                "follow_up": follow_up_opened,
                 "degraded": result.degraded,
                 "model": result.model_used,
                 "charts": len(turn.charts),
@@ -480,17 +561,32 @@ class AiChatService:
         return turn
 
     @staticmethod
-    def _offers_note(offers: list[HeldSlot], confirmed_hold_token: str | None) -> str:
+    def _offers_note(
+        offers: list[HeldSlot], confirmed_hold_token: str | None, *, voice: bool = False
+    ) -> str:
         """The open offers, for the model: times and places, never a hold token."""
         lines = [
             f"- starts_at {offer.starts_at.isoformat()}"
             + (f" at business_slug {offer.business_slug}" if offer.business_slug else "")
+            # What was held, in local time: the words to repeat to the customer.
+            + (f": {offer.label}" if offer.label else "")
             for offer in offers
         ]
         note = "Times already held for this customer and waiting for their answer:\n" + "\n".join(
             lines
         )
         confirmed = next((o for o in offers if o.hold_token == confirmed_hold_token), None)
+        if voice:
+            if confirmed is not None:
+                return (
+                    f"{note}\nThe caller just pressed 1 to book starts_at "
+                    f"{confirmed.starts_at.isoformat()}. "
+                    "Call book_held_slot with that starts_at now."
+                )
+            return (
+                f"{note}\nThe caller books one by pressing 1 on the keypad. If they say yes out "
+                "loud, ask them to press 1. Do not call book_held_slot, and do not hold it again."
+            )
         if confirmed is not None:
             return (
                 f'{note}\nThe customer just pressed "Yes, book it" on starts_at '
@@ -501,6 +597,64 @@ class AiChatService:
             "say yes in words, ask them to press it. Do not call book_held_slot, and do not "
             "hold it again."
         )
+
+    def _owes_follow_up(
+        self, spec: AgentSpec, principal: Principal, *, self_service: bool, voice: bool
+    ) -> bool:
+        """Whether a handoff in this turn is a business's to follow up.
+
+        A signed-in customer, in their own name, at a business: someone staff
+        can reach. Not the marketplace assistant, which has no business to
+        tell; not staff, who are the people a handoff would go to; and not a
+        call, whose follow-up `call_center` opens with the caller's number.
+        """
+        return (
+            spec.audience is Audience.CUSTOMER
+            and not voice
+            and self.services is not None
+            and self.tenant_id is not None
+            and principal.kind is PrincipalKind.CUSTOMER
+            and self_service
+        )
+
+    async def _open_follow_up(
+        self,
+        user_id: UUID,
+        business_id: UUID | None,
+        session_id: str,
+        result: InferenceResult,
+        artifacts: TurnArtifacts,
+        message: str,
+    ) -> bool:
+        """Opens (or updates) this conversation's follow-up. False if it could not:
+        the turn is answered either way, only without promising a person."""
+        if self.services is None:  # pragma: no cover - `_owes_follow_up` checked it
+            return False
+        if artifacts.handoff_reason is not None:
+            reason = FollowUpReason.ESCALATED
+        elif result.degraded:
+            reason = FollowUpReason.ASSISTANT_UNAVAILABLE
+        else:
+            reason = FollowUpReason.AGENT_COULD_NOT_HELP
+        # Masked as the model saw it (numbers, emails, payment references): a
+        # card number typed into the chat is not copied into the inbox. The
+        # contact on file is how staff reach the customer.
+        customer_message, _ = redact_pii(message.strip())
+        try:
+            async with self.services() as services:
+                await services.support.open_for_chat(
+                    user_id=user_id,
+                    business_id=business_id,
+                    session_id=session_id,
+                    reason=reason,
+                    summary=artifacts.handoff_reason,
+                    customer_message=customer_message,
+                    booking_id=artifacts.booking_ids[-1] if artifacts.booking_ids else None,
+                )
+        except Exception:
+            logger.warning("ai_follow_up_not_opened", exc_info=True)
+            return False
+        return True
 
     @staticmethod
     def _offers_after(deps: AgentDeps) -> list[HeldSlot]:
@@ -513,13 +667,24 @@ class AiChatService:
         ]
         return kept[-MAX_OFFERS:]
 
+    async def _count_ai_message(self, business_id: UUID) -> None:
+        if self.services is None:  # pragma: no cover - staff agents have a tenant
+            return
+        try:
+            async with self.services() as services:
+                await services.billing.use_ai_message(business_id)
+        except Exception:
+            # The answer is given; a lost count must not take it away.
+            logger.warning("ai_message_not_counted", exc_info=True)
+
     def unavailable_response(self, *, locale: str) -> InferenceResult:
         return fallback_result(locale=locale, reason="ai_disabled")
 
     @staticmethod
-    def _instructions(spec: AgentSpec, *, locale: str) -> str:
-        language = "Arabic" if locale == "ar" else "English"
-        parts = [spec.instructions, f"Reply in {language}."]
+    def _instructions(spec: AgentSpec, *, locale: str, voice: bool = False) -> str:
+        parts = [spec.instructions]
+        if voice:
+            parts.append(f"Reply in {'Arabic' if locale == 'ar' else 'English'}.")
         if spec.needs_business or spec.audience is Audience.CUSTOMER:
             today = datetime.now(UTC).date().isoformat()
             parts.append(f"Today is {today}. Tools take calendar dates as YYYY-MM-DD.")
@@ -561,6 +726,22 @@ class AiChatService:
         return named + unnamed
 
 
+#: The app's language decides the reply's, not the customer's message: someone
+#: who uses the app in Arabic and types in English still reads Arabic.
+_LANGUAGE_RULES = {
+    "ar": (
+        "Language: the app is set to Arabic. Write your whole reply in Arabic, even when "
+        "the customer writes in English or a tool's result is in English. Keep names, "
+        "numbers and times as they are."
+    ),
+    "en": (
+        "Language: the app is set to English. Write your whole reply in English, even when "
+        "the customer writes in Arabic or a tool's result is in Arabic. Keep names, "
+        "numbers and times as they are."
+    ),
+}
+
+
 _AFTER_WRITE_REPLIES = {
     ("en", True): "It is booked. Your QR ticket is below: show it at reception to check in.",
     ("ar", True): "تم الحجز. تذكرتك مع رمز QR أدناه: اعرضها في الاستقبال لتسجيل حضورك.",
@@ -569,18 +750,56 @@ _AFTER_WRITE_REPLIES = {
 }
 
 
+_CLOCK_TIME = re.compile(r"\b\d{2}:\d{2}\b")
+_TO_ASCII_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
 def _mentions_time(reply: str, offer: HeldSlot) -> bool:
     """Whether the reply already tells the customer the held time (its HH:MM)."""
     if offer.label is None:
         return True
-    hhmm = offer.label.rsplit(", ", 1)[-1][:5]
-    return hhmm in reply
+    if "الساعة" in offer.label:
+        # A call's Saudi label ("…، بكرة الساعة عشر الصبح"): the hour, in words.
+        hour = offer.label.rsplit("الساعة", 1)[-1].split()[0]
+        return f"الساعة {hour}" in reply
+    times = _CLOCK_TIME.findall(offer.label)
+    if not times:
+        return True
+    # A reply may write the time in Arabic-Indic digits.
+    return times[-1] in reply.translate(_TO_ASCII_DIGITS)
 
 
-def _unanswered_reply(locale: str, branches: tuple[str, ...] = ()) -> str:
+_UNAVAILABLE_REPLIES = {
+    "en": "The assistant can't answer right now. Please try again in a little while.",
+    "ar": "المساعد غير متاح الآن. يُرجى المحاولة بعد قليل.",
+}
+
+
+def _spends_trial(spec: AgentSpec) -> bool:
+    """Whether a turn counts against a trial's AI messages: the owner's agents do."""
+    return spec.audience is Audience.STAFF
+
+
+def _unavailable_reply(locale: str) -> str:
+    """Said instead of the fallback's "a person will help" when no one was told."""
+    return _UNAVAILABLE_REPLIES.get(locale, _UNAVAILABLE_REPLIES["en"])
+
+
+def _unanswered_reply(locale: str, branches: tuple[str, ...] = (), *, voice: bool = False) -> str:
     """Said for the model when it gave nothing back. With the storefront's branches
-    known, it says where they are (the question that failed live), from the records."""
+    known, it says where they are (the question that failed live), from the records.
+    On a call, no list: one spoken sentence."""
     arabic = locale.startswith("ar")
+    if voice:
+        if arabic:
+            return (
+                "المعذرة، ما قدرت أجاوبكم على هذا الحين. أقدر أعلمكم عن فروعنا وخدماتنا "
+                "وأسعارها، أو أدور لكم موعد مناسب."
+            )
+        return (
+            "Sorry, I couldn't answer that just now. I can tell you about our branches, "
+            "services and prices, or find you a time."
+        )
     if branches:
         where = "\n".join(f"- {line}" for line in branches)
         if arabic:
@@ -602,30 +821,55 @@ def _unanswered_reply(locale: str, branches: tuple[str, ...] = ()) -> str:
     )
 
 
-def _holding_reply(locale: str, offer: HeldSlot) -> str:
+def _holding_reply(locale: str, offer: HeldSlot, *, voice: bool = False) -> str:
     """The held time in words, from the hold itself rather than the model."""
+    if voice:
+        # Spoken: no timezone in brackets, and the call center adds "press 1".
+        label = (offer.label or "").rsplit(" (", 1)[0]
+        return f"حجزت لكم مؤقت {label}." if locale == "ar" else f"I am holding {label} for you."
     if locale == "ar":
         return f"أحجز لك مؤقتًا: {offer.label}. هل أؤكد الحجز؟"
     return f"I am holding {offer.label} for you. Shall I book it?"
 
 
-def _press_to_book_reply(locale: str) -> str:
+def _press_to_book_reply(locale: str, *, voice: bool = False) -> str:
     """Told when the model tried to book a time the customer has not confirmed."""
+    if voice:
+        if locale == "ar":
+            return "إذا تبون أأكد لكم الحجز اضغطوا واحد."
+        return "To book it, press 1 on your phone."
     if locale == "ar":
         return "لتأكيد الحجز، اضغط «نعم، احجزه» تحت الموعد المحجوز لك."
     return 'To book it, press "Yes, book it" under the time held for you.'
 
 
-def _booking_failed_reply(locale: str, reason: str) -> str:
-    """The truth after a refused booking, whatever the model said."""
+def _booking_failed_reply(locale: str, reason: str, *, voice: bool = False) -> str:
+    """The truth after a refused booking, whatever the model said.
+
+    On a call, Sara's own words: Saudi dialect in the polite plural, as her
+    instructions require, and no reason, which is the server's text, not speech.
+    """
+    if voice:
+        if locale == "ar":
+            return "المعذرة، ما قدرت أكمل الحجز. تبون أدور لكم موعد ثاني؟"
+        return "Sorry, I couldn't complete that booking. Shall I find you another time?"
     if locale == "ar":
         return "لم أتمكن من إتمام الحجز. هل تريد أن أبحث لك عن موعد آخر؟"
     return f"I could not complete the booking ({reason}). Shall I find you another time?"
 
 
-def _after_write_reply(locale: str, *, booked: bool) -> str:
+_AFTER_WRITE_SPOKEN = {
+    ("en", True): "It is booked. The business will confirm it shortly.",
+    ("ar", True): "أبشروا، تم الحجز، والمحل بيأكده لكم قريب إن شاء الله.",
+    ("en", False): "I am holding that time for you.",
+    ("ar", False): "حجزت لكم الموعد مؤقت.",
+}
+
+
+def _after_write_reply(locale: str, *, booked: bool, voice: bool = False) -> str:
     """What the customer is told when a tool wrote but the model gave no answer."""
-    return _AFTER_WRITE_REPLIES.get((locale, booked), _AFTER_WRITE_REPLIES[("en", booked)])
+    replies = _AFTER_WRITE_SPOKEN if voice else _AFTER_WRITE_REPLIES
+    return replies.get((locale, booked), replies[("en", booked)])
 
 
 #: Kept for callers and tests written against the docs/10 roster.

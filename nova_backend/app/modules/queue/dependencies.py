@@ -1,5 +1,6 @@
 """queue · DELIVERY layer — DI providers."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -17,9 +18,10 @@ from app.modules.queue.repository import (
     QueueEntryRepository,
     QueueRepository,
     TicketRepository,
+    UnscopedQueueEntryRepository,
     UnscopedTicketRepository,
 )
-from app.modules.queue.service import QueueService, TicketSweeper
+from app.modules.queue.service import QueueService, QueueSweeper, TicketSweeper
 
 
 def build_queue_service(
@@ -56,11 +58,11 @@ def build_queue_service(
 
 
 def get_queue_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
-    catalog: CatalogService = Depends(get_catalog_service),
-    customers: CustomerService = Depends(get_customer_service),
-    bookings: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    catalog: Annotated[CatalogService, Depends(get_catalog_service)],
+    customers: Annotated[CustomerService, Depends(get_customer_service)],
+    bookings: Annotated[BookingService, Depends(get_booking_service)],
 ) -> QueueService:
     """Composes queue with catalog, identity and booking.
 
@@ -76,3 +78,8 @@ def get_queue_service(
 def build_ticket_sweeper(session: AsyncSession) -> TicketSweeper:
     """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
     return TicketSweeper(UnscopedTicketRepository(session))
+
+
+def build_queue_sweeper(session: AsyncSession) -> QueueSweeper:
+    """Cross-tenant, for the worker. Call `bypass_tenant_scope` on the session first."""
+    return QueueSweeper(UnscopedQueueEntryRepository(session))

@@ -6,16 +6,18 @@
 	/**
 	 * A provider row. Selectable (a button) only when `onselect` is given;
 	 * `actions` renders trailing controls, so it must not be combined with
-	 * `onselect` (a button can't contain buttons).
+	 * `onselect` (a button can't contain buttons). `details` renders a line
+	 * under the title, such as the services they perform.
 	 *
 	 * @type {{
 	 *   provider: import('../../api/catalog.js').Provider,
 	 *   selected?: boolean,
 	 *   onselect?: (provider: import('../../api/catalog.js').Provider) => void,
-	 *   actions?: import('svelte').Snippet
+	 *   actions?: import('svelte').Snippet,
+	 *   details?: import('svelte').Snippet
 	 * }}
 	 */
-	let { provider, selected = false, onselect, actions } = $props();
+	let { provider, selected = false, onselect, actions, details } = $props();
 
 	let name = $derived(pickBilingual(provider, 'name'));
 	let title = $derived(pickBilingual(provider, 'title'));
@@ -38,6 +40,7 @@
 			{title || t('Provider')}{#if provider.is_active === false}
 				· {t('Inactive')}{/if}
 		</p>
+		{#if details}<div class="mt-1">{@render details()}</div>{/if}
 	</div>
 	{#if actions}
 		<div class="flex shrink-0 items-center gap-2">{@render actions()}</div>

@@ -29,6 +29,11 @@ class ColumnOut(ApiSchema):
     references: str | None = None
     #: An enum column's allowed values.
     choices: list[str] = []
+    #: Whether a direct edit may set it (not a generated column).
+    writable: bool = True
+    #: Whether a new row must be given a value: not null, and no default.
+    required: bool = False
+    max_length: int | None = None
 
 
 class ActionOut(ApiSchema):
@@ -55,6 +60,8 @@ class RelatedOut(ApiSchema):
 class TableDetailOut(ApiSchema):
     name: str
     group: str
+    #: Whether rows may be added, edited and deleted directly (all but the audit log).
+    editable: bool
     columns: list[ColumnOut]
     primary_key: list[str]
     actions: list[ActionOut]
@@ -65,6 +72,7 @@ class TableDetailOut(ApiSchema):
         return cls(
             name=description.name,
             group=description.group,
+            editable=description.editable,
             columns=[ColumnOut.model_validate(column) for column in description.columns],
             primary_key=description.primary_key,
             actions=[ActionOut.of(spec) for spec in description.actions],
@@ -100,3 +108,11 @@ class RowsPageOut(ApiSchema):
 
 class RunActionRequest(ApiSchema):
     reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
+
+
+class RowValuesRequest(ApiSchema):
+    """Column values for a direct edit, as JSON: ids, dates and enums as
+    strings, JSON columns as objects. An edit sends only what changes; a masked
+    column's current value is never sent back."""
+
+    values: dict[str, Any] = Field(max_length=200)

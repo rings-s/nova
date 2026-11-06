@@ -69,6 +69,12 @@ def test_default_order_is_nearest_when_located_and_by_name_otherwise() -> None:
     assert resolve_search_order("rating", located=True) == "rating"
 
 
+def test_a_price_order_holds_with_or_without_a_position() -> None:
+    for sort in ("price_asc", "price_desc"):
+        assert resolve_search_order(sort, located=False) == sort
+        assert resolve_search_order(sort, located=True) == sort
+
+
 def test_distance_needs_somewhere_to_measure_from() -> None:
     with pytest.raises(ValidationDomainError):
         resolve_search_order("distance", located=False)

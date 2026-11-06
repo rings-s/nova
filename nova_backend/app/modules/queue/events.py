@@ -17,6 +17,9 @@ class QueueEntryJoined(DomainEvent):
     entry_id: UUID
     customer_id: UUID
     source: str
+    #: Where they stand when they join, as the customer is told it — not the
+    #: entry's `position`, which is a join counter.
+    place_in_line: int
 
 
 @dataclass(frozen=True)

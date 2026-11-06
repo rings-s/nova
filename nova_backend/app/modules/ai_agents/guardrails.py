@@ -181,6 +181,37 @@ def _redact(segment: str) -> str:
 _ARABIC_MARKS = re.compile("[\u064b-\u0652\u0640]")
 
 
+#: The two languages the app is translated into (`nova-frontend/src/lib/i18n`).
+APP_LOCALES = ("ar", "en")
+_ARABIC_LETTERS = re.compile("[\u0621-\u064a\u0671-\u06d3\u06fa-\u06ff\ufb50-\ufdff\ufe70-\ufefc]")
+_LATIN_LETTERS = re.compile("[A-Za-z\u00c0-\u024f]")
+#: Fewer letters than this say nothing about a language: "OK", "QR", a time.
+_MIN_LETTERS_TO_JUDGE = 8
+#: The least share of its letters a reply must write in the app's script. Below
+#: half, so a name or a brand in the other script ("Lumière Spa") passes.
+_MIN_SHARE_IN_APP_SCRIPT = 0.4
+
+
+def app_locale(locale: str | None) -> str:
+    """The app language a client's locale names: `ar-SA` is Arabic, and
+    anything that is not Arabic is English, the app's other translation."""
+    return "ar" if (locale or "").strip().lower().startswith("ar") else "en"
+
+
+def in_wrong_language(text: str, locale: str) -> bool:
+    """Whether text is written in the other of the app's two languages.
+
+    By script, not by vocabulary: the app speaks Arabic or English, and the two
+    share no letters. Text too short to judge is never wrong.
+    """
+    arabic = len(_ARABIC_LETTERS.findall(text))
+    latin = len(_LATIN_LETTERS.findall(text))
+    if arabic + latin < _MIN_LETTERS_TO_JUDGE:
+        return False
+    own = arabic if app_locale(locale) == "ar" else latin
+    return own / (arabic + latin) < _MIN_SHARE_IN_APP_SCRIPT
+
+
 def detect_injection(text: str) -> bool:
     """Whether untrusted text is trying to issue instructions."""
     plain = _ARABIC_MARKS.sub("", text)

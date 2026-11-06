@@ -6,6 +6,7 @@ Every handler here is: parse -> call one service method -> commit -> return.
 """
 
 import time
+from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -35,6 +36,7 @@ from app.modules.catalog.domain import (
 from app.modules.catalog.exceptions import PhotoTooLargeError
 from app.modules.catalog.models import BusinessPhoto
 from app.modules.catalog.schemas import (
+    AssignmentOut,
     AssignServiceRequest,
     BusinessOut,
     BusinessPhotoOut,
@@ -89,8 +91,8 @@ router = APIRouter(prefix="/tenants/{tenant_id}/catalog", tags=["catalog"])
 async def create_business(
     tenant_id: UUID,
     payload: CreateBusinessRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Creates a business (a storefront) in this tenant. Owners and managers.
 
@@ -105,8 +107,8 @@ async def create_business(
 @router.get("/businesses", response_model=Page[BusinessOut], dependencies=[Depends(require_staff)])
 async def list_businesses(
     tenant_id: UUID,
-    params: PageParams = Depends(),
-    service: CatalogService = Depends(get_catalog_service),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> Page[BusinessOut]:
     """This salon's storefronts, oldest first. Staff only.
 
@@ -125,7 +127,7 @@ async def list_businesses(
 async def get_business(
     tenant_id: UUID,
     business_id: UUID,
-    service: CatalogService = Depends(get_catalog_service),
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """One business in this tenant, with its rating average and count. Staff only.
 
@@ -143,8 +145,8 @@ async def set_listing_visibility(
     tenant_id: UUID,
     business_id: UUID,
     payload: SetListingVisibilityRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Shows or hides this business on the public marketplace (ADR-0010).
 
@@ -167,8 +169,8 @@ async def set_listing_visibility(
 async def create_location(
     tenant_id: UUID,
     payload: CreateLocationRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Adds a branch to a business. Owners and managers.
 
@@ -187,8 +189,8 @@ async def set_location_position(
     tenant_id: UUID,
     location_id: UUID,
     payload: SetLocationPositionRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Sets, moves or clears where a branch appears on the marketplace map.
 
@@ -212,8 +214,8 @@ async def update_location(
     tenant_id: UUID,
     location_id: UUID,
     payload: UpdateLocationRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Renames a branch, or changes its city, timezone or whether it takes
     bookings (`is_active`). Owners and managers. Only the fields sent change."""
@@ -230,9 +232,9 @@ async def update_location(
 async def delete_location(
     tenant_id: UUID,
     location_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
-    bookings: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
+    bookings: Annotated[BookingService, Depends(get_booking_service)],
 ) -> None:
     """Deletes a branch, with its services and providers. Owners and managers.
 
@@ -250,7 +252,7 @@ async def delete_location(
 async def list_locations(
     tenant_id: UUID,
     business_id: UUID,
-    service: CatalogService = Depends(get_catalog_service),
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> Page[LocationOut]:
     """A business's branches, listed or not. Staff only: the public view is `/discovery`."""
     rows = await service.list_locations(business_id)
@@ -264,9 +266,9 @@ async def list_locations(
 )
 async def reverse_place(
     tenant_id: UUID,
-    latitude: float = Query(..., ge=-90, le=90),
-    longitude: float = Query(..., ge=-180, le=180),
-    geocoder: ReverseGeocoder = Depends(get_geocoder),
+    latitude: Annotated[float, Query(ge=-90, le=90)],
+    longitude: Annotated[float, Query(ge=-180, le=180)],
+    geocoder: Annotated[ReverseGeocoder, Depends(get_geocoder)],
 ) -> PlaceOut:
     """What the map calls a point: its district and city, in English and Arabic,
     and a branch name made from them. Owners and managers.
@@ -299,8 +301,8 @@ async def reverse_place(
 async def create_service(
     tenant_id: UUID,
     payload: CreateServiceRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Adds a bookable service, with its duration and price, at one branch.
     Owners and managers.
@@ -321,8 +323,8 @@ async def update_service(
     tenant_id: UUID,
     service_id: UUID,
     payload: UpdateServiceRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Changes a service's names, descriptions, category, duration, price, or
     whether it can be booked. Owners and managers. Only the fields sent change;
@@ -340,9 +342,9 @@ async def update_service(
 async def delete_service(
     tenant_id: UUID,
     service_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
-    bookings: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
+    bookings: Annotated[BookingService, Depends(get_booking_service)],
 ) -> None:
     """Deletes a service. Owners and managers. Refused with 409
     `catalog_item_in_use` while an appointment for it is still to come."""
@@ -358,7 +360,7 @@ async def delete_service(
 async def list_services(
     tenant_id: UUID,
     location_id: UUID,
-    service: CatalogService = Depends(get_catalog_service),
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> Page[ServiceOut]:
     """The services offered at a branch. Staff only: the public view is `/discovery`."""
     rows = await service.list_services(location_id)
@@ -374,8 +376,8 @@ async def list_services(
 async def create_provider(
     tenant_id: UUID,
     payload: CreateProviderRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Adds a provider, such as a stylist or therapist, at one branch. Owners and managers.
 
@@ -395,8 +397,8 @@ async def update_provider(
     tenant_id: UUID,
     provider_id: UUID,
     payload: UpdateProviderRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> object:
     """Renames a provider, changes their title, or takes them off the booking
     list (`is_active`). Owners and managers. Only the fields sent change."""
@@ -413,9 +415,9 @@ async def update_provider(
 async def delete_provider(
     tenant_id: UUID,
     provider_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
-    bookings: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
+    bookings: Annotated[BookingService, Depends(get_booking_service)],
 ) -> None:
     """Deletes a provider. Owners and managers. Refused with 409
     `catalog_item_in_use` while they have an appointment still to come."""
@@ -431,7 +433,7 @@ async def delete_provider(
 async def list_providers(
     tenant_id: UUID,
     location_id: UUID,
-    service: CatalogService = Depends(get_catalog_service),
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> Page[ProviderOut]:
     """The providers working at a branch. Staff only."""
     rows = await service.list_providers(location_id)
@@ -447,8 +449,8 @@ async def assign_service_to_provider(
     tenant_id: UUID,
     provider_id: UUID,
     payload: AssignServiceRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> None:
     """Qualifies a provider to perform a service. Owners and managers.
 
@@ -457,6 +459,44 @@ async def assign_service_to_provider(
     409."""
     await service.assign_service_to_provider(provider_id, payload.service_id)
     await session.commit()
+
+
+@router.delete(
+    "/providers/{provider_id}/services/{service_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_MANAGE_CATALOG), Depends(write_rate_limit)],
+)
+async def unassign_service_from_provider(
+    tenant_id: UUID,
+    provider_id: UUID,
+    service_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
+) -> None:
+    """Stops offering a provider for a service. Owners and managers.
+
+    Bookings already made with them stay. Removing a pair that is not assigned
+    answers 204 as well, so a retry is harmless."""
+    await service.unassign_service_from_provider(provider_id, service_id)
+    await session.commit()
+
+
+@router.get(
+    "/locations/{location_id}/assignments",
+    response_model=Page[AssignmentOut],
+    dependencies=[Depends(require_staff)],
+)
+async def list_assignments(
+    tenant_id: UUID,
+    location_id: UUID,
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
+) -> Page[AssignmentOut]:
+    """Which provider performs which service at a branch. Staff only.
+
+    A service with no provider here has no bookable time, on the marketplace
+    or anywhere else."""
+    rows = await service.list_assignments(location_id)
+    return Page(items=[AssignmentOut.model_validate(r) for r in rows])
 
 
 # --- Photos -----------------------------------------------------------------
@@ -515,7 +555,7 @@ async def _read_capped(request: Request, limit: int) -> bytes:
 async def list_business_photos(
     tenant_id: UUID,
     business_id: UUID,
-    service: CatalogService = Depends(get_catalog_service),
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> list[BusinessPhotoOut]:
     """The cover and gallery, cover first, with preview links."""
     return [_photo_out(photo) for photo in await service.list_photos(business_id)]
@@ -540,9 +580,10 @@ async def upload_business_photo(
     tenant_id: UUID,
     business_id: UUID,
     request: Request,
-    kind: str = Query(default="gallery", pattern="^(cover|gallery)$"),
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    *,
+    kind: Annotated[str, Query(pattern="^(cover|gallery)$")] = "gallery",
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> BusinessPhotoOut:
     """Adds a photo: the raw image file as the request body (JPEG, PNG or
     WebP). `kind=cover` replaces any existing cover. The file is re-encoded
@@ -562,8 +603,8 @@ async def update_business_photo(
     tenant_id: UUID,
     photo_id: UUID,
     payload: UpdatePhotoRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> BusinessPhotoOut:
     """Makes a photo the cover (the old cover joins the gallery), moves the
     cover back into the gallery, or sets a gallery photo's `position`. Owners
@@ -581,8 +622,8 @@ async def update_business_photo(
 async def delete_business_photo(
     tenant_id: UUID,
     photo_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: CatalogService = Depends(get_catalog_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> None:
     """Deletes a photo and its stored files. Owners and managers."""
     await service.delete_photo(photo_id)
@@ -602,7 +643,7 @@ admin_router = APIRouter(
 
 @admin_router.get("", response_model=list[CategoryAdminOut])
 async def admin_list_categories(
-    service: CategoryService = Depends(get_category_service),
+    service: Annotated[CategoryService, Depends(get_category_service)],
 ) -> list[CategoryAdminOut]:
     """Every service category, retired ones included. NOVA administrators only."""
     rows = await service.list_categories(include_inactive=True)
@@ -617,8 +658,8 @@ async def admin_list_categories(
 )
 async def admin_create_category(
     payload: CreateCategoryRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CategoryService = Depends(get_category_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CategoryService, Depends(get_category_service)],
 ) -> object:
     """Adds a service category that every salon can file services under.
     NOVA administrators only.
@@ -638,8 +679,8 @@ async def admin_create_category(
 async def admin_update_category(
     category_id: UUID,
     payload: UpdateCategoryRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: CategoryService = Depends(get_category_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[CategoryService, Depends(get_category_service)],
 ) -> object:
     """Renames a category, or retires (`is_active: false`) or restores it.
     NOVA administrators only.

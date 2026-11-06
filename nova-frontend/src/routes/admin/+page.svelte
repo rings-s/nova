@@ -28,7 +28,7 @@
 	eyebrow={t('NOVA administration')}
 	title={t('Every table')}
 	subtitle={t(
-		'Browse any table across every business. Secrets are hidden, and nothing here edits a row directly: changes go through each table’s actions.'
+		'Browse, add, edit and delete rows in any table across every business. Secrets are hidden, and every change is recorded in the audit log.'
 	)}
 >
 	{#snippet actions()}

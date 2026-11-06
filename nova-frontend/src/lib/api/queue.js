@@ -10,7 +10,7 @@ import { newIdempotencyKey } from '../utils/idempotency.js';
 /**
  * @typedef {'waiting'|'called'|'checked_in'|'in_service'|'completed'|'missed'|'cancelled'} QueueEntryStatus
  * @typedef {'walk_in'|'appointment'} QueueEntrySource
- * @typedef {'issued'|'redeemed'|'expired'|'revoked'} TicketStatus
+ * @typedef {'active'|'redeemed'|'expired'|'revoked'} TicketStatus
  */
 
 /**
@@ -39,8 +39,9 @@ import { newIdempotencyKey } from '../utils/idempotency.js';
  * @property {string|null} booking_id
  * @property {string|null} joined_at
  * @property {string|null} called_at
- * @property {number|null} place_in_line What the customer actually sees (1 = next).
+ * @property {number|null} place_in_line What the customer actually sees (1 = next); only while waiting.
  * @property {number|null} estimated_wait_minutes
+ * @property {string|null} [customer_name] On the staff board only.
  */
 
 /**
@@ -139,7 +140,8 @@ export function joinQueue(
 }
 
 /**
- * The live line. Staff-only.
+ * Reception's board, staff-only: the line in the order people will be seen,
+ * then whoever was missed (so they can be requeued or removed).
  * @param {string} tenantId @param {string} queueId
  * @param {{ limit?: number, offset?: number }} [params]
  * @returns {Promise<{ items: QueueEntry[], total: number }>}
@@ -168,11 +170,19 @@ export function markMissed(tenantId, entryId) {
 }
 
 /**
- * Someone who stepped outside and came back, rather than losing their place.
+ * Someone who stepped outside and came back. They go to the back of the line.
  * @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>}
  */
 export function requeue(tenantId, entryId) {
 	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/requeue`));
+}
+
+/**
+ * Staff checking in a called customer standing at the desk, without a QR scan.
+ * @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>}
+ */
+export function checkInQueueEntry(tenantId, entryId) {
+	return http.post(tenantPath(tenantId, `/queues/entries/${entryId}/check-in`));
 }
 
 /** @param {string} tenantId @param {string} entryId @returns {Promise<QueueEntry>} */

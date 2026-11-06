@@ -602,6 +602,32 @@ class SlotHoldRepository(TenantScopedRepository[SlotHoldRecord]):
         return result.rowcount or 0  # type: ignore[attr-defined]
 
 
+class UnscopedBookingReader:
+    """Cross-tenant reads of upcoming bookings, for reminder calls (ADR-0017).
+
+    Callers must have set `app.bypass_rls` (`db.session.bypass_tenant_scope`).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def list_confirmed_starting_between(
+        self, start: datetime, end: datetime, *, limit: int
+    ) -> list[tuple[UUID, UUID]]:
+        """(tenant_id, booking_id) of confirmed bookings starting in [start, end)."""
+        stmt = (
+            select(BookingRecord.tenant_id, BookingRecord.id)
+            .where(
+                BookingRecord.status == BookingStatus.CONFIRMED,
+                BookingRecord.starts_at >= start,
+                BookingRecord.starts_at < end,
+            )
+            .order_by(BookingRecord.starts_at)
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in (await self.session.execute(stmt)).all()]
+
+
 class UnscopedSlotHoldRepository:
     """Cross-tenant deletes for the slot-hold purge.
 
@@ -626,5 +652,6 @@ __all__ = [
     "BookingStatus",
     "ScheduleRepository",
     "SlotHoldRepository",
+    "UnscopedBookingReader",
     "UnscopedSlotHoldRepository",
 ]

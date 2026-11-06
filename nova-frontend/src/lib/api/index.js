@@ -18,3 +18,5 @@ export * as analytics from './analytics.js';
 export * as notification from './notification.js';
 export * as review from './review.js';
 export * as ai from './ai.js';
+export * as callCenter from './call_center.js';
+export * as support from './support.js';

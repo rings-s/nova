@@ -6,8 +6,13 @@ Note there is no "set queue position" endpoint. Ordering is derived by the
 domain from arrival and appointment times (docs/08 section 12: queue ordering
 must be deterministic); an endpoint that let reception reorder the line by hand
 would make that untrue on the first busy Thursday.
+
+A called entry is checked in either by scanning its QR ticket
+(`POST /tickets/check-in`) or by staff at the desk (`…/entries/{id}/check-in`)
+for someone standing in front of them.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -34,12 +39,17 @@ from app.modules.queue.schemas import (
     TicketOut,
     TicketStateOut,
 )
-from app.modules.queue.service import QueuePosition, QueueService
+from app.modules.queue.service import JoinedQueue, QueuePosition, QueueService
 
 router = APIRouter(prefix="/tenants/{tenant_id}/queues", tags=["queue"])
 
 
-def _entry_out(entry: QueueEntry, position: QueuePosition | None = None) -> QueueEntryOut:
+def _entry_out(
+    entry: QueueEntry,
+    position: QueuePosition | JoinedQueue | None = None,
+    *,
+    customer_name: str | None = None,
+) -> QueueEntryOut:
     return QueueEntryOut(
         id=entry.id,
         queue_id=entry.queue_id,
@@ -56,6 +66,7 @@ def _entry_out(entry: QueueEntry, position: QueuePosition | None = None) -> Queu
         called_at=entry.called_at,
         place_in_line=position.place_in_line if position else None,
         estimated_wait_minutes=position.estimated_wait_minutes if position else None,
+        customer_name=customer_name,
     )
 
 
@@ -71,8 +82,8 @@ def _entry_out(entry: QueueEntry, position: QueuePosition | None = None) -> Queu
 async def create_queue(
     tenant_id: UUID,
     payload: CreateQueueRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> object:
     """Opens a walk-in queue at a branch. Staff only.
 
@@ -86,7 +97,7 @@ async def create_queue(
 async def list_queues(
     tenant_id: UUID,
     location_id: UUID,
-    service: QueueService = Depends(get_queue_service),
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> Page[QueueOut]:
     """The queues at a branch, open or closed, for a customer choosing one to join."""
     rows = await service.list_queues(location_id)
@@ -102,8 +113,8 @@ async def set_queue_open(
     tenant_id: UUID,
     queue_id: UUID,
     payload: SetQueueOpenRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> object:
     """Closing a queue stops new joins; people already waiting are still served."""
     queue = await service.set_queue_open(queue_id, is_open=payload.is_open)
@@ -124,10 +135,10 @@ async def join_queue(
     tenant_id: UUID,
     queue_id: UUID,
     payload: JoinQueueRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
-    principal: Principal = Depends(get_principal),
-    guard: IdempotencyGuard = Depends(idempotency_guard("POST /queues/entries")),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
+    guard: Annotated[IdempotencyGuard, Depends(idempotency_guard("POST /queues/entries"))],
 ) -> object:
     """Takes a place in a queue: your own as a customer, or someone else's as staff
     (`on_behalf_of_customer_id`).
@@ -160,22 +171,28 @@ async def join_queue(
 async def list_queue_entries(
     tenant_id: UUID,
     queue_id: UUID,
-    params: PageParams = Depends(),
-    service: QueueService = Depends(get_queue_service),
-    _: Principal = Depends(require_staff),
+    params: Annotated[PageParams, Depends()],
+    service: Annotated[QueueService, Depends(get_queue_service)],
+    _: Annotated[Principal, Depends(require_staff)],
 ) -> Page[QueueEntryOut]:
-    """The live line. Staff-only: it names every waiting customer."""
-    entries = await service.list_queue(queue_id)
-    window = entries[params.offset : params.offset + params.limit]
-    return Page(items=[_entry_out(e) for e in window], total=len(entries))
+    """Reception's board. Staff-only: it names every waiting customer.
+
+    The line in the order people will be seen, with `place_in_line` and
+    `estimated_wait_minutes` for those still waiting, followed by missed
+    entries (which can be requeued or removed)."""
+    board = await service.list_board(queue_id)
+    window = board[params.offset : params.offset + params.limit]
+    names = await service.customer_names([p.entry.customer_id for p in window])
+    items = [_entry_out(p.entry, p, customer_name=names.get(p.entry.customer_id)) for p in window]
+    return Page(items=items, total=len(board))
 
 
 @router.get("/entries/{entry_id}", response_model=QueueEntryOut)
 async def get_queue_entry(
     tenant_id: UUID,
     entry_id: UUID,
-    service: QueueService = Depends(get_queue_service),
-    principal: Principal = Depends(get_principal),
+    service: Annotated[QueueService, Depends(get_queue_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> QueueEntryOut:
     """A customer polling "how much longer?" — the one read they need.
 
@@ -195,9 +212,10 @@ async def get_queue_entry(
 async def call_next(
     tenant_id: UUID,
     queue_id: UUID,
+    *,
     provider_id: UUID | None = None,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> QueueEntryOut:
     """Calls the next person in line. Staff only.
 
@@ -217,12 +235,13 @@ async def call_next(
 async def mark_missed(
     tenant_id: UUID,
     entry_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> QueueEntryOut:
     """Marks a called customer who did not come forward. Staff only.
 
-    Put them back, at the end of the line, with `/requeue`."""
+    They stay on the board. Put them back, at the end of the line, with
+    `/requeue`, or remove them with `/cancel`."""
     entry = await service.mark_missed(entry_id)
     await session.commit()
     return _entry_out(entry)
@@ -236,11 +255,34 @@ async def mark_missed(
 async def requeue(
     tenant_id: UUID,
     entry_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> QueueEntryOut:
-    """Someone who stepped outside and came back, rather than losing them."""
+    """Someone who stepped outside and came back, rather than losing them.
+
+    They go to the back of the line: their place counts from now, not from
+    when they first joined."""
     entry = await service.requeue(entry_id)
+    await session.commit()
+    return _entry_out(entry)
+
+
+@router.post(
+    "/entries/{entry_id}/check-in",
+    response_model=QueueEntryOut,
+    dependencies=[Depends(require_staff), Depends(write_rate_limit)],
+)
+async def check_in_entry(
+    tenant_id: UUID,
+    entry_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
+) -> QueueEntryOut:
+    """Checks in a called customer who is standing at the desk. Staff only.
+
+    The same transition a QR scan at `POST /tickets/check-in` makes, for a
+    walk-in who has no ticket to hand."""
+    entry = await service.check_in_entry(entry_id)
     await session.commit()
     return _entry_out(entry)
 
@@ -253,12 +295,13 @@ async def requeue(
 async def start_service(
     tenant_id: UUID,
     entry_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> QueueEntryOut:
     """Starts serving a checked-in queue entry. Staff only.
 
-    An entry is checked in when its QR ticket is scanned at `POST /tickets/check-in`."""
+    An entry is checked in when its QR ticket is scanned at `POST /tickets/check-in`,
+    or by staff at `POST /queues/entries/{entry_id}/check-in`."""
     entry = await service.start_service(entry_id)
     await session.commit()
     return _entry_out(entry)
@@ -272,8 +315,8 @@ async def start_service(
 async def complete_entry(
     tenant_id: UUID,
     entry_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> QueueEntryOut:
     """Finishes serving a queue entry. Staff only."""
     entry = await service.complete(entry_id)
@@ -289,9 +332,9 @@ async def complete_entry(
 async def cancel_entry(
     tenant_id: UUID,
     entry_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> QueueEntryOut:
     """A customer leaving the line themselves, or staff removing them.
 
@@ -318,9 +361,9 @@ ticket_router = APIRouter(prefix="/tenants/{tenant_id}/tickets", tags=["queue"])
 async def issue_ticket(
     tenant_id: UUID,
     payload: IssueTicketRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> TicketOut:
     """Issues a QR ticket for the caller's own booking or queue entry.
 
@@ -354,8 +397,8 @@ async def issue_ticket(
 async def check_in_with_ticket(
     tenant_id: UUID,
     payload: CheckInTicketRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> CheckInResultOut:
     """Reception scans a QR ticket (docs/09 #8).
 
@@ -379,8 +422,8 @@ async def check_in_with_ticket(
 async def revoke_ticket(
     tenant_id: UUID,
     ticket_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: QueueService = Depends(get_queue_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[QueueService, Depends(get_queue_service)],
 ) -> object:
     """Revokes a QR ticket, so it no longer checks anyone in. Staff only.
 

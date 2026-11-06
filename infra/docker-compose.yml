@@ -57,13 +57,8 @@ x-backend: &backend
   image: nova-backend:dev
   env_file: .env
   environment: *backend-environment
-  # The local model server (LM Studio or Ollama) runs on the host, not in this
-  # stack. `host-gateway` is the host's address on the default bridge, so
-  # AI_BASE_URL=http://host.docker.internal:1234/v1 reaches it. The server must
-  # listen on more than 127.0.0.1 for this to connect: see nova_backend/README.md,
-  # "AI agents".
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
+  # The models come from the `llm` service below (vLLM), over the compose
+  # network.
   volumes:
     # Bind mount for reload-on-save. The image keeps its virtualenv at
     # /opt/venv precisely so this mount cannot shadow it.
@@ -270,6 +265,93 @@ services:
       postgres:
         condition: service_healthy
 
+  # The text model, served by vLLM (ADR-0019), in every environment: it starts
+  # with the stack, and AI_PROVIDER=vllm, AI_BASE_URL=http://llm:8000/v1 are the
+  # backend's defaults. This is vLLM's CPU build, which needs AVX-512;
+  # infra/docker-compose.gpu.yml switches it to the CUDA build. Nothing is
+  # published: only the backend and the worker call it, over the compose
+  # network. Nothing waits on it either: until the model is loaded, the agents
+  # hand off and every other flow works.
+  #
+  # The default model is Qwen3-4B, for a GPU. vLLM loads full-precision weights
+  # (no GGUF), about 8 GB for the 4B, so a CPU-only machine serves Qwen3-1.7B
+  # instead: LLM_MODEL, LLM_ALIAS and AI_*_MODEL in infra/.env.
+  llm:
+    image: ${LLM_IMAGE:-public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.10.2}
+    restart: unless-stopped
+    entrypoint: ["vllm", "serve"]
+    environment:
+      # The weights are downloaded here once; the volume keeps them.
+      HF_HOME: /models
+      # CPU build only: GiB of RAM set aside for the KV cache. 8192 tokens of
+      # Qwen3-1.7B need under 1 GiB, of the 4B about 1.2.
+      VLLM_CPU_KVCACHE_SPACE: ${LLM_CPU_KVCACHE_GIB:-2}
+    command:
+      - ${LLM_MODEL:-Qwen/Qwen3-4B}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      # The name the API answers to: AI_ROUTING_MODEL and AI_REASONING_MODEL.
+      # It has to contain `qwen3` for runtime.py to switch thinking off.
+      - --served-model-name
+      - ${LLM_ALIAS:-qwen3-4b}
+      - --max-model-len
+      - ${LLM_CTX:-8192}
+      # Sequences at once. One by default, to match AI_MAX_CONCURRENT_TURNS; on
+      # a GPU, raise both.
+      - --max-num-seqs
+      - ${LLM_PARALLEL:-1}
+      # The agents call tools: Qwen3 writes its calls in the hermes format.
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+      # Any thinking goes to `reasoning_content`, never into the answer.
+      # runtime.py switches it off per request (`enable_thinking: false`) and
+      # with `/no_think`.
+      - --reasoning-parser
+      - qwen3
+    # vLLM's worker processes share tensors through /dev/shm.
+    shm_size: 2gb
+    volumes:
+      - llm_models:/models
+    # /health answers 200 once the model is loaded. The first start downloads
+    # it, hence the long grace.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 900s
+
+  # Sara's voice (ADR-0017, ADR-0018): the Saudi Qwen3-TTS fine-tune behind the
+  # `/audio/speech` the backend calls. llama.cpp cannot serve it, so it is its
+  # own small server, infra/tts. Off by default:
+  # `docker compose --profile tts up -d --build tts`, then
+  # VOICE_TTS_BASE_URL=http://tts:8091/v1. Built for CUDA by default; a CPU dev
+  # build sets TTS_TORCH_INDEX=https://download.pytorch.org/whl/cpu.
+  tts:
+    build:
+      context: ./tts
+      args:
+        TORCH_INDEX: ${TTS_TORCH_INDEX:-https://download.pytorch.org/whl/cu128}
+    image: nova-tts:local
+    profiles: ["tts"]
+    restart: unless-stopped
+    environment:
+      TTS_MODEL: ${VOICE_TTS_MODEL:-vadimbelsky/qwen3-TTS-KSA}
+      # The same key the backend sends as VOICE_TTS_API_KEY. Empty: no check,
+      # which is fine while nothing outside the compose network can reach it.
+      TTS_API_KEY: ${VOICE_TTS_API_KEY:-}
+    volumes:
+      - tts_models:/models
+
   # Nothing is published beyond loopback: the tunnel dials out to Cloudflare
   # and traffic arrives over that connection (docs/01, docs/09 #15). Runs only
   # when a token is configured, so `make dev` works offline without one. The
@@ -298,3 +380,5 @@ volumes:
   redis_data:
   frontend_node_modules:
   backup_data:
+  llm_models:
+  tts_models:

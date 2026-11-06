@@ -25,7 +25,7 @@ import { http, tenantPath } from './client.js';
  * @property {Record<string, string>} aliases Old agent names and what they resolve to.
  * @property {AgentInfo[]} agents
  * @property {boolean} inference_available False when every turn would only hand off: the AI
- *   extra is missing, AI is disabled, or the local model server (LM Studio/Ollama) is not answering.
+ *   extra is missing, AI is disabled, or the model server (the vLLM `llm` service) is not answering.
  */
 
 /**
@@ -63,6 +63,8 @@ import { http, tenantPath } from './client.js';
  * @property {string} reply
  * @property {string[]} suggested_actions
  * @property {boolean} requires_human_handoff
+ * @property {boolean} follow_up_opened The handoff reached the business's follow-up inbox. Only then
+ *   may the client tell the customer that someone will get back to them.
  * @property {string|null} related_booking_id
  * @property {string|null} related_ticket_url
  * @property {import('./booking.js').SlotHold[]} held_slots

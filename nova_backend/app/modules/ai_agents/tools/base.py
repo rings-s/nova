@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core import metrics
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
+from app.core.spoken import saudi_time
 from app.modules.ai_agents.agents import WRITE_TOOLS, AgentSpec
 from app.modules.ai_agents.guardrails import (
     GuardrailError,
@@ -158,6 +159,15 @@ class PendingCancellation:
     reason: str | None
 
 
+class ToolTimeoutError(Exception):
+    """A tool ran past `ai_tool_timeout_seconds`. Not a `TimeoutError`, which
+    the engine reads as the whole turn running out of time."""
+
+    def __init__(self, tool_name: str) -> None:
+        super().__init__(f"The tool '{tool_name}' did not finish in time.")
+        self.tool_name = tool_name
+
+
 def _iso(value: date | datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -173,9 +183,10 @@ def _text(value: Any) -> Any:
 MAX_SHOWN_TEXT = 80
 
 
-def _shown(value: str | None) -> str | None:
+def _shown(value: str | None, *, limit: int = MAX_SHOWN_TEXT) -> str | None:
     """Tenant-written text as the model sees it: one line, without control or
-    invisible format characters, at most `MAX_SHOWN_TEXT` characters."""
+    invisible format characters, at most `limit` characters (a name's
+    `MAX_SHOWN_TEXT` unless the caller allows a description more)."""
     if value is None:
         return None
     # Format characters (zero-width, bidi overrides) are dropped; line breaks and
@@ -186,8 +197,8 @@ def _shown(value: str | None) -> str | None:
         if unicodedata.category(c) != "Cf"
     )
     line = " ".join(kept.split())
-    if len(line) > MAX_SHOWN_TEXT:
-        return line[: MAX_SHOWN_TEXT - 1].rstrip() + "…"
+    if len(line) > limit:
+        return line[: limit - 1].rstrip() + "…"
     return line
 
 
@@ -283,7 +294,11 @@ class ToolkitBase:
             result = await asyncio.wait_for(work(), timeout=self.tool_timeout_seconds)
         except TimeoutError:
             logger.warning("ai_tool_timeout", extra={"agent": self.spec.name, "tool": tool_name})
-            raise
+            if tool_name in WRITE_TOOLS:
+                # Cancelled mid-commit, the write may have landed: counted as
+                # done, so the turn is not started over to do it twice.
+                self.deps.artifacts.committed_writes.append(tool_name)
+            raise ToolTimeoutError(tool_name) from None
         except GuardrailError:
             raise
         except DomainError as exc:
@@ -312,6 +327,19 @@ class ToolkitBase:
         )
         return result
 
+    def _ask_to_confirm(self) -> str:
+        return _ASK_TO_CONFIRM_BY_PHONE if self.deps.voice else _ASK_TO_CONFIRM
+
+    def _speaks_saudi(self) -> bool:
+        """A phone call in Arabic: Sara says everything in Saudi dialect."""
+        return self.deps.voice and self.deps.locale == "ar"
+
+    def _when(self, moment: datetime, timezone: str) -> str:
+        """A time ready to repeat: written for a chat, as a Saudi says it on a call."""
+        if self._speaks_saudi():
+            return saudi_time(moment, timezone=timezone, now=datetime.now(UTC))
+        return _local(moment, timezone, locale=self.deps.locale)
+
     def _business(self) -> UUID:
         business_id = self.deps.business_id
         if business_id is None:  # pragma: no cover - the service refuses this first
@@ -332,8 +360,37 @@ class _TimeNotFree(ConflictError):
     code = "time_not_free"
 
 
-def _local(moment: datetime, timezone: str) -> str:
-    """A time as the branch's customers read it: `Thu 24 Sep 2026, 20:00 (Asia/Riyadh)`.
+#: Weekday and month names as the Gulf writes them, for an Arabic chat.
+_ARABIC_WEEKDAYS = ("الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
+_ARABIC_MONTHS = (
+    "يناير",
+    "فبراير",
+    "مارس",
+    "أبريل",
+    "مايو",
+    "يونيو",
+    "يوليو",
+    "أغسطس",
+    "سبتمبر",
+    "أكتوبر",
+    "نوفمبر",
+    "ديسمبر",
+)
+#: The GCC zones by the city a customer knows them as. Any other keeps its key.
+_ARABIC_ZONES = {
+    "Asia/Riyadh": "الرياض",
+    "Asia/Dubai": "دبي",
+    "Asia/Kuwait": "الكويت",
+    "Asia/Qatar": "قطر",
+    "Asia/Bahrain": "البحرين",
+    "Asia/Muscat": "مسقط",
+}
+
+
+def _local(moment: datetime, timezone: str, *, locale: str = "en") -> str:
+    """A time as the branch's customers read it, in the app's language:
+    `Thu 24 Sep 2026, 20:00 (Asia/Riyadh)`, or
+    `الخميس 24 سبتمبر 2026، 20:00 (بتوقيت الرياض)`.
 
     The ISO time is UTC. A small model restating it gets the day and hour
     wrong, so each time is also given ready to repeat."""
@@ -341,7 +398,13 @@ def _local(moment: datetime, timezone: str) -> str:
         zone = ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError):
         zone = ZoneInfo(get_settings().default_timezone)
-    return f"{moment.astimezone(zone):%a %d %b %Y, %H:%M} ({zone.key})"
+    local = moment.astimezone(zone)
+    if locale != "ar":
+        return f"{local:%a %d %b %Y, %H:%M} ({zone.key})"
+    weekday = _ARABIC_WEEKDAYS[local.weekday()]
+    month = _ARABIC_MONTHS[local.month - 1]
+    city = _ARABIC_ZONES.get(zone.key, zone.key)
+    return f"{weekday} {local.day} {month} {local.year}، {local:%H:%M} (بتوقيت {city})"
 
 
 #: Told to the model with every hold, before it can try to book too early.
@@ -349,6 +412,11 @@ _ASK_TO_CONFIRM = (
     "Now reply to the customer naming the business, the service and the held local_time, "
     "and ask: shall I book it? "
     'They confirm by pressing "Yes, book it" under the time; it is booked only then.'
+)
+#: The same, on a phone call (ADR-0017), where the keypad is the button.
+_ASK_TO_CONFIRM_BY_PHONE = (
+    "Now tell the caller the held day and time, in words, and ask them to press 1 to book it. "
+    "It is booked only when they press 1; a yes said out loud does not book."
 )
 
 #: What a small model writes into an optional argument it has no value for.

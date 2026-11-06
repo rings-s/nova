@@ -96,6 +96,58 @@ async def on_booking_confirmed(
     )
 
 
+@subscribe("BookingDetailsRequested")
+async def on_booking_details_requested(
+    session: AsyncSession, tenant_id: UUID, payload: dict[str, Any]
+) -> None:
+    """Sends a caller the booking Sara made: when, where, the ticket link, and
+    that the business will confirm it (ADR-0017).
+
+    The caller cannot see a QR code on the phone, and the confirmation message
+    waits for staff, so without this they heard "booked" and then nothing.
+    The time is the branch's own clock, not UTC. Idempotent by its dedupe key.
+    """
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import get_settings
+    from app.modules.booking.dependencies import build_booking_service
+    from app.modules.catalog.dependencies import build_catalog_service
+    from app.modules.queue.dependencies import build_queue_service
+
+    catalog = build_catalog_service(session, tenant_id)
+    customers = build_customer_service(session, tenant_id)
+    bookings = build_booking_service(session, tenant_id, catalog=catalog, customers=customers)
+    queue = build_queue_service(
+        session, tenant_id, catalog=catalog, customers=customers, bookings=bookings
+    )
+
+    booking = await bookings.get(UUID(payload["booking_id"]))
+    customer = await customers.get(UUID(payload["customer_id"]))
+    arabic = customer.preferred_language.startswith("ar")
+    business = await catalog.get_business(booking.business_id)
+    service = await catalog.get_service(booking.service_id)
+    location = await catalog.get_location(booking.location_id)
+    ticket_url = (
+        await queue.ticket_page_for_booking(booking.id)
+        or f"{get_settings().public_app_url.rstrip('/')}/bookings"
+    )
+    starts_at = booking.slot.starts_at.astimezone(ZoneInfo(location.timezone))
+
+    await _notify(
+        session,
+        tenant_id,
+        customer_id=payload["customer_id"],
+        template=MessageTemplate.BOOKING_RECEIVED,
+        context={
+            "business_name": business.name_ar if arabic else business.name_en,
+            "service_name": service.name_ar if arabic else service.name_en,
+            "starts_at": starts_at.strftime("%Y-%m-%d %H:%M"),
+            "ticket_url": ticket_url,
+        },
+        dedupe_key=f"booking_received:{booking.id}",
+    )
+
+
 @subscribe("BookingCancelled")
 async def on_booking_cancelled(
     session: AsyncSession, tenant_id: UUID, payload: dict[str, Any]
@@ -151,7 +203,8 @@ async def on_queue_joined(session: AsyncSession, tenant_id: UUID, payload: dict[
         tenant_id,
         customer_id=payload["customer_id"],
         template=MessageTemplate.QUEUE_JOINED,
-        context={"position": str(payload.get("position", ""))},
+        # Events written before `place_in_line` existed have none.
+        context={"position": str(payload.get("place_in_line", ""))},
         dedupe_key=f"queue_joined:{payload['entry_id']}",
     )
 

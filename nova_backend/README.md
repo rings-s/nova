@@ -61,9 +61,11 @@ nova_backend/
 │   │   ├── analytics/       ✅ owner reports and Plotly charts (pandas, numpy)  ← owns no tables
 │   │   ├── notification/    ✅ Notification
 │   │   ├── ai_agents/       ✅ PydanticAI agents (calls services, never the DB)
+│   │   ├── call_center/     ✅ PhoneLine, Call  ← Sara answers the phone (ADR-0017, Unifonic)
+│   │   ├── support/         ✅ FollowUp  ← the inbox behind "someone will get back to you"
 │   │   └── admin/           ✅ AdminAuditEntry  ← superuser console: reads every table, audited
 │   │
-│   ├── integrations/        outbound adapters (Moyasar, WhatsApp) + images.py, storage/ (photos)
+│   ├── integrations/        outbound adapters (Moyasar, WhatsApp, Unifonic Voice) + images.py, storage/ (photos)
 │   └── worker/              outbox dispatcher + scheduled jobs (ARQ)
 │
 ├── alembic/                 migrations
@@ -72,10 +74,10 @@ nova_backend/
 
 ✅ implemented · ⬜ scaffolded, not yet implemented
 
-All eleven contexts are implemented. The agent roster (receptionist, customer service,
+All twelve contexts are implemented. The agent roster (receptionist, customer service,
 accountant, analyst, business manager) and the charts are specified in docs/13 and ADR-0011.
 `ai_agents` needs the optional `ai` extra and a reachable
-Ollama to do inference; it degrades to a human handoff without them, and every other flow is
+vLLM server (the compose `llm` service) to do inference; it degrades to a human handoff without them, and every other flow is
 unaffected (docs/10 section 12).
 
 ## Anatomy of a module
@@ -89,8 +91,9 @@ The exception is `analytics`, which owns no tables. It has no `models.py`, `repo
 
 `admin` (the platform console at `/admin`, superusers only) also differs. Its repository reads
 every table generically through `Base.metadata`, never another module's ORM classes, and it owns
-no events. Its only writes are the audit entry and the curated actions in `admin/domain.py`, each
-run through the owning module's service.
+no events. It writes through the curated actions in `admin/domain.py`, each run through the owning
+module's service, and through direct edits that add, change or delete any row but the audit log's
+as plain SQL (no module rule or event runs). Both are scoped to the row's tenant and audited.
 
 | File              | Layer       | Holds                                             |
 | :---------------- | :---------- | :------------------------------------------------ |
@@ -277,6 +280,67 @@ A `live: false` (test-mode) webhook is ignored when `ENV=production`. Refunds
 go through `POST …/payments/{id}/refund` (owners and managers). A refund made
 in Moyasar's dashboard is not synced back to NOVA.
 
+## Sara on the phone (Unifonic Voice)
+
+Sara (`call_center_agent`, ADR-0017) answers a business's phone. Unifonic carries the call as
+webhook turns; NOVA's own agent decides what she says. To connect a number:
+
+1. Buy a Saudi number in the Unifonic console and give it an **inbound application**.
+2. Set `VOICE_PUBLIC_BASE_URL` to the API's public origin (the tunnel's, locally) and
+   `VOICE_AI_BASE_URL` / `VOICE_AI_MODEL` / `VOICE_AI_API_KEY` to a fast vLLM server (on a
+   GPU; unset, Sara uses the `llm` service). A caller cannot wait for the local
+   CPU model; each turn times out after
+   `VOICE_AI_REQUEST_TIMEOUT_SECONDS` (6). Speech Unifonic recognised with a `confidence` under
+   `VOICE_MIN_SPEECH_CONFIDENCE` (0.3; 0 switches it off) is asked for again and never reaches the
+   model; `nova_voice_unclear_speech_total` counts how often. Check Unifonic's scale on a live
+   account: on 0–100, 0.3 lets everything through. The model and Sara's voice share
+   `VOICE_TURN_BUDGET_SECONDS` (8): keep it under Unifonic's own wait for a reply.
+3. As a superuser, `POST /api/v1/tenants/{tenant_id}/call-center/lines` with `business_id` and
+   `number_e164`. Paste the returned `answer_url` into the inbound application. It is the line's
+   credential: `POST …/lines/{id}/rotate` replaces it.
+4. The business needs a plan with `ai_call_center` (Studio or Chain).
+5. Get the WhatsApp template `call_verification_code` (one parameter, `code`) approved, or Sara
+   cannot verify callers before reading their bookings. Also `booking_received` (`customer_name`,
+   `business_name`, `service_name`, `starts_at`, `ticket_url`): what a caller is sent after Sara
+   books, saying the business will confirm it.
+6. For Sara's own Saudi voice, serve Qwen3-TTS (see below) and set `VOICE_TTS_BASE_URL`.
+   Without it, Unifonic's text-to-speech reads her replies.
+7. For reminder calls, set `UNIFONIC_VOICE_API_KEY`. The worker rings customers with
+   `voice_consent` about confirmed bookings 2–24 hours ahead, 10:00–21:00 local time.
+
+### Sara's voice: Qwen3-TTS
+
+Qwen3-TTS has no Arabic of its own, so the model is the Saudi fine-tune
+[`vadimbelsky/qwen3-TTS-KSA`](https://huggingface.co/vadimbelsky/qwen3-TTS-KSA) (Apache-2.0, one
+voice, `ksa_speaker`). NOVA calls any OpenAI-compatible `POST /v1/audio/speech` server; its own is
+the compose `tts` service (`infra/tts`, ADR-0018), a small FastAPI app around the model's `qwen-tts`
+package. Neither vLLM, which serves the text model, nor llama.cpp before it can serve this
+checkpoint.
+
+```bash
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.gpu.yml \
+    --env-file infra/.env --profile tts up -d --build tts
+```
+
+Then set `VOICE_TTS_BASE_URL=http://tts:8091/v1` and recreate `backend` and `worker`. The first
+start downloads the weights (about 4.5 GB) into the `tts_models` volume. The model speaks at
+24 kHz; the service resamples every clip to the `sample_rate` NOVA asks for (8000 Hz, the phone
+line's, `VOICE_TTS_SAMPLE_RATE`) and returns mono 16-bit PCM WAV. It generates one clip at a time.
+Setting `VOICE_TTS_API_KEY` makes the service require it too. Without the GPU override, build it
+for CPU with `TTS_TORCH_INDEX=https://download.pytorch.org/whl/cpu`: that works for listening to it,
+but a CPU is far slower than `VOICE_TTS_TIMEOUT_SECONDS` allows, so on a call Unifonic's voice would
+read nearly every reply.
+
+Listen to the [demo](https://huggingface.co/spaces/vadimbelsky/saudi-tts-demo) before going live:
+the authors call the model not production-ready, and whether `ksa_speaker` is a woman's voice, as
+Sara's should be, is unconfirmed.
+
+Unifonic's documentation is behind a login, so check these on a live account before go-live: the
+inbound request's field names and the recognised-speech field (`_SPEECH_FIELDS` in
+`app/integrations/voice/unifonic.py`), the outbound `POST /calls` endpoint and its auth, and how
+long Unifonic waits for a webhook reply, and whether `play` accepts an audio URL (Sara's own voice
+depends on it).
+
 ## AI agents (local models)
 
 The agents in `modules/ai_agents` run on a model server on your own machine,
@@ -304,39 +368,64 @@ which server is running.
   false when the model server does not answer. The storefront then hides the
   button, and `/app/ai` shows an "offline" panel.
 
-**Setting it up with LM Studio**
+**The model server: vLLM** (ADR-0019)
 
-1. In LM Studio, download models that support tool calling. Without a GPU,
-   use small Qwen3 models: `lms get qwen/qwen3-4b` for reasoning and
-   `lms get qwen/qwen3-1.7b` for routing. Then start the server on all
-   interfaces, so the containers can reach it: `lms server start --bind 0.0.0.0 --port 1234` (or turn on "Serve on
-   Local Network" in the Developer tab). Keep the host firewall closed to the
-   LAN on port 1234. Docker's bridge reaches it through `host.docker.internal`,
-   which compose maps with `extra_hosts: host-gateway`.
-2. Set the provider in `infra/.env`, then recreate `backend` and `worker`:
+Every environment serves the model with vLLM, the compose `llm` service, which
+`make dev` starts with the rest of the stack. The base compose file runs vLLM's
+CPU build (`public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.10.2`, which needs
+AVX-512); `infra/docker-compose.gpu.yml` switches it to the CUDA build
+(`vllm/vllm-openai:v0.10.2`):
 
-   ```dotenv
-   AI_PROVIDER=lmstudio
-   AI_BASE_URL=http://host.docker.internal:1234/v1
-   AI_ROUTING_MODEL=qwen/qwen3-1.7b   # LM Studio's model id (`lms ls`)
-   AI_REASONING_MODEL=qwen/qwen3-4b
-   AI_REQUEST_TIMEOUT_SECONDS=300      # the 30 s default suits a GPU, not a laptop
-   ```
+```bash
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.gpu.yml \
+    --env-file infra/.env up -d llm
+```
 
-For Ollama, set `AI_PROVIDER=ollama` and point `AI_BASE_URL` (or
-`OLLAMA_BASE_URL`) at `http://host.docker.internal:11434/v1`.
+On first start it downloads `LLM_MODEL` from Hugging Face into the `llm_models`
+volume and answers as `LLM_ALIAS`. The default is Qwen3-4B (`Qwen/Qwen3-4B`, as
+`qwen3-4b`), for a GPU. vLLM loads full-precision weights, about 8 GB for the
+4B, so a CPU-only machine serves Qwen3-1.7B (about 3.4 GB) instead:
+
+```dotenv
+LLM_MODEL=Qwen/Qwen3-1.7B
+LLM_ALIAS=qwen3-1.7b
+AI_ROUTING_MODEL=qwen3-1.7b
+AI_REASONING_MODEL=qwen3-1.7b
+```
+
+These are the backend's defaults, and what `infra/.env.example` sets:
+
+```dotenv
+AI_PROVIDER=vllm
+AI_BASE_URL=http://llm:8000/v1
+AI_ROUTING_MODEL=qwen3-4b            # the service's --served-model-name (LLM_ALIAS)
+AI_REASONING_MODEL=qwen3-4b
+AI_THINKING=false
+```
+
+The service parses Qwen3's tool calls (`--enable-auto-tool-choice
+--tool-call-parser hermes`) and its thinking (`--reasoning-parser qwen3`, into
+`reasoning_content`, never shown). Thinking is off two ways: every request sends
+the chat template's `enable_thinking: false` (`runtime.py`, `_model_settings`),
+and the instructions end in `/no_think`. Keep `qwen3` in the alias, or neither
+is sent. It runs one sequence at a time (`LLM_PARALLEL`, vLLM's
+`--max-num-seqs`) with an 8,192-token context (`LLM_CTX`); on a GPU raise the
+first together with `AI_MAX_CONCURRENT_TURNS`. On the CPU build,
+`LLM_CPU_KVCACHE_GIB` (2) is the RAM set aside for the KV cache. Nothing
+publishes its port.
 
 **Speed**
 
 A turn sends the agent's instructions and tool schemas, typically 1,000 to 3,000
 tokens, and may call the model several times. `AI_THINKING=false`, the default,
 adds Qwen3's `/no_think` switch to the instructions. That cut a small
-tool-calling turn from 319 s to 59 s with qwen3-8b in LM Studio. PydanticAI's
+tool-calling turn from 319 s to 59 s with qwen3-8b. PydanticAI's
 generic `thinking=False` (sent as `reasoning_effort`) did not finish that turn
 within 10 minutes in testing, so it is not used.
 
-Measured on a CPU-only laptop (i7-1185G7, 16 GB, AVX2 runtime), in tokens per
-second:
+vLLM on a CPU has not been measured here yet. For reference, on a CPU-only
+laptop (i7-1185G7, 16 GB) with quantised GGUF weights (LM Studio and llama.cpp,
+before 2026-10-28), in tokens per second:
 
 | Model      | Reading the prompt | Generating |
 | ---------- | ------------------ | ---------- |
@@ -344,38 +433,33 @@ second:
 | qwen3-4b   | ~4.5               | ~1.9       |
 | qwen3-1.7b | ~10–27             | ~3–14      |
 
-Only qwen3-1.7b finishes a grounded staff turn there: the accountant's "How much
-did we earn this month?" took 270 s over 3–4 model calls, with a real chart.
-That machine runs 1.7B in both roles, with `AI_REQUEST_TIMEOUT_SECONDS=600`.
-With a GPU, use `qwen/qwen3-4b` or larger for `AI_REASONING_MODEL`.
-
-Load the model with **one parallel slot**, so each follow-up call in a turn
-reuses the cached prompt instead of reading it all again (that alone cut a
-second call from 1,375 prompt tokens to 253):
-
-```bash
-lms load qwen/qwen3-1.7b --parallel 1 -c 8192
-```
+With qwen3-1.7b there, the accountant's "How much did we earn this month?" took
+270 s over 3–4 model calls, with a real chart. vLLM's CPU build reads
+full-precision weights for every token, so expect it no faster; that laptop runs
+it with `AI_REQUEST_TIMEOUT_SECONDS=1800`. One sequence at a time keeps a turn's
+follow-up calls on the prompt prefix vLLM already cached.
 
 When the model is unreachable or times out, the turn hands off to a human. It
 never fails the request, and the rest of the app is unaffected.
 
 **Capacity, measurement and what is kept**
 
-- **Turn limit.** `AI_MAX_CONCURRENT_TURNS` (default 2) turns run at once per API
+- **Turn limit.** `AI_MAX_CONCURRENT_TURNS` (default 1) turns run at once per API
   process and each caller gets one at a time; a further turn waits
   `AI_QUEUE_WAIT_SECONDS` (default 15), then gets `429 ai_busy`. Set the first to
-  the server's slots: LM Studio loaded with `--parallel N` serves N turns at a
-  time. With several API replicas, divide the slots among them.
+  the server's: the `llm` service with `LLM_PARALLEL=N` runs N sequences at a time. With several API replicas, divide the slots among them.
 - **Metrics.** `/metrics` (with `METRICS_TOKEN` set) carries
   `nova_ai_turns_total{agent,outcome}` (ok, handoff, degraded, busy),
   `nova_ai_turn_duration_seconds`, `nova_ai_tool_calls_total{tool,outcome}` and
-  `nova_ai_injection_total`. A rising degraded or handoff rate means the model
+  `nova_ai_injection_total`, and `nova_ai_output_retries_total{agent,reason}`: replies sent back to
+  the model as JSON, in the wrong language or with a figure no tool returned. A rising degraded or handoff rate means the model
   is down or struggling; a rising busy rate means more slots are needed.
-- **Evaluation.** `make ai-eval` sends 12 fixed Arabic and English messages
-  (injection, "refund me", "book me", a phone number, the price) to the
-  configured model and prints a pass/fail table; `AI_EVAL_MIN_PASS` (default
-  0.8) is the gate. It needs the model server and is skipped otherwise. Run it
+- **Evaluation.** `make ai-eval` sends 14 fixed Arabic and English messages
+  (injection, "refund me", "book me", a phone number, the price, a question in
+  the other language than the app's) to the configured model and prints a
+  pass/fail table; `AI_EVAL_MIN_PASS` (default 0.8) is the gate. A case the
+  model did not answer fails, and the table counts them. It needs the model
+  server and is skipped only when no case was answered. Run it
   before and after changing a model, a prompt or a guardrail. It checks what
   happened, not the wording.
 - **Retention.** A conversation's recent turns are kept in Redis for

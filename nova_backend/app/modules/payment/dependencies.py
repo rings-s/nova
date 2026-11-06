@@ -1,6 +1,7 @@
 """payment · DELIVERY layer — DI providers."""
 
 from decimal import Decimal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -65,17 +66,17 @@ def build_payment_service(
 
 
 def get_payment_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
-    gateway: PaymentGateway = Depends(get_payment_gateway),
-    bookings: BookingService = Depends(get_booking_service),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
+    gateway: Annotated[PaymentGateway, Depends(get_payment_gateway)],
+    bookings: Annotated[BookingService, Depends(get_booking_service)],
 ) -> PaymentService:
     return build_payment_service(session, tenant_id, gateway=gateway, bookings=bookings)
 
 
 def get_webhook_processor(
-    session: AsyncSession = Depends(get_db_session),
-    gateway: PaymentGateway = Depends(get_payment_gateway),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    gateway: Annotated[PaymentGateway, Depends(get_payment_gateway)],
 ) -> PaymentWebhookProcessor:
     """Deliberately has no `get_tenant_context` dependency.
 

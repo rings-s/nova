@@ -21,6 +21,8 @@
 		createProvider,
 		listProviders,
 		assignServiceToProvider,
+		unassignServiceFromProvider,
+		listAssignments,
 		updateLocation,
 		deleteLocation,
 		updateService,
@@ -45,6 +47,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Checkbox from '$lib/components/ui/Checkbox.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import LocationCard from '$lib/components/catalog/LocationCard.svelte';
@@ -294,8 +297,101 @@
 	}
 
 	$effect(() => {
-		if (activeTab === 'services') loadServices();
+		if (activeTab === 'services') {
+			loadServices();
+			loadProviders();
+			loadAssignments();
+		}
 	});
+
+	// --- Who performs each service ----------------------------------------------
+	//
+	// A service nobody is assigned to has no bookable time anywhere: the
+	// marketplace, the booking calendar and the assistants only ever offer a
+	// provider the salon assigned (`list_bookable_providers`). So the service
+	// dialogs pick who performs it, and a card with nobody says so.
+
+	let assignments = $state(/** @type {import('$lib/api/catalog.js').Assignment[]} */ ([]));
+
+	async function loadAssignments() {
+		const currentLocationId = selectedLocationId;
+		if (!currentLocationId) {
+			assignments = [];
+			return;
+		}
+		try {
+			const page = await listAssignments(tenantId, currentLocationId);
+			if (currentLocationId === selectedLocationId) assignments = page.items;
+		} catch (err) {
+			toastStore.fromError(err);
+		}
+	}
+
+	/** @param {string} serviceId */
+	function assignedProviderIds(serviceId) {
+		return assignments.filter((a) => a.service_id === serviceId).map((a) => a.provider_id);
+	}
+
+	/** Each service's active providers: the ones who make its times bookable. */
+	let performersByService = $derived.by(() => {
+		/** @type {Record<string, import('$lib/api/catalog.js').Provider[]>} */
+		const result = {};
+		for (const { provider_id, service_id } of assignments) {
+			const provider = providers.find((p) => p.id === provider_id);
+			if (provider?.is_active) (result[service_id] ??= []).push(provider);
+		}
+		return result;
+	});
+
+	let servicesByProvider = $derived.by(() => {
+		/** @type {Record<string, import('$lib/api/catalog.js').Service[]>} */
+		const result = {};
+		for (const { provider_id, service_id } of assignments) {
+			const service = services.find((s) => s.id === service_id);
+			if (service) (result[provider_id] ??= []).push(service);
+		}
+		return result;
+	});
+
+	/** The providers ticked in whichever service dialog is open. */
+	let performerIds = $state(/** @type {string[]} */ ([]));
+
+	/** @param {string} providerId @param {boolean} on */
+	function togglePerformer(providerId, on) {
+		performerIds = on
+			? [...performerIds, providerId]
+			: performerIds.filter((id) => id !== providerId);
+	}
+
+	function openServiceModal() {
+		// Everyone active is ticked: unticking is the owner's choice, and a
+		// service nobody performs cannot be booked at all.
+		performerIds = providers.filter((p) => p.is_active).map((p) => p.id);
+		serviceError = null;
+		serviceModalOpen = true;
+	}
+
+	/** @param {string} serviceId */
+	async function savePerformers(serviceId) {
+		const current = assignedProviderIds(serviceId);
+		const wanted = performerIds;
+		try {
+			for (const providerId of wanted.filter((id) => !current.includes(id))) {
+				await assignServiceToProvider(tenantId, providerId, serviceId);
+			}
+			for (const providerId of current.filter((id) => !wanted.includes(id))) {
+				await unassignServiceFromProvider(tenantId, providerId, serviceId);
+			}
+		} finally {
+			await loadAssignments();
+		}
+	}
+
+	function goToProviders() {
+		serviceModalOpen = false;
+		editOpen = false;
+		activeTab = 'providers';
+	}
 
 	/** @param {SubmitEvent} event */
 	async function handleCreateService(event) {
@@ -313,6 +409,13 @@
 				currency: serviceForm.currency
 			});
 			services = [...services, service];
+			try {
+				await savePerformers(service.id);
+			} catch (err) {
+				// The service exists; only who performs it failed. Say so, and
+				// leave the owner to retry from Edit.
+				toastStore.fromError(err);
+			}
 			serviceModalOpen = false;
 			serviceForm = {
 				nameEn: '',
@@ -339,10 +442,6 @@
 	let providerError = $state(/** @type {string|null} */ (null));
 	let providerForm = $state({ nameEn: '', nameAr: '', titleEn: '' });
 
-	let assignProviderId = $state('');
-	let assignServiceId = $state('');
-	let assigning = $state(false);
-
 	async function loadProviders() {
 		const currentLocationId = selectedLocationId;
 		if (!currentLocationId) {
@@ -364,6 +463,7 @@
 		if (activeTab === 'providers') {
 			loadProviders();
 			loadServices();
+			loadAssignments();
 		}
 	});
 
@@ -473,19 +573,6 @@
 		}
 	}
 
-	async function handleAssign() {
-		if (!assignProviderId || !assignServiceId) return;
-		assigning = true;
-		try {
-			await assignServiceToProvider(tenantId, assignProviderId, assignServiceId);
-			toastStore.success(t('Service assigned.'));
-		} catch (err) {
-			toastStore.fromError(err);
-		} finally {
-			assigning = false;
-		}
-	}
-
 	// --- Edit and delete ------------------------------------------------------
 
 	/**
@@ -528,7 +615,10 @@
 			price: item.price ?? '',
 			isActive: item.is_active
 		};
-		if (row.kind === 'service') loadCategories();
+		if (row.kind === 'service') {
+			loadCategories();
+			performerIds = assignedProviderIds(row.item.id);
+		}
 		editError = null;
 		editing = row;
 		editOpen = true;
@@ -572,6 +662,7 @@
 					price: editForm.price
 				});
 				services = services.map((s) => (s.id === updated.id ? updated : s));
+				await savePerformers(updated.id);
 			} else {
 				const updated = await updateProvider(tenantId, editing.item.id, {
 					...common,
@@ -776,11 +867,7 @@
 					<div class="flex flex-wrap items-end justify-between gap-3">
 						{@render locationFilter()}
 						{#if canEdit}
-							<Button
-								size="sm"
-								disabled={!selectedLocationId}
-								onclick={() => (serviceModalOpen = true)}
-							>
+							<Button size="sm" disabled={!selectedLocationId} onclick={openServiceModal}>
 								<Icon name="plus" class="size-4" />
 								{t('Add service')}
 							</Button>
@@ -798,8 +885,35 @@
 					{:else}
 						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
 							{#each services as service (service.id)}
+								{#snippet performedBy()}
+									{@const performers = performersByService[service.id] ?? []}
+									{#if performers.length > 0}
+										<p class="flex items-center gap-1.5 text-xs text-fg-muted">
+											<Icon name="users" class="size-3.5 shrink-0" />
+											<span class="truncate"
+												>{t('Performed by {names}', {
+													names: performers.map((p) => pickBilingual(p, 'name')).join('، ')
+												})}</span
+											>
+										</p>
+									{:else if canEdit}
+										<button
+											type="button"
+											class="rounded-control text-start focus-ring"
+											onclick={() => openEdit({ kind: 'service', item: service })}
+										>
+											<Badge tone="warning" size="sm" dot
+												>{t("No provider: customers can't book this")}</Badge
+											>
+										</button>
+									{:else}
+										<Badge tone="warning" size="sm" dot
+											>{t("No provider: customers can't book this")}</Badge
+										>
+									{/if}
+								{/snippet}
 								{#if canEdit}
-									<ServiceCard {service}>
+									<ServiceCard {service} details={performedBy}>
 										{#snippet actions()}
 											<Button
 												size="sm"
@@ -818,7 +932,7 @@
 										{/snippet}
 									</ServiceCard>
 								{:else}
-									<ServiceCard {service} />
+									<ServiceCard {service} details={performedBy} />
 								{/if}
 							{/each}
 						</div>
@@ -861,6 +975,14 @@
 						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 							{#each providers as provider (provider.id)}
 								<ProviderCard {provider}>
+									{#snippet details()}
+										{@const performs = servicesByProvider[provider.id] ?? []}
+										<p class="truncate text-xs text-fg-subtle">
+											{performs.length > 0
+												? performs.map((s) => pickBilingual(s, 'name')).join('، ')
+												: t('No services assigned yet')}
+										</p>
+									{/snippet}
 									{#snippet actions()}
 										<Button size="sm" variant="outline" onclick={() => openSchedule(provider)}>
 											<Icon name="clock" class="size-4" />
@@ -888,48 +1010,6 @@
 								</ProviderCard>
 							{/each}
 						</div>
-
-						{#if services.length > 0 && canEdit}
-							<Card padding="none">
-								{#snippet header()}
-									<h2 class="text-sm font-semibold text-fg">
-										{t('Qualify a provider for a service')}
-									</h2>
-									<p class="mt-0.5 text-xs text-fg-muted">
-										{t('Customers can only book a provider for services they are qualified for.')}
-									</p>
-								{/snippet}
-								<div class="flex flex-wrap items-end gap-3 p-5">
-									<div class="w-full sm:w-52">
-										<Select
-											label={t('Provider')}
-											bind:value={assignProviderId}
-											options={providers.map((p) => ({
-												value: p.id,
-												label: pickBilingual(p, 'name')
-											}))}
-										/>
-									</div>
-									<div class="w-full sm:w-52">
-										<Select
-											label={t('Service')}
-											bind:value={assignServiceId}
-											options={services.map((s) => ({
-												value: s.id,
-												label: pickBilingual(s, 'name')
-											}))}
-										/>
-									</div>
-									<Button
-										loading={assigning}
-										disabled={!assignProviderId || !assignServiceId}
-										onclick={handleAssign}
-									>
-										{t('Assign')}
-									</Button>
-								</div>
-							</Card>
-						{/if}
 					{/if}
 				</div>
 			{/if}
@@ -1021,6 +1101,39 @@
 	</form>
 </Modal>
 
+{#snippet performersField()}
+	<fieldset class="flex flex-col gap-2">
+		<legend class="mb-1 text-sm font-medium text-fg">{t('Who performs this?')}</legend>
+		{#if providers.length === 0}
+			<p class="text-sm text-fg-muted">
+				{t('Add a provider first. Nobody can book a service until someone performs it.')}
+			</p>
+			<div>
+				<Button size="sm" variant="outline" onclick={goToProviders}>{t('Go to providers')}</Button>
+			</div>
+		{:else}
+			{#each providers as provider (provider.id)}
+				<Checkbox
+					label={provider.is_active
+						? pickBilingual(provider, 'name')
+						: `${pickBilingual(provider, 'name')} · ${t('Inactive')}`}
+					checked={performerIds.includes(provider.id)}
+					onchange={(/** @type {Event} */ event) =>
+						togglePerformer(
+							provider.id,
+							/** @type {HTMLInputElement} */ (event.currentTarget).checked
+						)}
+				/>
+			{/each}
+			{#if !providers.some((p) => p.is_active && performerIds.includes(p.id))}
+				<Alert tone="warning">
+					{t("With nobody ticked, customers can't book this service.")}
+				</Alert>
+			{/if}
+		{/if}
+	</fieldset>
+{/snippet}
+
 <Modal bind:open={serviceModalOpen} title={t('Add service')}>
 	{#if serviceError}
 		<Alert tone="error" class="mb-4">{serviceError}</Alert>
@@ -1056,6 +1169,7 @@
 				bind:value={serviceForm.price}
 			/>
 		</div>
+		{@render performersField()}
 		<Button type="submit" loading={creatingService} fullWidth>{t('Add service')}</Button>
 	</form>
 </Modal>
@@ -1174,6 +1288,7 @@
 				<p class="text-xs text-fg-muted">
 					{t('Bookings already made keep the price and time they were made with.')}
 				</p>
+				{@render performersField()}
 			{:else}
 				<div class="grid gap-4 sm:grid-cols-2">
 					<Input label={t('Title (English)')} bind:value={editForm.titleEn} />

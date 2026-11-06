@@ -36,6 +36,11 @@ _COUNTER_HELP = {
     "nova_ai_turns_total": "Assistant turns by agent and outcome (ok, handoff, degraded, busy).",
     "nova_ai_tool_calls_total": "Assistant tool calls by tool and outcome (ok, refused).",
     "nova_ai_injection_total": "Messages flagged as trying to instruct the model.",
+    "nova_ai_output_retries_total": (
+        "Replies sent back to the model by agent and reason (json, language, ungrounded)."
+    ),
+    "nova_voice_unclear_speech_total": "Caller speech too unsure to act on, asked for again.",
+    "nova_voice_code_limited_total": "Verification codes refused: too many sent to one number.",
 }
 _counters: dict[tuple[str, tuple[tuple[str, str], ...]], int] = defaultdict(int)
 _ai_turn_buckets: dict[str, list[int]] = {}

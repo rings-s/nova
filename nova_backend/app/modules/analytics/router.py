@@ -12,7 +12,7 @@ caps it.
 """
 
 from datetime import date
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -66,7 +66,7 @@ def _window_out(window: ReportWindow) -> ReportWindowOut:
 @router.get("/charts", response_model=Page[ChartCatalogEntryOut])
 async def list_charts(
     tenant_id: UUID,
-    service: AnalyticsService = Depends(get_analytics_service),
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> Page[ChartCatalogEntryOut]:
     """The chart catalog (docs/13 section 7), with the plan feature each needs."""
     entries = [
@@ -88,12 +88,13 @@ async def list_charts(
 async def get_chart(
     tenant_id: UUID,
     chart_id: str,
-    business_id: UUID = Query(...),
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
-    granularity: Granularity | None = Query(default=None),
-    locale: Locale = Query(default="en"),
-    service: AnalyticsService = Depends(get_analytics_service),
+    business_id: Annotated[UUID, Query()],
+    *,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    granularity: Annotated[Granularity | None, Query()] = None,
+    locale: Annotated[Locale, Query()] = "en",
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> ChartOut:
     """One chart as Plotly JSON, for plotly.js to draw."""
     report = await service.chart(
@@ -125,10 +126,11 @@ async def get_chart(
 @router.get("/overview", response_model=OverviewOut)
 async def get_overview(
     tenant_id: UUID,
-    business_id: UUID = Query(...),
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
-    service: AnalyticsService = Depends(get_analytics_service),
+    business_id: Annotated[UUID, Query()],
+    *,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> OverviewOut:
     """Every KPI in docs/13 section 6.4. A suppressed one has a null value."""
     overview = await service.overview(business_id, date_from=date_from, date_to=date_to)
@@ -153,12 +155,13 @@ async def get_overview(
 @router.get("/breakdown", response_model=Page[BreakdownRowOut])
 async def get_breakdown(
     tenant_id: UUID,
-    business_id: UUID = Query(...),
-    dimension: Dimension = Query(...),
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
-    locale: Locale = Query(default="en"),
-    service: AnalyticsService = Depends(get_analytics_service),
+    business_id: Annotated[UUID, Query()],
+    dimension: Annotated[Dimension, Query()],
+    *,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    locale: Annotated[Locale, Query()] = "en",
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> Page[BreakdownRowOut]:
     """Per service, provider, source, or (on Chain) branch."""
     report = await service.breakdown(business_id, dimension, date_from=date_from, date_to=date_to)
@@ -182,10 +185,11 @@ async def get_breakdown(
 @router.get("/forecast", response_model=ForecastOut)
 async def get_forecast(
     tenant_id: UUID,
-    business_id: UUID = Query(...),
-    metric: ForecastMetric = Query(default=ForecastMetric.BOOKINGS),
-    horizon_weeks: int = Query(default=4, ge=1, le=8),
-    service: AnalyticsService = Depends(get_analytics_service),
+    business_id: Annotated[UUID, Query()],
+    *,
+    metric: Annotated[ForecastMetric, Query()] = ForecastMetric.BOOKINGS,
+    horizon_weeks: Annotated[int, Query(ge=1, le=8)] = 4,
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> ForecastOut:
     """A linear trend over complete weeks (docs/13 section 10), never a promise."""
     report = await service.forecast(business_id, metric, horizon_weeks=horizon_weeks)
@@ -216,10 +220,11 @@ async def get_forecast(
 )
 async def get_financial_summary(
     tenant_id: UUID,
-    business_id: UUID = Query(...),
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
-    service: AnalyticsService = Depends(get_analytics_service),
+    business_id: Annotated[UUID, Query()],
+    *,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+    service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> FinancialSummaryOut:
     """The accountant's ledger for one window.
 

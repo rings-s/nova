@@ -12,9 +12,12 @@ Two properties are load-bearing here and are asserted repeatedly:
 """
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
 
 DISCOVERY = "/api/v1/discovery"
 
@@ -212,6 +215,38 @@ async def test_the_cheapest_service_is_the_price_on_the_card(
     assert items[0]["currency"] == "SAR"
 
 
+async def test_a_price_sort_pages_the_whole_result_not_one_page(
+    client, tenant_factory, business_factory, location_factory, service_factory
+):
+    """Cheapest first across pages, and a branch with nothing priced last.
+
+    The marketplace once sorted each page by price on its own, so page two
+    could hold a cheaper salon than anything on page one.
+    """
+    from decimal import Decimal
+
+    tenant = await tenant_factory()
+    for name, price in (("Tier Alpha", "300.00"), ("Tier Bravo", "90.00"), ("Tier Charlie", None)):
+        location = await location_factory(await business_factory(tenant, name_en=name))
+        if price is not None:
+            await service_factory(location, name_en="Cut", price=Decimal(price))
+    await service_factory(
+        await location_factory(await business_factory(tenant, name_en="Tier Delta")),
+        name_en="Cut",
+        price=Decimal("150.00"),
+    )
+
+    async def names(sort: str, offset: int) -> list[str]:
+        params = {"q": "Tier", "sort": sort, "limit": 2, "offset": offset}
+        items = (await client.get(DISCOVERY + "/businesses", params=params)).json()["items"]
+        return [item["name_en"] for item in items]
+
+    assert await names("price_asc", 0) == ["Tier Bravo", "Tier Delta"]
+    assert await names("price_asc", 2) == ["Tier Alpha", "Tier Charlie"]
+    assert await names("price_desc", 0) == ["Tier Alpha", "Tier Delta"]
+    assert await names("price_desc", 2) == ["Tier Bravo", "Tier Charlie"]
+
+
 class TestOnlyPublishedRowsAreVisible:
     """The restriction that makes a cross-tenant read safe.
 
@@ -392,6 +427,57 @@ async def test_public_availability_offers_only_qualified_providers(
     # Chronological across providers, not grouped by stylist.
     starts = [slot["starts_at"] for slot in body["slots"]]
     assert starts == sorted(starts)
+
+
+async def test_a_full_response_ends_on_a_whole_day_and_says_where_to_resume(
+    client,
+    monkeypatch,
+    tenant_factory,
+    business_factory,
+    location_factory,
+    service_factory,
+    provider_factory,
+    qualify,
+):
+    """Over the slot cap, whole days come off the end, so the calendar never
+    shows a day with free times as closed, and the client asks for the rest."""
+    monkeypatch.setattr(get_settings(), "discovery_max_public_slots", 40)
+    tenant = await tenant_factory()
+    business = await business_factory(tenant, slug="busy-salon")
+    location = await location_factory(business)
+    service = await service_factory(location, duration_minutes=60)
+    provider = await provider_factory(location)
+    await qualify(provider, service)
+    every_day = [{"weekday": day, "start_minute": 540, "end_minute": 1020} for day in range(7)]
+    schedule = await client.put(
+        f"/api/v1/tenants/{tenant.id}/schedules/providers/{provider.id}",
+        json={"windows": every_day},
+    )
+    assert schedule.status_code == 200
+    riyadh = ZoneInfo("Asia/Riyadh")
+    start = (datetime.now(riyadh) + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    url = f"{DISCOVERY}/businesses/busy-salon/services/{service.id}/availability"
+
+    first = (
+        await client.get(
+            url,
+            params={
+                "date_from": start.isoformat(),
+                "date_to": (start + timedelta(days=7)).isoformat(),
+            },
+        )
+    ).json()
+
+    # 09:00-17:00 at 15-minute steps is 29 one-hour starts a day: one day fits in 40.
+    days = {
+        datetime.fromisoformat(slot["starts_at"]).astimezone(riyadh).date()
+        for slot in first["slots"]
+    }
+    assert days == {start.date()}
+    assert len(first["slots"]) == 29
+    assert first["more_from"] == (start + timedelta(days=1)).date().isoformat()
 
 
 async def test_availability_for_a_service_at_another_salon_is_a_404(

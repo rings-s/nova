@@ -12,8 +12,9 @@ validation that decides what a referral means.
 import hashlib
 import math
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from app.core.exceptions import ValidationDomainError
 
@@ -68,9 +69,9 @@ def normalize_search_term(term: str | None) -> str | None:
 
 
 #: What a search may be ordered by, as the client asks for it.
-SearchSort = Literal["default", "distance", "rating"]
+SearchSort = Literal["default", "distance", "rating", "price_asc", "price_desc"]
 #: What the search is actually ordered by, once the request is understood.
-SearchOrder = Literal["name", "distance", "rating"]
+SearchOrder = Literal["name", "distance", "rating", "price_asc", "price_desc"]
 
 
 def resolve_search_order(sort: SearchSort, *, located: bool) -> SearchOrder:
@@ -80,6 +81,7 @@ def resolve_search_order(sort: SearchSort, *, located: bool) -> SearchOrder:
     the customer said where they are, alphabetical otherwise. `distance` has no
     meaning without a position to measure from, so asking for it without
     coordinates is refused rather than quietly answered alphabetically.
+    `rating` and the two price orders hold with or without a position.
     """
     if sort == "distance":
         if not located:
@@ -87,8 +89,8 @@ def resolve_search_order(sort: SearchSort, *, located: bool) -> SearchOrder:
                 "Sorting by distance needs a latitude and longitude to measure from."
             )
         return "distance"
-    if sort == "rating":
-        return "rating"
+    if sort in ("rating", "price_asc", "price_desc"):
+        return sort
     return "distance" if located else "name"
 
 
@@ -225,6 +227,32 @@ def validate_availability_window(*, date_from: datetime, date_to: datetime, max_
         raise ValidationDomainError("date_to must be after date_from.")
     if (date_to - date_from) > timedelta(days=max_days):
         raise ValidationDomainError(f"A public availability window may not exceed {max_days} days.")
+
+
+def trim_to_whole_days(
+    starts: list[datetime], *, cap: int, timezone: str
+) -> tuple[int, date | None]:
+    """How many of `starts` (sorted) one public response keeps, and the first
+    branch-local day it leaves out (None when nothing is left out).
+
+    The cut always falls between two days, never inside one: a calendar shows
+    a day as having times or not, so half a day would read as a full one, and
+    a missing day as a closed one. The caller asks again from the day returned.
+    The first day is kept whole even when it alone is over the cap, or a salon
+    with a great many stylists would show no times at all.
+    """
+    if len(starts) <= cap:
+        return len(starts), None
+    zone = ZoneInfo(timezone)
+    days = [start.astimezone(zone).date() for start in starts]
+    cut_day = days[cap]
+    keep = days.index(cut_day)
+    if keep == 0:
+        # The first day alone is over the cap: keep it, cut at the next day.
+        keep = next((i for i, day in enumerate(days) if day != cut_day), len(days))
+    if keep == len(days):
+        return keep, None
+    return keep, days[keep]
 
 
 def new_referral_token() -> str:

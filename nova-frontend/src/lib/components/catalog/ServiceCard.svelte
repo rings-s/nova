@@ -11,16 +11,18 @@
 	 * `StorefrontService` (discovery.js) — the two share every field this uses.
 	 * Selectable (a button) only when `onselect` is given. `actions` renders
 	 * trailing controls, so it must not be combined with `onselect` (a button
-	 * can't contain buttons).
+	 * can't contain buttons). `details` renders a line under the price, such as
+	 * who performs the service.
 	 *
 	 * @type {{
 	 *   service: import('../../api/catalog.js').Service|import('../../api/discovery.js').StorefrontService,
 	 *   selected?: boolean,
 	 *   onselect?: (service: import('../../api/catalog.js').Service|import('../../api/discovery.js').StorefrontService) => void,
-	 *   actions?: import('svelte').Snippet
+	 *   actions?: import('svelte').Snippet,
+	 *   details?: import('svelte').Snippet
 	 * }}
 	 */
-	let { service, selected = false, onselect, actions } = $props();
+	let { service, selected = false, onselect, actions, details } = $props();
 
 	// Only the dashboard's `Service` carries it; a storefront shows active ones only.
 	let inactive = $derived('is_active' in service && !service.is_active);
@@ -67,6 +69,7 @@
 			{formatMoney(service.price, service.currency)}
 		</span>
 	</div>
+	{#if details}<div class="mt-3">{@render details()}</div>{/if}
 	{#if inactive || actions}
 		<div class="mt-3 flex items-center justify-between gap-2 border-t border-line-subtle pt-3">
 			<span

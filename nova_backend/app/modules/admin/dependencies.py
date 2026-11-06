@@ -5,6 +5,7 @@ it opens `bypass_tenant_scope` after `require_superuser` has passed, for this
 request's transaction alone (`SET LOCAL`).
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -24,8 +25,8 @@ from app.modules.identity.dependencies import get_auth_service, require_superuse
 
 
 async def get_admin_session(
-    principal: Principal = Depends(require_superuser),
-    session: AsyncSession = Depends(get_db_session),
+    principal: Annotated[Principal, Depends(require_superuser)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> AsyncSession:
     """The request's session, reading across tenants.
 
@@ -34,19 +35,20 @@ async def get_admin_session(
     every tenant is the console's purpose. What bounds it instead:
 
       - only a superuser reaches it, re-read from the account row each request;
-      - the console reads through `AdminTableRepository` and writes nothing
-        generic: each curated action re-scopes to the row's own tenant first
-        (`AdminService._scoped`), which also switches the bypass off;
-      - every read and action is recorded in `admin_audit_log`, which the app
-        role cannot update or delete.
+      - every write, a curated action or a direct edit, re-scopes to the row's
+        own tenant first (`AdminService._scoped`, `_scope_write`), which also
+        switches the bypass off; only a platform table with no `tenant_id`
+        (users, tenants, categories…) is written under the bypass;
+      - every read, action and edit is recorded in `admin_audit_log`, which the
+        app role cannot update or delete, and which the console cannot edit.
     """
     await bypass_tenant_scope(session)
     return session
 
 
 def get_admin_service(
-    session: AsyncSession = Depends(get_admin_session),
-    auth: AuthService = Depends(get_auth_service),
+    session: Annotated[AsyncSession, Depends(get_admin_session)],
+    auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> AdminService:
     def catalog_for(tenant_id: UUID) -> CatalogService:
         return build_catalog_service(session, tenant_id)

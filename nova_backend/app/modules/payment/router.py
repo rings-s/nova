@@ -14,6 +14,7 @@ Two routers with very different security models:
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
@@ -84,10 +85,10 @@ def _payment_out(p: Payment) -> PaymentOut:
 async def create_payment_intent(
     tenant_id: UUID,
     payload: CreatePaymentIntentRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: PaymentService = Depends(get_payment_service),
-    principal: Principal = Depends(get_principal),
-    guard: IdempotencyGuard = Depends(idempotency_guard("POST /payments/intents")),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[PaymentService, Depends(get_payment_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
+    guard: Annotated[IdempotencyGuard, Depends(idempotency_guard("POST /payments/intents"))],
 ) -> object:
     """Starts a payment. Send an `Idempotency-Key` — a retried intent that
     creates a second gateway payment is a customer charged twice.
@@ -130,8 +131,8 @@ async def create_payment_intent(
 async def get_payment(
     tenant_id: UUID,
     payment_id: UUID,
-    service: PaymentService = Depends(get_payment_service),
-    principal: Principal = Depends(get_principal),
+    service: Annotated[PaymentService, Depends(get_payment_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> PaymentOut:
     """One payment, if the caller may see its booking.
 
@@ -145,8 +146,8 @@ async def get_payment(
 async def list_payments_for_booking(
     tenant_id: UUID,
     booking_id: UUID,
-    service: PaymentService = Depends(get_payment_service),
-    principal: Principal = Depends(get_principal),
+    service: Annotated[PaymentService, Depends(get_payment_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> Page[PaymentOut]:
     """Guarded on the booking too — otherwise a payment that cannot be read by
     its own id is still readable by naming the booking it belongs to."""
@@ -166,9 +167,9 @@ async def refund_payment(
     tenant_id: UUID,
     payment_id: UUID,
     payload: RefundPaymentRequest,
-    session: AsyncSession = Depends(get_db_session),
-    service: PaymentService = Depends(get_payment_service),
-    guard: IdempotencyGuard = Depends(idempotency_guard("POST /payments/refund")),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[PaymentService, Depends(get_payment_service)],
+    guard: Annotated[IdempotencyGuard, Depends(idempotency_guard("POST /payments/refund"))],
 ) -> object:
     """Refunds a captured payment. Owners and managers only (`refund_payments`),
     and idempotency-keyed — a double-submitted refund is real money leaving
@@ -194,9 +195,9 @@ async def refund_payment(
 async def sync_payment(
     tenant_id: UUID,
     payment_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
-    service: PaymentService = Depends(get_payment_service),
-    principal: Principal = Depends(get_principal),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    service: Annotated[PaymentService, Depends(get_payment_service)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> PaymentOut:
     """Asks Moyasar where this payment stands, and records it.
 
@@ -226,8 +227,8 @@ webhook_router = APIRouter(prefix="/webhooks", tags=["payment"])
 @webhook_router.post("/moyasar", response_model=WebhookAckOut)
 async def moyasar_webhook(
     request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    processor: PaymentWebhookProcessor = Depends(get_webhook_processor),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    processor: Annotated[PaymentWebhookProcessor, Depends(get_webhook_processor)],
     gateway=Depends(get_payment_gateway),
 ) -> WebhookAckOut:
     """Receives a Moyasar webhook (https://docs.moyasar.com/api/other/webhooks/webhook-reference/).

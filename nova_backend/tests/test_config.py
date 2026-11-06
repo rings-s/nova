@@ -182,3 +182,19 @@ class TestMoyasarKeyNames:
         settings = Settings(_env_file=None, **REQUIRED, secret_key=GENERATED_KEY, env="local")
 
         assert settings.moyasar_api_key == "sk_test_abc"
+
+
+class TestModelServer:
+    """The models come from vLLM only (ADR-0019)."""
+
+    def test_vllm_is_the_default(self):
+        settings = build()
+
+        assert settings.ai_provider == "vllm"
+        assert settings.ai_base_url == "http://llm:8000/v1"
+
+    @pytest.mark.parametrize("provider", ["llamacpp", "ollama", "lmstudio", "openai_compatible"])
+    @pytest.mark.parametrize("field", ["ai_provider", "voice_ai_provider"])
+    def test_no_other_model_server_starts(self, field, provider):
+        with pytest.raises(ValidationError, match=field):
+            build(**{field: provider})

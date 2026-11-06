@@ -5,13 +5,13 @@
 	import { pickBilingual } from '$lib/utils/bilingual.js';
 	import { formatMoney } from '$lib/utils/money.js';
 	import { resolve } from '$app/paths';
+	import { SvelteSet } from 'svelte/reactivity';
+	import { tick } from 'svelte';
 	import Container from '$lib/components/marketing/Container.svelte';
 	import GradientBlob from '$lib/components/marketing/GradientBlob.svelte';
 	import ListingsMap from '$lib/components/map/ListingsMap.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
-	import Pagination from '$lib/components/ui/Pagination.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
@@ -21,7 +21,14 @@
 	import { describeAccuracy, locate, LocateError, metresBetween } from '$lib/map/geolocate.js';
 	import AssistantLauncher from '$lib/components/ai/AssistantLauncher.svelte';
 
+	/** What is in the search box. */
 	let q = $state('');
+	/**
+	 * What is searched: the box, once typing pauses (or on Enter). The list and
+	 * the map share one 60-requests-a-minute allowance per address, so a search
+	 * per keystroke would spend it in a sentence.
+	 */
+	let term = $state('');
 	let selectedCategory = $state('');
 	let sortBy = $state('recommended');
 	let offset = $state(0);
@@ -42,11 +49,22 @@
 	 * `west,south,east,north`. Null searches everywhere.
 	 */
 	let area = $state(/** @type {string | null} */ (null));
-	// Below `lg` the list and the map take turns on the screen; from `lg` up they
-	// sit side by side and this is ignored.
-	/** @type {('list' | 'map')[]} */
-	const views = [m('list'), m('map')];
-	let view = $state(views[0]);
+	// The list and the map take turns on the screen at every width: the map is a
+	// view of the results, not a panel squeezed in beside them.
+	const views = /** @type {const} */ ([
+		{ id: 'list', label: m('List'), icon: 'list' },
+		{ id: 'map', label: m('Map'), icon: 'map' }
+	]);
+	let view = $state(/** @type {'list' | 'map'} */ ('list'));
+
+	/** Top of the results, scrolled to when the page or the view changes. */
+	/** @type {HTMLElement | undefined} */
+	let resultsTop = $state();
+	/** @type {HTMLElement | undefined} */
+	let mapBox = $state();
+
+	/** Covers whose image failed to load, drawn as the initial on the gradient instead. */
+	const brokenCovers = new SvelteSet();
 
 	// Quick View Modal
 	let quickViewSalon = $state(/** @type {any | null} */ (null));
@@ -108,7 +126,7 @@
 		const next = /** @type {const} */ ({ ...fix, source: 'device' });
 		if (!origin || metresBetween(origin, fix) > Math.max(GOOD_ENOUGH_M, fix.accuracy / 2)) {
 			origin = next;
-			searchAt = { latitude: fix.latitude, longitude: fix.longitude };
+			moveSearch(fix);
 		} else if (fix.accuracy < origin.accuracy) {
 			// Same place, surer: update the circle without moving the search.
 			origin = { ...origin, accuracy: fix.accuracy };
@@ -120,7 +138,17 @@
 	function moveHere(position) {
 		locateAbort?.abort();
 		origin = { ...position, accuracy: 0, source: 'map' };
+		moveSearch(position);
+	}
+
+	/**
+	 * Moves the point searches measure from. A nearest-first list is a new list
+	 * from a new point, so it starts again at its first page.
+	 * @param {{ latitude: number, longitude: number }} position
+	 */
+	function moveSearch(position) {
 		searchAt = { latitude: position.latitude, longitude: position.longitude };
+		if (sortBy === 'nearest') offset = 0;
 	}
 
 	let originNote = $derived.by(() => {
@@ -198,7 +226,7 @@
 	}
 
 	// Spotlight rows, shown above the results when nothing is being searched.
-	let browsing = $derived(!q && !selectedCategory && !area && offset === 0);
+	let browsing = $derived(!term && !selectedCategory && !area && offset === 0);
 	let topRated = $state(/** @type {import('$lib/api/discovery.js').ListingCard[]} */ ([]));
 	let nearby = $state(/** @type {import('$lib/api/discovery.js').ListingCard[] | null} */ (null));
 
@@ -240,37 +268,41 @@
 			.catch(() => (nearby = []));
 	});
 
-	async function search() {
+	/** The page's sort names, as the API's `sort`. */
+	const API_SORT = /** @type {Record<string, import('$lib/api/discovery.js').SearchSort>} */ ({
+		recommended: 'default',
+		rating: 'rating',
+		nearest: 'distance',
+		'price-low': 'price_asc',
+		'price-high': 'price_desc'
+	});
+
+	/**
+	 * One page of results. Every ordering — price included — is the server's,
+	 * so page two continues page one instead of re-sorting twelve cards alone.
+	 * @param {{ term: string, category: string, sort: string, bbox: string | null,
+	 *   near: { latitude: number, longitude: number } | null, offset: number }} params
+	 */
+	async function search({ term, category, sort, bbox, near, offset }) {
 		const ticket = ++searchTicket;
 		loading = true;
 		try {
-			const near = sortBy === 'nearest' ? searchAt : null;
 			const page = await searchBusinesses({
-				q: q || null,
-				category: selectedCategory || null,
-				bbox: area,
+				q: term || null,
+				category: category || null,
+				bbox,
 				latitude: near?.latitude ?? null,
 				longitude: near?.longitude ?? null,
 				radiusKm: near ? NEAR_RADIUS_KM : null,
-				sort: near ? 'distance' : sortBy === 'rating' ? 'rating' : 'default',
+				sort: near ? 'distance' : sort === 'nearest' ? 'default' : (API_SORT[sort] ?? 'default'),
+				// One extra row says whether a next page exists without counting them all.
 				limit: limit + 1,
 				offset
 			});
-			let items = page.items || [];
 			if (ticket !== searchTicket) return;
+			const items = page.items || [];
 			hasNextPage = items.length > limit;
-			items = items.slice(0, limit);
-
-			if (sortBy === 'price-low') {
-				items = [...items].sort(
-					(a, b) => parseFloat(a.starting_price || '0') - parseFloat(b.starting_price || '0')
-				);
-			} else if (sortBy === 'price-high') {
-				items = [...items].sort(
-					(a, b) => parseFloat(b.starting_price || '0') - parseFloat(a.starting_price || '0')
-				);
-			}
-			listings = items;
+			listings = items.slice(0, limit);
 		} catch (err) {
 			if (ticket === searchTicket) toastStore.fromError(err);
 		} finally {
@@ -304,42 +336,86 @@
 		}
 	}
 
+	// Typing settles into `term` after a pause, and a new term starts at page one.
 	$effect(() => {
-		offset;
-		selectedCategory;
-		sortBy;
-		area;
-		searchAt;
-		search();
+		const next = q.trim();
+		if (next === term) return;
+		const timer = setTimeout(() => {
+			term = next;
+			offset = 0;
+		}, 350);
+		return () => clearTimeout(timer);
+	});
+
+	$effect(() => {
+		search({
+			term,
+			category: selectedCategory,
+			sort: sortBy,
+			bbox: area,
+			// Only a nearest-first list depends on where the customer is.
+			near: sortBy === 'nearest' ? searchAt : null,
+			offset
+		});
 	});
 
 	// Pins have their own effect: they do not depend on the page or the sort, so
-	// turning a page must not refetch them. Debounced, because the search box
-	// re-runs the search on every keystroke and the discovery routes share one
-	// 60-requests-a-minute allowance per address.
+	// turning a page must not refetch them.
 	$effect(() => {
-		const term = q || null;
-		const category = selectedCategory || null;
-		const bbox = area;
-		const timer = setTimeout(() => loadPins(term, category, bbox), 300);
-		return () => clearTimeout(timer);
+		loadPins(term || null, selectedCategory || null, area);
 	});
 
 	/** @param {SubmitEvent} event */
 	function handleSubmit(event) {
 		event.preventDefault();
+		term = q.trim();
 		offset = 0;
-		search();
+		showResults();
 	}
 
 	function resetFilters() {
 		q = '';
+		term = '';
 		selectedCategory = '';
 		sortBy = 'recommended';
 		area = null;
 		offset = 0;
-		search();
 	}
+
+	/** @param {number} next */
+	function goToPage(next) {
+		offset = Math.max(0, next);
+		showResults();
+	}
+
+	/** @param {'list' | 'map'} next */
+	async function showView(next) {
+		view = next;
+		if (next === 'list') return showResults();
+		// The map is sized to fill the screen under the toolbar: scroll it there.
+		await tick();
+		mapBox?.scrollIntoView({ behavior: motion(), block: 'start' });
+	}
+
+	/** Brings the top of the results into view, unless it is already on screen. */
+	function showResults() {
+		if (!resultsTop || resultsTop.getBoundingClientRect().top >= 0) return;
+		resultsTop.scrollIntoView({ behavior: motion(), block: 'start' });
+	}
+
+	/** @returns {ScrollBehavior} */
+	function motion() {
+		return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+	}
+
+	const pagerButton =
+		'inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-medium text-fg-secondary focus-ring transition-colors duration-fast hover:bg-surface-muted hover:text-fg disabled:pointer-events-none disabled:opacity-40';
+
+	let showingRange = $derived(
+		offset > 0 || hasNextPage
+			? t('Showing {from}–{to}', { from: offset + 1, to: offset + listings.length })
+			: tp(listings.length, '{count} venue', '{count} venues')
+	);
 
 	/** @param {string | null} bbox */
 	function searchArea(bbox) {
@@ -359,21 +435,36 @@
 </svelte:head>
 
 <!-- Search header -->
-<section class="relative overflow-hidden border-b border-line bg-surface">
+<section class="relative isolate overflow-hidden">
 	<GradientBlob variant="hero" />
+	<!-- A hairline that fades out at both ends, in place of a hard border. -->
+	<div
+		class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-line-strong to-transparent"
+		aria-hidden="true"
+	></div>
 
-	<Container size="lg" class="relative z-10 py-12 sm:py-16">
+	<Container size="lg" class="relative z-10 pt-12 pb-10 sm:pt-20 sm:pb-14">
 		<div class="mx-auto max-w-3xl text-center">
 			<p
-				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1 text-xs font-medium text-fg-secondary backdrop-blur"
+				class="inline-flex items-center gap-2 rounded-full border border-line bg-surface/70 px-3.5 py-1.5 text-xs font-medium text-fg-secondary shadow-card backdrop-blur"
 			>
-				<span class="size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+				<span class="relative flex size-2">
+					<span
+						class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60 motion-reduce:hidden"
+					></span>
+					<span class="relative inline-flex size-2 rounded-full bg-emerald-500"></span>
+				</span>
 				{t('Live availability in Riyadh, Jeddah & Khobar')}
 			</p>
-			<h1 class="mt-5 text-display-xl font-semibold tracking-tight text-fg">
+			<h1 class="mt-6 text-display-xl font-semibold tracking-tight text-balance text-fg">
 				{t('Find your next treatment')}
 			</h1>
-			<p class="mt-3 text-body-lg text-fg-muted">
+			<div
+				class="mx-auto mt-5 h-1 w-16 rounded-full"
+				style="background-image: var(--gradient-ink)"
+				aria-hidden="true"
+			></div>
+			<p class="mx-auto mt-5 max-w-xl text-body-lg text-pretty text-fg-muted">
 				{t('Book a real, held slot in seconds — confirmed instantly on WhatsApp.')}
 			</p>
 		</div>
@@ -381,22 +472,22 @@
 		<form
 			onsubmit={handleSubmit}
 			role="search"
-			class="mx-auto mt-8 flex max-w-3xl flex-col gap-2 rounded-panel border border-line bg-surface p-2 shadow-raised sm:flex-row sm:items-center"
+			class="mx-auto mt-9 flex max-w-3xl flex-col gap-2 rounded-panel border border-line bg-surface/90 p-2 shadow-overlay ring-1 ring-white/40 backdrop-blur-xl transition-shadow duration-base focus-within:border-line-strong sm:flex-row sm:items-center dark:ring-white/5"
 		>
 			<div class="relative flex-1">
 				<Icon
 					name="search"
-					class="pointer-events-none absolute start-3.5 top-1/2 size-5 -translate-y-1/2 text-fg-subtle"
+					class="pointer-events-none absolute start-4 top-1/2 size-5 -translate-y-1/2 text-fg-subtle"
 				/>
 				<input
-					type="text"
+					type="search"
 					aria-label={t('Search venues or services')}
 					placeholder={t('Venue or treatment — e.g. Thai massage, HydraFacial, balayage')}
 					bind:value={q}
-					class="h-12 w-full rounded-card border-0 bg-transparent ps-11 pe-3 text-[15px] text-fg placeholder:text-fg-subtle focus:ring-0 focus:outline-none"
+					class="h-12 w-full rounded-card border-0 bg-transparent ps-12 pe-3 text-[15px] text-fg placeholder:text-fg-subtle focus:ring-0 focus:outline-none"
 				/>
 			</div>
-			<div class="hidden h-7 w-px bg-line sm:block"></div>
+			<div class="hidden h-8 w-px bg-line sm:block"></div>
 			<!-- Where to search comes from the device (or the map), never from a list of cities. -->
 			<Button
 				type="button"
@@ -417,24 +508,54 @@
 						? t('Update my location')
 						: t('Use my location')}
 			</Button>
-			<Button type="submit" size="lg" class="sm:px-7">{t('Search')}</Button>
+			<Button type="submit" size="lg" class="sm:px-8">{t('Search')}</Button>
 		</form>
 		{#if locateMessage || originNote}
-			<p
-				class={[
-					'mx-auto mt-2 max-w-lg text-center text-xs',
-					origin && origin.source === 'device' && origin.accuracy > ROUGH_FIX_M
-						? 'text-amber-700 dark:text-amber-400'
-						: 'text-fg-muted'
-				].join(' ')}
-				role="status"
+			<div
+				class="mx-auto mt-3 flex max-w-xl flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center"
 			>
-				{locateMessage ?? originNote}
-			</p>
+				<p
+					class={[
+						'text-xs',
+						origin && origin.source === 'device' && origin.accuracy > ROUGH_FIX_M
+							? 'text-amber-700 dark:text-amber-400'
+							: 'text-fg-muted'
+					]}
+					role="status"
+				>
+					{locateMessage ?? originNote}
+				</p>
+				{#if origin && origin.source === 'device' && origin.accuracy > ROUGH_FIX_M && view === 'list'}
+					<button
+						type="button"
+						class="rounded-sm text-xs font-semibold text-accent underline-offset-4 focus-ring hover:underline"
+						onclick={() => showView('map')}
+					>
+						{t('Correct it on the map')}
+					</button>
+				{/if}
+			</div>
 		{/if}
 
+		<ul
+			class="mx-auto mt-6 flex max-w-3xl flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-fg-muted"
+		>
+			<li class="inline-flex items-center gap-1.5">
+				<Icon name="zap" class="size-3.5 text-accent" />{t('Instant confirmation')}
+			</li>
+			<li class="inline-flex items-center gap-1.5">
+				<Icon name="clock" class="size-3.5 text-accent" />{t('Real, held time slots')}
+			</li>
+			<li class="inline-flex items-center gap-1.5">
+				<Icon name="shield-check" class="size-3.5 text-accent" />{t(
+					'Pay securely with Mada or Apple Pay'
+				)}
+			</li>
+		</ul>
+
+		<!-- One scrolling row on a phone, centred and wrapped from `sm` up. -->
 		<div
-			class="mt-6 flex flex-wrap items-center justify-center gap-2"
+			class="-mx-4 mt-8 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0"
 			role="group"
 			aria-label={t('Category')}
 		>
@@ -448,11 +569,11 @@
 						offset = 0;
 					}}
 					class={[
-						'inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium focus-ring transition-colors duration-fast',
+						'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-4 text-xs font-medium focus-ring transition-[background-color,border-color,color,box-shadow] duration-fast',
 						selectedCategory === cat.id
-							? 'border-transparent bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-							: 'border-line bg-surface text-fg-secondary hover:border-line-strong hover:text-fg'
-					].join(' ')}
+							? 'border-transparent bg-fg text-canvas shadow-raised'
+							: 'border-line bg-surface/80 text-fg-secondary backdrop-blur hover:border-line-strong hover:text-fg'
+					]}
 				>
 					<Icon name={cat.icon} class="size-3.5" />
 					{t(cat.name)}
@@ -466,17 +587,19 @@
 	/** @type {import('$lib/api/discovery.js').ListingCard} */ listing,
 	/** @type {string} */ shape
 )}
-	{#if listing.cover_url}
+	{#if listing.cover_url && !brokenCovers.has(listing.cover_url)}
 		<img
 			src={apiAssetUrl(listing.cover_url)}
 			alt=""
 			loading="lazy"
+			onerror={() => listing.cover_url && brokenCovers.add(listing.cover_url)}
 			class={`w-full object-cover ${shape}`}
 		/>
 	{:else}
-		<!-- No photo yet: the name's initial on the brand gradient, so every card keeps one shape. -->
+		<!-- No photo (or one that would not load): the name's initial on the brand
+		     gradient, so every card keeps one shape. -->
 		<div
-			class={`flex w-full items-center justify-center text-3xl font-semibold text-white/90 ${shape}`}
+			class={`flex w-full items-center justify-center text-4xl font-semibold text-white/90 ${shape}`}
 			style="background-image: var(--gradient-hero)"
 			aria-hidden="true"
 		>
@@ -490,7 +613,12 @@
 		href={resolve('/discover/[slug]', { slug: listing.slug })}
 		class="group flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-card focus-ring transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
 	>
-		{@render cover(listing, 'aspect-[16/10]')}
+		<div class="overflow-hidden">
+			{@render cover(
+				listing,
+				'aspect-[16/10] transition-transform duration-slow ease-out-premium group-hover:scale-[1.04]'
+			)}
+		</div>
 		<div class="flex flex-1 flex-col p-4">
 			<p class="truncate font-semibold text-fg group-hover:text-accent">
 				{pickBilingual(listing, 'name')}
@@ -523,31 +651,45 @@
 	</a>
 {/snippet}
 
-<Container size="lg" class="py-8 sm:py-12">
+{#snippet sectionHeading(
+	/** @type {string} */ id,
+	/** @type {'map-pin' | 'star'} */ icon,
+	/** @type {string} */ title,
+	/** @type {(() => void) | null} */ onall
+)}
+	<div class="mb-4 flex items-center justify-between gap-3">
+		<h2 {id} class="flex items-center gap-2.5 text-base font-semibold tracking-tight text-fg">
+			<span class="flex size-7 items-center justify-center rounded-full bg-accent-soft text-accent">
+				<Icon name={icon} class="size-3.5" />
+			</span>
+			{title}
+		</h2>
+		{#if onall}
+			<Button size="sm" variant="ghost" onclick={onall}>
+				{t('See all')}
+				<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
+			</Button>
+		{/if}
+	</div>
+{/snippet}
+
+<Container size="lg" class="py-10 sm:py-14">
 	{#if browsing}
-		<div class="mb-12 grid gap-10 lg:grid-cols-2">
+		<div class="mb-14 grid gap-10 lg:grid-cols-2">
 			<section aria-labelledby="near-heading">
-				<div class="mb-4 flex items-center justify-between gap-3">
-					<h2
-						id="near-heading"
-						class="flex items-center gap-2 text-base font-semibold tracking-tight text-fg"
-					>
-						<Icon name="map-pin" class="size-4 text-accent" />
-						{t('Near you')}
-					</h2>
-					{#if origin}
-						<Button size="sm" variant="ghost" onclick={() => changeSort('nearest')}>
-							{t('See all')}
-							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
-						</Button>
-					{/if}
-				</div>
+				{@render sectionHeading(
+					'near-heading',
+					'map-pin',
+					t('Near you'),
+					origin ? () => changeSort('nearest') : null
+				)}
 				{#if !origin}
 					<div
-						class="flex flex-col items-start gap-4 rounded-card border border-dashed border-line-strong bg-surface-sunken/60 p-5 sm:flex-row sm:items-center"
+						class="relative isolate flex flex-col items-start gap-4 overflow-hidden rounded-card border border-line bg-surface p-5 shadow-card sm:flex-row sm:items-center"
 					>
+						<GradientBlob variant="corner" class="opacity-60" />
 						<span
-							class="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
+							class="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent ring-4 ring-accent-soft/40"
 						>
 							<Icon name="map-pin" class="size-5" />
 						</span>
@@ -578,21 +720,12 @@
 			</section>
 
 			<section aria-labelledby="top-heading">
-				<div class="mb-4 flex items-center justify-between gap-3">
-					<h2
-						id="top-heading"
-						class="flex items-center gap-2 text-base font-semibold tracking-tight text-fg"
-					>
-						<Icon name="star" class="size-4 text-amber-500" />
-						{t('Top rated')}
-					</h2>
-					{#if topRated.length > 0}
-						<Button size="sm" variant="ghost" onclick={() => changeSort('rating')}>
-							{t('See all')}
-							<Icon name="arrow-right" class="size-4 rtl:rotate-180" />
-						</Button>
-					{/if}
-				</div>
+				{@render sectionHeading(
+					'top-heading',
+					'star',
+					t('Top rated'),
+					topRated.length > 0 ? () => changeSort('rating') : null
+				)}
 				{#if topRated.length === 0}
 					<p class="rounded-card border border-line bg-surface p-5 text-sm text-fg-muted">
 						{t('Ratings appear here once customers rate their visits.')}
@@ -608,153 +741,197 @@
 		</div>
 	{/if}
 
-	<!-- Result bar -->
-	<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-		<div class="flex items-center gap-3">
-			<p class="text-sm text-fg-secondary" aria-live="polite">
-				{#if loading}
-					{t('Searching…')}
-				{:else}
-					{tp(listings.length, '{count} venue', '{count} venues')}
-				{/if}
+	<section aria-labelledby="results-heading">
+		<div bind:this={resultsTop} class="scroll-mt-24 sm:scroll-mt-28">
+			<p class="text-xs font-semibold tracking-[0.14em] text-accent uppercase">
+				{t('Book a treatment')}
 			</p>
-			{#if q || selectedCategory || area}
-				<Button size="sm" variant="ghost" onclick={resetFilters}>
-					<Icon name="x" class="size-3.5" />
-					{t('Clear filters')}
-				</Button>
-			{/if}
+			<h2 id="results-heading" class="mt-1.5 text-display-md font-semibold tracking-tight text-fg">
+				{browsing ? t('All venues') : t('Results')}
+			</h2>
 		</div>
 
-		<div class="flex items-center gap-2">
-			<!-- Below `lg` the list and the map take turns. -->
-			<div
-				class="inline-flex rounded-control bg-surface-muted p-1 lg:hidden"
-				role="group"
-				aria-label={t('Show results as')}
-			>
-				{#each views as mode (mode)}
-					<button
-						type="button"
-						onclick={() => (view = mode)}
-						aria-pressed={view === mode}
-						class={[
-							'h-7 rounded-[calc(var(--radius-control)-2px)] px-3 text-xs font-medium capitalize focus-ring transition-colors',
-							view === mode
-								? 'bg-surface text-fg shadow-card ring-1 ring-line'
-								: 'text-fg-muted hover:text-fg'
-						]}
-					>
-						{t(mode)}
-					</button>
-				{/each}
+		<!-- The toolbar follows the page down, just under the site header. -->
+		<div
+			class="sticky top-20 z-30 -mx-2 mt-5 mb-6 flex flex-wrap items-center justify-between gap-3 rounded-panel border border-line bg-surface/85 px-3 py-2 shadow-card backdrop-blur-xl sm:top-22 sm:mx-0"
+		>
+			<div class="flex min-w-0 items-center gap-2 ps-1">
+				<p class="text-sm font-medium text-fg-secondary tabular-nums" aria-live="polite">
+					{loading && listings.length === 0 ? t('Searching…') : showingRange}
+				</p>
+				{#if term || selectedCategory || area}
+					<Button size="sm" variant="ghost" onclick={resetFilters}>
+						<Icon name="x" class="size-3.5" />
+						{t('Clear filters')}
+					</Button>
+				{/if}
 			</div>
-			<label for="sort-select" class="sr-only">{t('Sort by')}</label>
-			<select
-				id="sort-select"
-				value={sortBy}
-				onchange={(event) => changeSort(event.currentTarget.value)}
-				class={`${fieldBase} ${fieldBorder(false)} h-9 w-auto pe-9 text-[13px]`}
-			>
-				<option value="recommended">{t('Recommended')}</option>
-				<option value="rating">{t('Top rated')}</option>
-				<option value="nearest">{t('Nearest to me')}</option>
-				<option value="price-low">{t('Price: low to high')}</option>
-				<option value="price-high">{t('Price: high to low')}</option>
-			</select>
-		</div>
-	</div>
 
-	<div
-		class="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]"
-	>
-		<div class={[view === 'map' && 'hidden', 'lg:block']}>
-			{#if loading}
-				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-					{#each [0, 1, 2, 3] as n (n)}
-						<div class="space-y-3 rounded-card border border-line bg-surface p-5 shadow-card">
-							<Skeleton class="h-5 w-2/3" />
-							<Skeleton class="h-3 w-1/3" />
-							<Skeleton class="h-3 w-full" />
-							<Skeleton class="mt-6 h-9 w-full rounded-control" />
+			<div class="flex items-center gap-2">
+				<label for="sort-select" class="sr-only">{t('Sort by')}</label>
+				<select
+					id="sort-select"
+					value={sortBy}
+					onchange={(event) => changeSort(event.currentTarget.value)}
+					class={`${fieldBase} ${fieldBorder(false)} h-9 w-auto pe-9 text-[13px]`}
+				>
+					<option value="recommended">{t('Recommended')}</option>
+					<option value="rating">{t('Top rated')}</option>
+					<option value="nearest">{t('Nearest to me')}</option>
+					<option value="price-low">{t('Price: low to high')}</option>
+					<option value="price-high">{t('Price: high to low')}</option>
+				</select>
+				<div
+					class="inline-flex rounded-full bg-surface-muted p-1"
+					role="group"
+					aria-label={t('Show results as')}
+				>
+					{#each views as mode (mode.id)}
+						<button
+							type="button"
+							onclick={() => showView(mode.id)}
+							aria-pressed={view === mode.id}
+							class={[
+								'inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-ring transition-[background-color,color,box-shadow] duration-fast',
+								view === mode.id
+									? 'bg-surface text-fg shadow-card ring-1 ring-line'
+									: 'text-fg-muted hover:text-fg'
+							]}
+						>
+							<Icon name={mode.icon} class="size-3.5" />
+							{t(mode.label)}
+						</button>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<div class={[view === 'map' && 'hidden']}>
+			{#if loading && listings.length === 0}
+				<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+					{#each [0, 1, 2] as n (n)}
+						<div class="overflow-hidden rounded-panel border border-line bg-surface shadow-card">
+							<Skeleton class="aspect-[4/3] w-full rounded-none" />
+							<div class="space-y-3 p-5">
+								<Skeleton class="h-5 w-2/3" />
+								<Skeleton class="h-3 w-1/3" />
+								<Skeleton class="mt-6 h-9 w-full rounded-control" />
+							</div>
 						</div>
 					{/each}
 				</div>
 			{:else if listings.length === 0}
-				<EmptyState
-					title={t('No venues match')}
-					description={t('Try a different search term or category, or move the map.')}
-				>
-					{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
-					{#snippet action()}
-						<Button variant="outline" onclick={resetFilters}>{t('Reset filters')}</Button>
-					{/snippet}
-				</EmptyState>
+				{#if offset > 0}
+					<EmptyState
+						title={t('No more venues')}
+						description={t('This page is past the end of the results.')}
+					>
+						{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
+						{#snippet action()}
+							<Button variant="outline" onclick={() => goToPage(0)}
+								>{t('Back to the first page')}</Button
+							>
+						{/snippet}
+					</EmptyState>
+				{:else}
+					<EmptyState
+						title={t('No venues match')}
+						description={t('Try a different search term or category, or move the map.')}
+					>
+						{#snippet icon()}<Icon name="search" class="size-6" />{/snippet}
+						{#snippet action()}
+							<Button variant="outline" onclick={resetFilters}>{t('Reset filters')}</Button>
+						{/snippet}
+					</EmptyState>
+				{/if}
 			{:else}
-				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<!-- The page being replaced stays on screen, dimmed, until the next one
+				     arrives: no jump to skeletons and back on every page turn. -->
+				<div
+					class={[
+						'grid grid-cols-1 gap-6 transition-opacity duration-base sm:grid-cols-2 lg:grid-cols-3',
+						loading && 'pointer-events-none opacity-50'
+					]}
+					aria-busy={loading}
+				>
 					{#each listings as listing (listing.business_id + listing.location_id)}
 						<article
-							class="group flex flex-col rounded-card border border-line bg-surface shadow-card transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-0.5 hover:border-line-strong hover:shadow-raised"
+							class="group relative flex flex-col overflow-hidden rounded-panel border border-line bg-surface shadow-card transition-[border-color,box-shadow,transform] duration-base ease-out-premium hover:-translate-y-1 hover:border-line-strong hover:shadow-raised"
 						>
-							{@render cover(listing, 'aspect-[16/9] rounded-t-card')}
-							<div class="flex-1 p-5">
-								<div class="flex items-start justify-between gap-3">
-									<div class="min-w-0">
-										<h3 class="font-semibold text-fg transition-colors group-hover:text-accent">
-											{pickBilingual(listing, 'name')}
-										</h3>
-										{#if i18n.locale === 'en' && listing.name_ar}
-											<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="rtl" lang="ar">
-												{listing.name_ar}
-											</p>
-										{:else if i18n.locale === 'ar' && listing.name_en}
-											<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="ltr" lang="en">
-												{listing.name_en}
-											</p>
-										{/if}
-									</div>
-									<Badge tone="neutral" size="sm">{listing.city ? t(listing.city) : t('KSA')}</Badge
+							<div class="relative overflow-hidden">
+								{@render cover(
+									listing,
+									'aspect-[4/3] transition-transform duration-slow ease-out-premium group-hover:scale-[1.04]'
+								)}
+								<div
+									class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/0 to-black/10"
+									aria-hidden="true"
+								></div>
+								<span
+									class="absolute start-3 top-3 inline-flex items-center gap-1 rounded-full bg-surface/90 px-2.5 py-1 text-[11px] font-semibold text-fg shadow-card backdrop-blur"
+								>
+									<Icon name="map-pin" class="size-3 text-accent" />
+									{listing.city ? t(listing.city) : t('KSA')}
+								</span>
+								{#if listing.distance_km != null}
+									<span
+										class="absolute end-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold text-white tabular-nums backdrop-blur"
 									>
-								</div>
+										{t('{n} km', { n: listing.distance_km })}
+									</span>
+								{/if}
+								{#if listing.starting_price != null}
+									<p
+										class="absolute start-4 bottom-3 text-xs font-medium text-white/90 drop-shadow"
+									>
+										{t('From')}
+										<span class="text-base font-semibold text-white tabular-nums">
+											{formatMoney(listing.starting_price, listing.currency ?? 'SAR')}
+										</span>
+									</p>
+								{/if}
+							</div>
 
-								<div class="mt-2">
+							<div class="flex flex-1 flex-col p-5">
+								<h3
+									class="text-[17px] leading-snug font-semibold tracking-tight text-fg transition-colors group-hover:text-accent"
+								>
+									{pickBilingual(listing, 'name')}
+								</h3>
+								{#if i18n.locale === 'en' && listing.name_ar}
+									<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="rtl" lang="ar">
+										{listing.name_ar}
+									</p>
+								{:else if i18n.locale === 'ar' && listing.name_en}
+									<p class="mt-0.5 w-fit text-xs text-fg-muted" dir="ltr" lang="en">
+										{listing.name_en}
+									</p>
+								{/if}
+
+								<div
+									class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-fg-muted"
+								>
 									<RatingStars
 										average={listing.rating_average}
 										count={listing.rating_count}
 										size="sm"
+										compact
 									/>
+									<span class="inline-flex min-w-0 items-center gap-1">
+										<Icon name="building" class="size-3.5" />
+										<span class="truncate"
+											>{pickBilingual(listing, 'location_name') || listing.city}</span
+										>
+									</span>
 								</div>
-
-								<p class="mt-2 flex items-center gap-1.5 text-xs text-fg-muted">
-									<Icon name="map-pin" class="size-3.5" />
-									<span class="truncate"
-										>{pickBilingual(listing, 'location_name') || listing.city}</span
-									>
-									{#if listing.distance_km != null}
-										<span aria-hidden="true">·</span>
-										<span class="shrink-0">{t('{n} km', { n: listing.distance_km })}</span>
-									{/if}
-								</p>
 
 								{#if pickBilingual(listing, 'description')}
 									<p class="mt-3 line-clamp-2 text-sm text-fg-muted">
 										{pickBilingual(listing, 'description')}
 									</p>
 								{/if}
-							</div>
 
-							<!-- Stacked rather than one row: next to the map a card can be under
-							     280px wide, too narrow for a price and two buttons side by side. -->
-							<div
-								class="flex flex-col gap-3 rounded-b-card border-t border-line-subtle bg-surface-sunken px-5 py-4"
-							>
-								<p class="flex items-baseline justify-between gap-2 text-xs text-fg-muted">
-									{t('From')}
-									<span class="text-base font-semibold text-fg tabular-nums">
-										{formatMoney(listing.starting_price, listing.currency ?? 'SAR')}
-									</span>
-								</p>
-								<div class="grid grid-cols-2 gap-2">
+								<div class="mt-auto grid grid-cols-2 gap-2 pt-5">
 									<Button
 										size="sm"
 										variant="outline"
@@ -776,19 +953,43 @@
 					{/each}
 				</div>
 
-				<div class="mt-10">
-					<Pagination
-						{limit}
-						{offset}
-						itemCount={listings.length}
-						{hasNextPage}
-						onchange={(next) => (offset = next)}
-					/>
-				</div>
+				{#if offset > 0 || hasNextPage}
+					<nav class="mt-12 flex flex-col items-center gap-3" aria-label={t('Pagination')}>
+						<div
+							class="inline-flex items-center gap-1 rounded-full border border-line bg-surface p-1 shadow-card"
+						>
+							<button
+								type="button"
+								class={pagerButton}
+								disabled={offset === 0 || loading}
+								onclick={() => goToPage(offset - limit)}
+							>
+								<Icon name="chevron-left" class="size-4 rtl:rotate-180" />
+								{t('Previous')}
+							</button>
+							<span
+								class="flex h-9 min-w-9 items-center justify-center rounded-full bg-fg px-3 text-sm font-semibold text-canvas tabular-nums"
+								aria-current="page"
+							>
+								{t('Page {page}', { page: Math.floor(offset / limit) + 1 })}
+							</span>
+							<button
+								type="button"
+								class={pagerButton}
+								disabled={!hasNextPage || loading}
+								onclick={() => goToPage(offset + limit)}
+							>
+								{t('Next')}
+								<Icon name="chevron-right" class="size-4 rtl:rotate-180" />
+							</button>
+						</div>
+						<p class="text-xs text-fg-muted tabular-nums">{showingRange}</p>
+					</nav>
+				{/if}
 			{/if}
 		</div>
 
-		<div class={[view === 'list' && 'hidden', 'lg:sticky lg:top-24 lg:block']}>
+		<div bind:this={mapBox} class={['scroll-mt-40 sm:scroll-mt-44', view === 'list' && 'hidden']}>
 			<ListingsMap
 				listings={pins}
 				fit={area === null}
@@ -800,10 +1001,10 @@
 				onclear={() => searchArea(null)}
 				here={origin}
 				onmovehere={moveHere}
-				class="h-[65vh] min-h-96 lg:h-[calc(100vh-8rem)]"
+				class="h-[calc(100dvh-11rem)] min-h-[26rem] shadow-raised sm:h-[calc(100dvh-12rem)]"
 			/>
 		</div>
-	</div>
+	</section>
 </Container>
 
 <Modal

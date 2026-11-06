@@ -205,6 +205,10 @@ class Customer(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     # refuses to send without the matching flag — never assume opt-in.
     marketing_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     whatsapp_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Phone calls from Sara (ADR-0017): appointment reminders.
+    voice_consent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     #: Who last changed each flag, and when (`CustomerService.update_consent`):
     #: `*_source` is a `ConsentSource`, `*_by` the acting user's id. Null for a
     #: flag never changed since the record was created with it off.
@@ -218,6 +222,11 @@ class Customer(Base, UUIDPKMixin, TimestampMixin, TenantOwnedMixin, SoftDeleteMi
     whatsapp_consent_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     whatsapp_consent_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     whatsapp_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    voice_consent_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    voice_consent_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    voice_consent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

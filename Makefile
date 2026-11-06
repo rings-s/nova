@@ -83,8 +83,8 @@ host-env: infra/.env
 		> nova_backend/.env; \
 	echo "wrote nova_backend/.env (app role only, git-ignored)"
 
-# Opt-in: it needs the model server from AI_BASE_URL (LM Studio or Ollama on the
-# host) and takes minutes on a CPU. Prints a pass/fail table; AI_EVAL_MIN_PASS
+# Opt-in: it needs the model server from AI_BASE_URL (the `llm` service, so
+# start the stack first) and takes minutes on a CPU. Prints a pass/fail table; AI_EVAL_MIN_PASS
 # (default 0.8) is the gate. Run it before and after changing a model or prompt.
 ai-eval:
 	$(COMPOSE) run --rm -e AI_EVAL=1 tools uv run pytest tests/ai_eval -s -q

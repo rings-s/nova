@@ -37,7 +37,8 @@ const FEATURE_LABELS = {
 	ai_retention_campaigns: m('AI win-back campaigns'),
 	pos_and_product_sales: m('Point of sale and product sales'),
 	cross_location_reporting: m('Reporting across branches'),
-	api_access: m('API access')
+	api_access: m('API access'),
+	ai_call_center: m('Sara, the AI phone agent')
 };
 
 /** @param {string} feature */

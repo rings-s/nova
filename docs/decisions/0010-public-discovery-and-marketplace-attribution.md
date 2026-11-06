@@ -150,6 +150,10 @@ results, which is the scrape ADR-0007 found on the old unauthenticated `GET /ten
   caps the other one, a salon with a great many stylists. The slot cap truncates chronologically
   after sorting, so it reads as "the next N available times" rather than dropping one stylist's
   day.
+  > **Since 2026-10-23:** the cap (now 1,500) cuts between days, never inside one
+  > (`discovery/domain.py::trim_to_whole_days`), and the response's `more_from` names the first
+  > day left out; the web calendar asks again from it. A chronological cut showed the later days
+  > of a busy salon's window as closed.
 - Geo search is a two-step: a bounding box the database can index, then an exact haversine in
   `discovery.domain` that trims the square to the circle. When a geo filter is present, paging is
   applied after that trim, so the query over-fetches a bounded window.

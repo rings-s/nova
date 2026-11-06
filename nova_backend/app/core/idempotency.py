@@ -28,7 +28,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -289,10 +289,10 @@ def idempotency_guard(endpoint: str):
     from app.core.security import Principal, get_principal
 
     async def _dependency(
-        session: AsyncSession = Depends(get_db_session),
-        tenant_id: uuid.UUID = Depends(get_tenant_context),
-        principal: Principal = Depends(get_principal),
-        idempotency_key: str | None = Header(default=None, alias=IDEMPOTENCY_HEADER),
+        session: Annotated[AsyncSession, Depends(get_db_session)],
+        tenant_id: Annotated[uuid.UUID, Depends(get_tenant_context)],
+        principal: Annotated[Principal, Depends(get_principal)],
+        idempotency_key: Annotated[str | None, Header(alias=IDEMPOTENCY_HEADER)] = None,
     ) -> IdempotencyGuard:
         return IdempotencyGuard(
             session,

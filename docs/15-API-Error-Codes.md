@@ -213,6 +213,25 @@ These answer Moyasar's webhook calls, not app clients:
 | `agent_guardrail`       | 403  | The assistant refused: the agent is not available to you, or the request crosses one of its rules.       | Show the message; don't retry the same request. |
 | `ai_memory_unavailable` | 503  | Conversation memory could not be reached, so nothing was forgotten (`DELETE /ai/conversations`).          | Retry shortly; don't tell the user it is done.  |
 
+## Phone calls with Sara (ADR-0017)
+
+Sara's webhooks answer Unifonic, not a person, so most of these reach only the call-center console and the server logs.
+
+| Code                   | HTTP | Meaning                                                                                             | What to do                                                         |
+| ---------------------- | ---- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `phone_line_not_found` | 404  | No active line with that id, or a line URL that is forged or was rotated.                           | Use the `answer_url` from the latest create or rotate.             |
+| `phone_number_taken`   | 409  | The number is already a NOVA phone line.                                                             | Use another number, or find the line that has it.                  |
+| `call_not_found`       | 404  | No such call, or a turn link that is forged or expired.                                              | Nothing for a client to do; Unifonic's call has outlived its link. |
+| `audio_not_found`      | 404  | A clip of Sara's voice that is unknown or has expired (`VOICE_TTS_CACHE_SECONDS`).                  | Nothing to do; Unifonic fetched a link past its time.             |
+| `call_ended`           | 409  | The call has already ended.                                                                          | Nothing to do.                                                     |
+| `voice_gateway_error`  | 502  | Unifonic refused to place a call or could not be reached.                                            | Retry with backoff; the reminder sweep retries on its own.         |
+
+## Follow-ups
+
+| Code                  | HTTP | Meaning                                       | What to do                     |
+| --------------------- | ---- | --------------------------------------------- | ------------------------------ |
+| `follow_up_not_found` | 404  | No such follow-up in this business's inbox.   | Reload the follow-up list.     |
+
 ## Rate limits and idempotency
 
 | Code                     | HTTP | Meaning                                                         | What to do                                   |

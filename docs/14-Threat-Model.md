@@ -239,6 +239,7 @@ E elevation of privilege. "Ref" points at §6 (TM-xx) or §8 (SR-xx).
 | :-- | :--------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- | :----------------------- |
 | E   | App connected as an RLS-exempt role                                                                                                                        | `nova_app`; `enforce_rls_role` refuses it in staging and production                                            | closed                                                                                                      | —                        |
 | E   | RLS windows left open                                                                                                                                      | `bypass_tenant_scope` in the webhook, login token issue, outbox and cron jobs; `set_tenant_scope` turns it off | maintenance jobs write under the bypass; handlers for events with no tenant run with it on                  | TM-16                    |
+| E   | A superuser, or a stolen superuser session, rewrites or deletes any tenant's rows from the console                                                         | `require_superuser` re-read per request; each edit scoped to the row's tenant; masked values never sent back; audit log append-only with masked before/after | by design: no domain rule or event runs on a direct edit; ON DELETE CASCADE can remove a tenant's data in one call | —                        |
 | I   | Tables with no RLS: `users` (password hashes), `tenants`, `domain_events` (cross-tenant payloads), `idempotency_keys` (stored responses), `webhook_events` | bound parameters throughout; no string-built SQL                                                               | a single injection or ORM slip reads across tenants                                                         | SR-15                    |
 | T   | Double booking                                                                                                                                             | advisory lock                                                                                                  | the exclusion constraint matches 0 rows, because enums are stored as uppercase names (2026-09-15 DB review) | tracked in the DB review |
 | D   | Runaway query                                                                                                                                              | `statement_timeout` of 10 s; pool limits                                                                       | closed                                                                                                      | —                        |
@@ -325,6 +326,7 @@ privilege escalation. Evidence is `live`, `code` or `design` (see the top of thi
 | TM-18 | Low                                   | Uploaded bytes are not checked against the declared type                                                           | code                  |
 | TM-19 | Low                                   | No hardening headers; `debug` defaults to true; correlation ids unvalidated                                        | code                  |
 | TM-20 | Info                                  | Ollama unauthenticated, models pinned by tag, no inference concurrency cap per tenant                              | design                |
+| TM-21 | Medium — mitigated 2026-10-22         | Sara's phone line (ADR-0017): caller ID is forgeable, and Unifonic's webhooks carry no Authorization header        | design                |
 
 ### TM-01: An unverified phone number claims another person's customer record
 
@@ -577,7 +579,39 @@ if user is None or user.email_verified_at is None:
 | TM-17 | `POST /customers` takes staff-asserted `whatsapp_consent`; template params include `full_name`                                                                      | Confirm consent with the customer (double opt-in over WhatsApp) before the first non-transactional send; limit sends per tenant per hour                                             |
 | TM-18 | `media/domain.py` validates the declared type only                                                                                                                  | On completion, `stat` the object and compare size and type; sniff the first bytes; serve PDFs as attachments with `nosniff`                                                          |
 | TM-19 | no `nosniff` or `no-store` headers; `config.py:22` `debug: bool = True`; `middleware.py:27` takes any `X-Correlation-ID`                                            | Add headers in middleware; default `debug` to False; accept only `[A-Za-z0-9-]{1,64}` correlation ids                                                                                |
-| TM-20 | `ollama_base_url`; models `llama3.1:8b` and `llama3.1:70b` by tag                                                                                                   | Ollama on loopback or the compose network only; pin model digests; a per-tenant semaphore on inference                                                                               |
+| TM-20 | `ollama_base_url`; models `llama3.1:8b` and `llama3.1:70b` by tag (since 2026-10-24: llama.cpp only, the unpublished compose `llm` service, `AI_BASE_URL`, model pinned by image tag and GGUF file; since 2026-10-28: vLLM only, same unpublished service, image pinned by tag, weights by Hugging Face repo name, not by revision)                                                                                                   | Ollama on loopback or the compose network only; pin model digests; a per-tenant semaphore on inference                                                                               |
+
+### TM-21: Sara's phone line
+
+Not yet tested live. What `call_center` does for each threat (ADR-0017), and what is still open:
+
+- **A forged caller ID reads or cancels someone's booking.** Caller ID only finds the customer to
+  book for. Every tool that reads or offers to change a booking refuses until the caller types a
+  4-digit code sent to the customer's WhatsApp. The code is valid 5 minutes, allows 3 attempts, and
+  is stored as an HMAC bound to the call. Cancelling also needs that verification, and a press of 2.
+- **A forged caller ID books in someone's name.** Allowed, as a call to a human receptionist
+  would be. The booking is a draft that the business or a deposit confirms. Turns are capped per
+  call (`VOICE_MAX_TURNS_PER_CALL`). Open: a service principal's holds are not capped per
+  customer, as a self-service customer's are.
+- **A leaked line or turn URL.** The line URL is an HMAC over tenant, line and `token_version`;
+  `POST …/lines/{id}/rotate` revokes it. A turn URL is a 2-hour purpose token for one call. The path's
+  tenant scopes RLS before anything is read, so a token under another tenant finds nothing (404).
+- **A spoken "yes" planted to book.** The keypad books; the model never sees a key, and a spoken
+  yes is refused with `not_confirmed`, as in chat (ADR-0015).
+- **Toll fraud and harassment by reminder calls.** Calls go only to the number on file, only with
+  `voice_consent`, only GCC numbers, during 10:00–21:00 in the branch's timezone, at most once per
+  booking and `VOICE_REMINDER_DAILY_CAP` a day per business.
+- **Sara's voice clips** (`GET /webhooks/voice/audio/{key}.wav`) are public, because Unifonic
+  fetches them without auth. The key is an HMAC of voice and words under a purpose key, so a clip
+  is found only through the reply that linked it. Clips expire with `VOICE_TTS_CACHE_SECONDS`. A
+  reminder's clip carries a customer's name and appointment, as the call itself does.
+- **The call log** (`voice_calls`) keeps a caller's number and Sara's last words for
+  `VOICE_CALL_RETENTION_DAYS` (90); the nightly `scrub_old_calls` then clears them and keeps only
+  the outcome.
+- **The speech server** (vLLM-Omni) has no authentication of its own: keep it off the public
+  network, or put `VOICE_TTS_API_KEY` behind a proxy.
+- **Open.** No per-IP rate limit on the voice webhooks (as TM-10 for Moyasar). Unifonic's
+  source addresses are not allowlisted.
 
 ---
 

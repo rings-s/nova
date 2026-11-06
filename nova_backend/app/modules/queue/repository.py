@@ -47,6 +47,7 @@ def _entry_to_domain(record: QueueEntryRecord) -> QueueEntry:
         called_at=record.called_at,
         checked_in_at=record.checked_in_at,
         completed_at=record.completed_at,
+        requeued_at=record.requeued_at,
     )
 
 
@@ -57,6 +58,7 @@ def _apply_entry(entry: QueueEntry, record: QueueEntryRecord) -> QueueEntryRecor
     record.called_at = entry.called_at
     record.checked_in_at = entry.checked_in_at
     record.completed_at = entry.completed_at
+    record.requeued_at = entry.requeued_at
     return record
 
 
@@ -158,6 +160,18 @@ class QueueEntryRepository(TenantScopedRepository[QueueEntryRecord]):
                 QueueEntryRecord.status.in_(tuple(ACTIVE_QUEUE_STATUSES)),
             )
         ).order_by(QueueEntryRecord.position)
+        result = await self.session.execute(stmt)
+        return [_entry_to_domain(r) for r in result.scalars().all()]
+
+    async def list_missed(self, queue_id: UUID) -> list[QueueEntry]:
+        """Called customers who did not come forward: off the line, but still on
+        reception's board until they are requeued or removed."""
+        stmt = self._scope(
+            select(QueueEntryRecord).where(
+                QueueEntryRecord.queue_id == queue_id,
+                QueueEntryRecord.status == QueueEntryStatus.MISSED,
+            )
+        ).order_by(QueueEntryRecord.called_at, QueueEntryRecord.position)
         result = await self.session.execute(stmt)
         return [_entry_to_domain(r) for r in result.scalars().all()]
 
@@ -351,10 +365,45 @@ class UnscopedTicketRepository:
         return len(stale)
 
 
+#: Entries a sweep may cancel: still waiting for a turn, never served. One
+#: already checked in or in the chair is left for staff to finish.
+_STALE_ENTRY_STATUSES = (
+    QueueEntryStatus.WAITING,
+    QueueEntryStatus.CALLED,
+    QueueEntryStatus.MISSED,
+)
+
+
+class UnscopedQueueEntryRepository:
+    """Cross-tenant writes for the stale-entry sweep.
+
+    Callers must have set `app.bypass_rls` (`db.session.bypass_tenant_scope`).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def cancel_stale(self, *, joined_before: datetime, limit: int) -> int:
+        stmt = (
+            select(QueueEntryRecord)
+            .where(
+                QueueEntryRecord.status.in_(_STALE_ENTRY_STATUSES),
+                QueueEntryRecord.joined_at < joined_before,
+            )
+            .limit(limit)
+        )
+        stale = list((await self.session.execute(stmt)).scalars().all())
+        for entry in stale:
+            entry.status = QueueEntryStatus.CANCELLED
+        await self.session.flush()
+        return len(stale)
+
+
 __all__ = [
     "QueueEntryRepository",
     "QueueEntrySource",
     "QueueRepository",
     "TicketRepository",
+    "UnscopedQueueEntryRepository",
     "UnscopedTicketRepository",
 ]

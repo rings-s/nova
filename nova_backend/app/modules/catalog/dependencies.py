@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -51,8 +52,8 @@ def build_catalog_service(session: AsyncSession, tenant_id: UUID) -> CatalogServ
 
 
 def get_catalog_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
 ) -> CatalogService:
     """Builds every catalog repository against one session and one tenant.
 
@@ -82,6 +83,8 @@ def build_public_catalog_service(session: AsyncSession) -> PublicCatalogService:
     )
 
 
-def get_category_service(session: AsyncSession = Depends(get_db_session)) -> CategoryService:
+def get_category_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> CategoryService:
     """The platform's category list. No tenant: it is shared by all of them."""
     return CategoryService(categories=ServiceCategoryRepository(session))

@@ -1,5 +1,6 @@
 """discovery · DELIVERY layer — DI providers."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -14,7 +15,7 @@ from app.modules.discovery.service import AttributionService, DiscoveryService
 
 
 async def get_discovery_service(
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> DiscoveryService:
     """Builds the public marketplace service and opens its RLS window.
 
@@ -52,8 +53,8 @@ def build_attribution_service(session: AsyncSession, tenant_id: UUID) -> Attribu
 
 
 def get_attribution_service(
-    session: AsyncSession = Depends(get_db_session),
-    tenant_id: UUID = Depends(get_tenant_context),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    tenant_id: Annotated[UUID, Depends(get_tenant_context)],
 ) -> AttributionService:
     """The half booking depends on, scoped to the booking's own tenant.
 

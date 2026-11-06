@@ -10,7 +10,7 @@ otherwise one query returns a scrape-ready directory of every salon on NOVA,
 which is the defect ADR-0007 found on the old unauthenticated `GET /tenants`.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -204,3 +204,6 @@ class PublicAvailabilityOut(ApiSchema):
     price: Decimal
     currency: str
     slots: list[PublicSlotOut] = Field(default_factory=list)
+    #: Set when the slot cap left days out: the first branch-local day not in
+    #: `slots`. Every day that is in `slots` is complete. Ask again from it.
+    more_from: date | None = None

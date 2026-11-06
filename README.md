@@ -101,7 +101,7 @@ answer `503 integration_not_configured`, and the assistants hand off to a person
 
 - **Payments (Moyasar).** Keys, webhook and test cards: [`nova_backend/README.md`, "Payments"](nova_backend/README.md#payments-moyasar).
 - **WhatsApp** through a business solution provider: the `WHATSAPP_*` settings in `infra/.env`.
-- **AI agents** on a model server on your machine (LM Studio or Ollama): [`nova_backend/README.md`, "AI agents"](nova_backend/README.md#ai-agents-local-models).
+- **AI agents** on vLLM, the compose `llm` service that `make dev` starts: [`nova_backend/README.md`, "AI agents"](nova_backend/README.md#ai-agents-local-models).
 - **Public access** through a Cloudflare tunnel, with no open ports: set `CLOUDFLARE_TUNNEL_TOKEN`
   and run `make tunnel`.
 

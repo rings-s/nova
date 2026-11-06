@@ -24,6 +24,7 @@ from app.modules.ai_agents.tools.base import (
     _shown,
 )
 from app.modules.ai_agents.tools.booking import SlotTools
+from app.modules.ai_agents.tools.facts import read_catalog, snapshot_json
 
 
 class MarketplaceTools(SlotTools):
@@ -79,32 +80,22 @@ class MarketplaceTools(SlotTools):
         return await self._call_discovery("search_businesses", work)
 
     async def get_business_details(self, business_slug: str) -> Result:
-        """A listed business's branches and the services it sells, with prices."""
+        """A listed business's branches with opening hours, the services it sells with
+        prices, who performs them and whether they can be booked, its rating, and its
+        cancellation and deposit policy."""
+        try:
+            tenant_id, business_id = await self._listing(business_slug)
+        except DomainError as exc:
+            code, message = exc.code, exc.message
+            return await self._run("get_business_details", lambda: _refuse(code, message))
 
-        async def work(discovery: "DiscoveryService") -> Result:
-            storefront = await discovery.get_storefront(business_slug)
-            return {
-                "business_slug": storefront.business.slug,
-                "name": self._name(storefront.business),
-                "branches": [
-                    {"location_id": str(loc.id), "name": self._name(loc), "city": _shown(loc.city)}
-                    for loc in storefront.locations
-                ],
-                "services": [
-                    {
-                        "service_id": str(svc.id),
-                        "name": self._name(svc),
-                        "location_id": str(svc.location_id),
-                        "duration_minutes": svc.duration_minutes,
-                        "price": str(svc.price),
-                        "currency": svc.currency,
-                    }
-                    for svc in storefront.services[:30]
-                    if svc.is_active
-                ],
-            }
+        async def work(services: "TenantServices") -> Result:
+            # The receptionist's facts, read in the listing's tenant: the same
+            # records, so the two assistants cannot describe a business differently.
+            snapshot = await read_catalog(services, business_id, self.deps.locale)
+            return {"business_slug": business_slug, **snapshot_json(snapshot)}
 
-        return await self._call_discovery("get_business_details", work)
+        return await self._call_in("get_business_details", self._tenant_scope(tenant_id), work)
 
     async def _listing(self, business_slug: str) -> tuple[UUID, UUID]:
         """The tenant and business behind a listing, resolved by the server from the
